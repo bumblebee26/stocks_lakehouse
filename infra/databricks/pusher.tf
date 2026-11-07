@@ -13,10 +13,12 @@ resource "databricks_service_principal" "pusher" {
   display_name = "${var.name_prefix}-lambda-pusher"
 
   # Without a workspace entitlement Databricks rejects Files API calls with 403
-  # ("disabled for users without ... workspace-access ... entitlements").
+  # ("disabled for users without the databricks-sql-access or workspace-access
+  # or workspace-consume entitlements"). Both are set to be safe on Free Edition.
   # This only lets the SP call workspace APIs; Unity Catalog grants below still
   # limit it to the one landing volume.
-  workspace_access = true
+  workspace_access      = true
+  databricks_sql_access = true
 }
 
 # Allow the SP to hold a token. This resource is authoritative for token
