@@ -1,8 +1,13 @@
 # ---------------------------------------------------------------------------
 # Catalog, medallion schemas, and the landing volume
 # ---------------------------------------------------------------------------
-# Already created these with SQL in the UI? Import instead of recreating:
+# Free Edition uses "Default Storage", which the API can't create catalogs in.
+# So the catalog is created ONCE in the UI (Catalog -> + -> Create catalog,
+# name "stocks", Default Storage) and then imported:
 #   terraform import databricks_catalog.stocks stocks
+#
+# Schemas and the volume are created by Terraform normally. If you already
+# made them with SQL, import those too:
 #   terraform import "databricks_schema.layer[\"bronze\"]" stocks.bronze
 #   terraform import "databricks_schema.layer[\"silver\"]" stocks.silver
 #   terraform import "databricks_schema.layer[\"gold\"]"   stocks.gold
@@ -11,6 +16,12 @@
 resource "databricks_catalog" "stocks" {
   name    = var.catalog_name
   comment = "Multi-market stock lakehouse. Managed by Terraform."
+
+  # The UI assigns Default Storage; don't let Terraform try to change or replace it.
+  lifecycle {
+    ignore_changes = [storage_root, comment]
+    prevent_destroy = true
+  }
 }
 
 resource "databricks_schema" "layer" {
