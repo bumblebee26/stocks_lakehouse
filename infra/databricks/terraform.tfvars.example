@@ -13,6 +13,6 @@ admin_user_emails = ["you@example.com"]
 # Leave empty until you have someone to share gold tables with
 analyst_user_emails = []
 
-# aws_region   = "ap-south-1"
+# aws_region   = "ap-southeast-2"
 # name_prefix  = "stocks"
 # catalog_name = "stocks"

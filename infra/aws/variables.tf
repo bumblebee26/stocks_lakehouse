@@ -1,37 +1,17 @@
 variable "aws_region" {
-  description = "AWS region for all project resources. Mumbai keeps you close to NSE."
+  description = <<-EOT
+    AWS region for all project resources. On the AWS free plan (projects
+    experience) only us-east-1, us-west-2 and the project's own region are
+    allowed; this project's region is Sydney.
+  EOT
   type        = string
-  default     = "ap-south-1"
+  default     = "ap-southeast-2"
 }
 
 variable "name_prefix" {
-  description = "Short prefix used in every resource name (IAM roles, groups, buckets)."
+  description = "Short prefix used in every resource name (IAM roles, buckets, parameters)."
   type        = string
   default     = "stocks"
-}
-
-variable "admin_user_name" {
-  description = "IAM user for the human project admin."
-  type        = string
-  default     = "stocks-admin"
-}
-
-variable "create_console_login" {
-  description = "Create a console password for the admin user. It must be changed at first sign-in."
-  type        = bool
-  default     = true
-}
-
-variable "manage_account_password_policy" {
-  description = "Set an account-wide IAM password policy. Turn off if your account already has one you want to keep."
-  type        = bool
-  default     = true
-}
-
-variable "admin_role_session_hours" {
-  description = "How long an assumed admin-role session lasts."
-  type        = number
-  default     = 4
 }
 
 variable "fetchers" {

@@ -1,7 +1,7 @@
 variable "aws_region" {
   description = "AWS region (same as the aws stack)."
   type        = string
-  default     = "ap-south-1"
+  default     = "ap-southeast-2"
 }
 
 variable "name_prefix" {
