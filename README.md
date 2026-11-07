@@ -187,6 +187,31 @@ NSE files are zips in S3; the Lambda unzips them on the way into the volume beca
 `stocks-refresh` job that runs it **when new files land** in the volume (`job_trigger = "file_arrival"`), or at
 06:00 IST Tue–Sat (`job_trigger = "schedule"`). Failures email you. Thresholds and proxy symbols are variables.
 
+## 6. Dashboard and pre-market brief
+
+**Dashboard** (`infra/databricks/dashboard.tf`): "Stocks lakehouse: India x US" in your workspace folder
+`stocks_lakehouse/`, on the Free Edition SQL warehouse. Breadth chart, US-return vs India-gap scatter,
+India-after-US summary, latest unusual volume, ADR premium. Change it in Terraform; UI edits are overwritten.
+
+**Pre-market brief** (`fetchers/premarket.py`, `infra/aws/premarket.tf`): a Lambda that queries the gold
+tables through the Databricks SQL Statement API and sends one Telegram message at **08:45 IST Mon–Fri**:
+previous US session, what India usually does after a day like that, ADRs overnight, India unusual volume.
+It runs in AWS because Databricks Free Edition blocks outbound internet.
+
+Set your bot token and chat ID (kept out of Terraform state):
+
+```
+aws ssm put-parameter --name /stocks/telegram-bot-token --type SecureString --overwrite --value YOUR_BOT_TOKEN --region ap-southeast-2
+aws ssm put-parameter --name /stocks/telegram-chat-id   --type SecureString --overwrite --value YOUR_CHAT_ID   --region ap-southeast-2
+```
+
+Preview without sending, then send once, then enable the schedule (`premarket_enabled = true`):
+
+```
+aws lambda invoke --function-name stocks-premarket-brief --region ap-southeast-2 --cli-binary-format raw-in-base64-out --payload "{\"dry_run\":true}" brief.json && type brief.json
+aws lambda invoke --function-name stocks-premarket-brief --region ap-southeast-2 --cli-binary-format raw-in-base64-out --payload "{}" brief.json && type brief.json
+```
+
 ## Notes
 
 - The free plan has a fixed number of days and credits; check AWS Settings → Projects. When it ends you'll need to upgrade or move the data elsewhere.

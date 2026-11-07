@@ -97,3 +97,9 @@ variable "min_avg_volume" {
   type        = number
   default     = 50000
 }
+
+variable "sql_warehouse_name" {
+  description = "SQL warehouse used by the dashboard and the pre-market brief (Free Edition ships one)."
+  type        = string
+  default     = "Serverless Starter Warehouse"
+}
