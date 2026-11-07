@@ -1,0 +1,12 @@
+# Copy to terraform.tfvars (git-ignored). Every value here has a default,
+# so you only need to uncomment what you want to change.
+
+# aws_region      = "ap-south-1"
+# name_prefix     = "stocks"
+# admin_user_name = "stocks-admin"
+
+# Set false if your AWS account already has an IAM password policy you want to keep.
+# manage_account_password_policy = true
+
+# create_console_login     = true
+# admin_role_session_hours = 4
