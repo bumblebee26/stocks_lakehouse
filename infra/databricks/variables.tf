@@ -5,39 +5,13 @@ variable "aws_region" {
 }
 
 variable "name_prefix" {
-  description = "Short prefix used in every resource name."
+  description = "Short prefix used in resource names."
   type        = string
   default     = "stocks"
 }
 
-variable "databricks_account_id" {
-  description = "Databricks account ID (account console, top-right user menu)."
-  type        = string
-}
-
 variable "databricks_workspace_url" {
-  description = "Workspace URL, e.g. https://dbc-1234abcd-5678.cloud.databricks.com"
-  type        = string
-}
-
-variable "databricks_workspace_id" {
-  description = "Numeric workspace ID (the number after 'o=' in the workspace URL, or in the account console)."
-  type        = number
-}
-
-variable "admin_user_emails" {
-  description = "Existing Databricks users (already in the account) to add to the project admins group."
-  type        = list(string)
-}
-
-variable "analyst_user_emails" {
-  description = "Users to create and add to the read-only analysts group. Leave empty for now if it's just you."
-  type        = list(string)
-  default     = []
-}
-
-variable "landing_bucket_name" {
-  description = "Output 'landing_bucket_name' from the aws stack."
+  description = "Workspace URL without the ?o= part, e.g. https://dbc-1234abcd-5678.cloud.databricks.com"
   type        = string
 }
 
@@ -51,4 +25,16 @@ variable "schemas" {
   description = "Medallion schemas inside the catalog."
   type        = list(string)
   default     = ["bronze", "silver", "gold"]
+}
+
+variable "landing_volume_name" {
+  description = "Managed volume in the bronze schema that the Lambdas push raw files into."
+  type        = string
+  default     = "landing"
+}
+
+variable "pusher_token_lifetime_days" {
+  description = "Lifetime of the Lambda's Databricks token. Re-apply before it expires to rotate it."
+  type        = number
+  default     = 180
 }

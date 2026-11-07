@@ -25,7 +25,7 @@ infra/
   modules/secure_bucket/   Private, encrypted, versioned, HTTPS-only S3 bucket
   bootstrap/               Terraform state bucket (run once, local state)
   aws/                     Landing bucket, fetcher roles, API key parameter
-  databricks/              PAUSED: being redesigned for Free Edition. Do not apply yet.
+  databricks/              Free Edition: catalog, schemas, landing volume, Lambda pusher identity
 fetchers/                  (next) Lambda handlers
 pipeline/                  (next) bronze / silver / gold SQL
 ```
@@ -123,9 +123,32 @@ aws lambda invoke --function-name stocks-fetch-massive --cli-binary-format raw-i
 
 Unit tests (no AWS needed): `python -m unittest discover -s tests -v`
 
-## 4. Databricks
+## 4. Databricks (Free Edition)
 
-Paused. The `infra/databricks` stack still describes the old design, where Databricks read S3 directly. The free plan blocks that, so it's being rewritten for Databricks Free Edition with a Volume. Don't apply it.
+Free Edition has no account-level APIs, so `infra/databricks` manages only workspace objects:
+the `stocks` catalog, `bronze`/`silver`/`gold` schemas, the `stocks.bronze.landing` volume, a
+`stocks-lambda-pusher` service principal that may only write to that volume, and its token
+(stored in AWS SSM as `/stocks/databricks-pusher-token`).
+
+One manual step: create a **bootstrap personal access token** for Terraform in the workspace
+(your user icon -> **Settings** -> **Developer** -> **Access tokens** -> **Generate new token**).
+
+```
+cd infra\databricks
+copy backend.hcl.example backend.hcl
+copy terraform.tfvars.example terraform.tfvars
+```
+
+Fill both in (state bucket, workspace URL without `?o=`), then:
+
+```
+set DATABRICKS_TOKEN=dapi...your bootstrap token...
+for /f "delims=" %i in ('aws configure export-credentials --profile stocks --format windows-cmd') do %i
+terraform init -backend-config=backend.hcl
+terraform apply
+```
+
+If you already created the catalog/schemas/volume with SQL, import them first (commands at the top of `catalog.tf`).
 
 ## Notes
 
