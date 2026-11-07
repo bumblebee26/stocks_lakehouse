@@ -30,3 +30,7 @@ __pycache__/
 
 # Lambda build output
 infra/aws/build/
+
+# Output of the fetchers
+infra/aws/massive_out.json
+infra/aws/nse_out.json
