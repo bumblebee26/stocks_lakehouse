@@ -230,6 +230,22 @@ class DatabricksPush(unittest.TestCase):
         self.assertEqual(req.call_args_list[1].kwargs["data"], b"PK..")
         self.assertEqual(req.call_args_list[1].kwargs["headers"]["Authorization"], "Bearer TOKEN")
 
+    def test_csv_zip_is_uploaded_unzipped(self):
+        import zipfile
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("BhavCopy_NSE_CM_0_0_0_20261106_F_0000.csv", "TckrSymb,ClsPric\nINFY,1500\n")
+        with mock.patch.object(databricks_volume, "http_request") as req:
+            path = databricks_volume.upload("nse/date=2026-11-06/bhavcopy_cm_20261106.csv.zip",
+                                            buf.getvalue())
+        self.assertTrue(path.endswith("nse/date=2026-11-06/bhavcopy_cm_20261106.csv"))
+        self.assertEqual(req.call_args_list[1].kwargs["data"], b"TckrSymb,ClsPric\nINFY,1500\n")
+
+    def test_exists_checks_unzipped_name(self):
+        with mock.patch.object(databricks_volume, "http_request", return_value=b"") as req:
+            databricks_volume.exists("nse/date=2026-11-06/b.csv.zip")
+        self.assertTrue(req.call_args.args[1].endswith("/nse/date=2026-11-06/b.csv"))
+
     def test_exists_maps_404_to_false(self):
         with mock.patch.object(databricks_volume, "http_request", side_effect=common.NotFound("x")):
             self.assertFalse(databricks_volume.exists("nse/a.zip"))

@@ -162,6 +162,31 @@ terraform apply
 
 If you already created the catalog/schemas/volume with SQL, import them first (commands at the top of `catalog.tf`).
 
+## 5. Lakeflow pipeline (Python, SQL equivalents in comments)
+
+`pipeline/` holds one file per layer. Each table's Python definition has the equivalent
+Lakeflow SQL in a comment above it, for reference.
+
+| Layer | Table | What it is |
+|---|---|---|
+| Bronze | `stocks.bronze.nse_bhavcopy_raw` | NSE UDiFF CSV rows as delivered (strings) + lineage columns |
+| Bronze | `stocks.bronze.massive_grouped_raw` | One row per Massive JSON file (`results` = all US tickers) |
+| Silver | `stocks.silver.nse_eq_daily` | NSE securities, typed, de-duplicated, quality-checked |
+| Silver | `stocks.silver.us_daily` | US stocks exploded from `results`, OTC excluded, quality-checked |
+| Silver | `stocks.silver.daily_bars` | **Both markets in one schema**: market, symbol, trade_date, OHLC, prev_close, volume, currency |
+| Silver | `stocks.silver.trading_days` | Trading calendar per market, derived from the data |
+| Gold | `stocks.gold.unusual_volume` | Volume >= 3x the prior 20-day average |
+| Gold | `stocks.gold.market_breadth` | Advances/declines, median return, % above 20-day average |
+| Gold | `stocks.gold.nifty_after_us_moves` | Each Indian session (NIFTYBEES) next to the preceding US session (SPY) |
+| Gold | `stocks.gold.nifty_after_us_moves_summary` | How India opens/closes after big US up/down days |
+| Gold | `stocks.gold.adr_premium` | INFY, WIT, HDB, IBN, RDY ADRs vs NSE shares (no FX feed needed) |
+
+NSE files are zips in S3; the Lambda unzips them on the way into the volume because Spark can't read zip.
+
+`infra/databricks/pipeline.tf` uploads the code, creates the serverless pipeline `stocks-medallion`, and a
+`stocks-refresh` job that runs it **when new files land** in the volume (`job_trigger = "file_arrival"`), or at
+06:00 IST Tue–Sat (`job_trigger = "schedule"`). Failures email you. Thresholds and proxy symbols are variables.
+
 ## Notes
 
 - The free plan has a fixed number of days and credits; check AWS Settings → Projects. When it ends you'll need to upgrade or move the data elsewhere.

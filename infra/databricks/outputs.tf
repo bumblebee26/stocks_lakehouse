@@ -26,3 +26,19 @@ output "workspace_url_parameter" {
 output "pusher_token_expiry_days" {
   value = var.pusher_token_lifetime_days
 }
+
+output "pipeline_id" {
+  value = databricks_pipeline.medallion.id
+}
+
+output "pipeline_url" {
+  value = "${trimsuffix(var.databricks_workspace_url, "/")}/pipelines/${databricks_pipeline.medallion.id}"
+}
+
+output "refresh_job_id" {
+  value = databricks_job.refresh.id
+}
+
+output "job_trigger" {
+  value = var.job_trigger
+}

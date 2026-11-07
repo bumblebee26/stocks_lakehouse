@@ -9,9 +9,11 @@ Config (set by Terraform as Lambda environment variables):
 The token is a dedicated, expiring token stored only in SSM (see infra/databricks/pusher.tf).
 """
 
+import io
 import os
 import time
 import urllib.parse
+import zipfile
 
 import boto3
 
@@ -56,17 +58,35 @@ def volume_path(relative):
     return f"{config()['volume']}/{relative.lstrip('/')}"
 
 
+def volume_relative(relative):
+    """Name the file gets in the volume: NSE .csv.zip archives are stored unzipped as .csv,
+    because Spark/Auto Loader can read gzip but not zip. S3 keeps the original zip."""
+    return relative[: -len(".zip")] if relative.endswith(".csv.zip") else relative
+
+
+def prepare(relative, body):
+    """Return (volume relative path, bytes to upload), unzipping .csv.zip archives."""
+    if not relative.endswith(".csv.zip"):
+        return relative, body
+    with zipfile.ZipFile(io.BytesIO(body)) as archive:
+        csvs = [n for n in archive.namelist() if n.lower().endswith(".csv")]
+        if len(csvs) != 1:
+            raise RuntimeError(f"Expected exactly one CSV in {relative}, found {archive.namelist()}")
+        return volume_relative(relative), archive.read(csvs[0])
+
+
 def exists(relative):
-    """True if the file is already in the volume."""
+    """True if the file (under its volume name) is already in the volume."""
     try:
-        http_request("HEAD", _url("files", volume_path(relative)), headers=_auth())
+        http_request("HEAD", _url("files", volume_path(volume_relative(relative))), headers=_auth())
         return True
     except NotFound:
         return False
 
 
 def upload(relative, body):
-    """Upload bytes to <volume>/<relative>, creating parent directories, overwriting if present."""
+    """Upload to <volume>/<relative> (unzipping .csv.zip), creating parent dirs, overwriting."""
+    relative, body = prepare(relative, body)
     path = volume_path(relative)
     parent = path.rsplit("/", 1)[0]
 
