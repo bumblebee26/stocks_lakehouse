@@ -116,7 +116,9 @@ aws lambda invoke --function-name stocks-fetch-massive --cli-binary-format raw-i
 ```
 
 - `{}` fetches the latest day, `{"date": ...}` one day, `{"start": ..., "end": ...}` every weekday in a range.
-- Massive backfills wait 13 seconds between days (free-plan rate limit), so keep ranges to about 60 days per call.
+- **Long ranges continue themselves:** when a run nears Lambda's time limit it re-invokes itself with the remaining dates, so one call can cover years. Start long backfills with `--invocation-type Event` so your terminal doesn't wait.
+- Massive waits 13 seconds between days (free-plan rate limit). Run only **one** Massive backfill at a time.
+- Available history: NSE UDiFF from **8 Jul 2024**; Massive free plan keeps a rolling **2 years**.
 - Holidays come back as `no_file` / `no_data`, not errors.
 
 Unit tests (no AWS needed): `python -m unittest discover -s tests -v`

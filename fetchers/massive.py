@@ -10,13 +10,12 @@ Lands at: landing/massive/date=YYYY-MM-DD/grouped_daily_YYYYMMDD.json (raw API r
 import datetime as dt
 import json
 import os
-import time
 import urllib.parse
 from zoneinfo import ZoneInfo
 
 import boto3
 
-from common import NotFound, http_get, log, previous_weekday, put_landing, resolve_dates
+from common import NotFound, http_get, log, previous_weekday, put_landing, resolve_dates, run_dates
 
 NEW_YORK = ZoneInfo("America/New_York")
 URL = "https://api.massive.com/v2/aggs/grouped/locale/us/market/stocks/{d}"
@@ -75,13 +74,5 @@ def fetch_one(trade_date):
 
 def handler(event, context):
     dates = resolve_dates(event, default_date)
-    results = []
-    for i, trade_date in enumerate(dates):
-        if i:
-            time.sleep(BACKFILL_DELAY_SECONDS)
-        results.append(fetch_one(trade_date))
-
-    summary = {"source": "massive", "requested": len(dates),
-               "written": sum(r["status"] == "written" for r in results), "results": results}
-    log.info("Summary: %s", {k: v for k, v in summary.items() if k != "results"})
-    return summary
+    return run_dates("massive", dates, fetch_one, delay_seconds=BACKFILL_DELAY_SECONDS,
+                     context=context, reserve_seconds=60)

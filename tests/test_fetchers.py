@@ -131,6 +131,53 @@ class MassiveFetch(unittest.TestCase):
         self.assertEqual(self.s3.puts, [])
 
 
+class FakeContext:
+    """Lambda context whose remaining time drops by step_ms on every check."""
+
+    function_name = "stocks-fetch-test"
+
+    def __init__(self, start_ms, step_ms):
+        self.ms, self.step = start_ms, step_ms
+
+    def get_remaining_time_in_millis(self):
+        self.ms -= self.step
+        return self.ms
+
+
+class SelfContinuation(unittest.TestCase):
+    def setUp(self):
+        self.invoked = mock.MagicMock()
+        common._lambda = self.invoked
+        self.fetch = lambda d: {"date": d.isoformat(), "status": "written"}
+        self.dates = common.resolve_dates({"start": "2026-11-02", "end": "2026-11-13"}, None)
+
+    def test_hands_off_remaining_dates_when_time_runs_low(self):
+        # 100s left, each check costs 30s, reserve 20s -> processes 3 dates, then hands off
+        with mock.patch("time.sleep"):
+            out = common.run_dates("t", self.dates, self.fetch, delay_seconds=0,
+                                   context=FakeContext(100_000, 30_000), reserve_seconds=20)
+        self.assertEqual(out["processed"], 3)
+        self.assertEqual(out["continued_from"], "2026-11-05")
+        call = self.invoked.invoke.call_args.kwargs
+        self.assertEqual(call["FunctionName"], "stocks-fetch-test")
+        self.assertEqual(call["InvocationType"], "Event")
+        self.assertEqual(json.loads(call["Payload"]), {"start": "2026-11-05", "end": "2026-11-13"})
+
+    def test_no_handoff_when_time_is_plenty(self):
+        with mock.patch("time.sleep"):
+            out = common.run_dates("t", self.dates, self.fetch, delay_seconds=0,
+                                   context=FakeContext(900_000, 1_000), reserve_seconds=20)
+        self.assertEqual(out["processed"], len(self.dates))
+        self.assertIsNone(out["continued_from"])
+        self.invoked.invoke.assert_not_called()
+
+    def test_always_processes_at_least_one_date(self):
+        with mock.patch("time.sleep"):
+            out = common.run_dates("t", self.dates, self.fetch, delay_seconds=0,
+                                   context=FakeContext(1_000, 1_000), reserve_seconds=60)
+        self.assertEqual(out["processed"], 1)
+
+
 class HttpGet(unittest.TestCase):
     def _http_error(self, code):
         return urllib.error.HTTPError("u", code, "x", {}, io.BytesIO(b""))

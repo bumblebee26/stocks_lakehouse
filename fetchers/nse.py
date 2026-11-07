@@ -7,10 +7,9 @@ Lands at: landing/nse/date=YYYY-MM-DD/bhavcopy_cm_YYYYMMDD.csv.zip (the original
 """
 
 import datetime as dt
-import time
 from zoneinfo import ZoneInfo
 
-from common import NotFound, http_get, log, put_landing, resolve_dates
+from common import NotFound, http_get, log, put_landing, resolve_dates, run_dates
 
 IST = ZoneInfo("Asia/Kolkata")
 URL = "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_{d:%Y%m%d}_F_0000.csv.zip"
@@ -54,13 +53,5 @@ def fetch_one(trade_date):
 
 def handler(event, context):
     dates = resolve_dates(event, default_date)
-    results = []
-    for i, trade_date in enumerate(dates):
-        if i:
-            time.sleep(BACKFILL_DELAY_SECONDS)
-        results.append(fetch_one(trade_date))
-
-    summary = {"source": "nse", "requested": len(dates),
-               "written": sum(r["status"] == "written" for r in results), "results": results}
-    log.info("Summary: %s", {k: v for k, v in summary.items() if k != "results"})
-    return summary
+    return run_dates("nse", dates, fetch_one, delay_seconds=BACKFILL_DELAY_SECONDS,
+                     context=context, reserve_seconds=30)

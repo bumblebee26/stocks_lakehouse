@@ -5,6 +5,7 @@ so the deployment zip is just these .py files with no dependencies to package.
 """
 
 import datetime as dt
+import json
 import logging
 import os
 import time
@@ -99,3 +100,52 @@ def previous_weekday(day):
     while day.weekday() >= 5:
         day -= dt.timedelta(days=1)
     return day
+
+
+_lambda = None
+
+
+def lambda_client():
+    global _lambda
+    if _lambda is None:
+        _lambda = boto3.client("lambda")
+    return _lambda
+
+
+def run_dates(source, dates, fetch_one, *, delay_seconds, context=None, reserve_seconds=60):
+    """Fetch each date in order, pausing delay_seconds between requests.
+
+    Long backfills continue themselves: when fewer than reserve_seconds of the
+    Lambda's time remain, this function asynchronously invokes the same Lambda
+    with the remaining range and returns. One invoke can therefore cover years.
+    """
+    results = []
+    continued_from = None
+
+    for i, trade_date in enumerate(dates):
+        if (context is not None and i > 0
+                and context.get_remaining_time_in_millis() / 1000 < reserve_seconds):
+            remaining = dates[i:]
+            payload = {"start": remaining[0].isoformat(), "end": remaining[-1].isoformat()}
+            lambda_client().invoke(FunctionName=context.function_name,
+                                   InvocationType="Event",
+                                   Payload=json.dumps(payload).encode())
+            continued_from = remaining[0].isoformat()
+            log.info("Time nearly up; continuing %d remaining dates in a new invocation: %s",
+                     len(remaining), payload)
+            break
+
+        if i:
+            time.sleep(delay_seconds)
+        results.append(fetch_one(trade_date))
+
+    summary = {
+        "source": source,
+        "requested": len(dates),
+        "processed": len(results),
+        "written": sum(r["status"] == "written" for r in results),
+        "continued_from": continued_from,
+        "results": results,
+    }
+    log.info("Summary: %s", {k: v for k, v in summary.items() if k != "results"})
+    return summary

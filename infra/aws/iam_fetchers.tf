@@ -69,3 +69,29 @@ resource "aws_iam_role_policy" "fetcher" {
   role   = aws_iam_role.fetcher[each.key].id
   policy = data.aws_iam_policy_document.fetcher[each.key].json
 }
+
+# Long backfills continue themselves by invoking the same function again
+# (see fetchers/common.py run_dates). Each role may invoke only its own function(s).
+# ARNs are built from names to avoid a dependency cycle with aws_lambda_function.
+data "aws_iam_policy_document" "fetcher_self_invoke" {
+  for_each = var.fetchers
+
+  statement {
+    sid     = "InvokeOwnFunctionForBackfillContinuation"
+    effect  = "Allow"
+    actions = ["lambda:InvokeFunction"]
+    resources = [
+      for fn, cfg in local.functions :
+      "arn:${local.partition}:lambda:${var.aws_region}:${local.account_id}:function:${var.name_prefix}-fetch-${fn}"
+      if cfg.role_key == each.key
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "fetcher_self_invoke" {
+  for_each = { for k, v in var.fetchers : k => v if length([for fn, cfg in local.functions : fn if cfg.role_key == k]) > 0 }
+
+  name   = "self-invoke-for-backfill"
+  role   = aws_iam_role.fetcher[each.key].id
+  policy = data.aws_iam_policy_document.fetcher_self_invoke[each.key].json
+}
