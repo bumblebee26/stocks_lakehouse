@@ -97,7 +97,31 @@ terraform apply
 aws ssm put-parameter --name /stocks/massive-api-key --type SecureString --overwrite --value YOUR_MASSIVE_KEY --region ap-southeast-2
 ```
 
-## 3. Databricks
+## 3. Fetchers (Lambda + schedules)
+
+Created by the AWS stack from the code in `fetchers/`:
+
+| Function | Source | Schedule (IST) | Lands at |
+|---|---|---|---|
+| `stocks-fetch-nse` | NSE equities bhavcopy (UDiFF zip) | 19:30 Mon–Fri | `landing/nse/date=YYYY-MM-DD/` |
+| `stocks-fetch-massive` | Massive grouped daily (all US stocks) | 04:30 Tue–Sat | `landing/massive/date=YYYY-MM-DD/` |
+
+Schedules are created **disabled** (`schedules_enabled = false`) until a manual run works.
+
+Test or backfill by invoking manually (Command Prompt):
+
+```
+aws lambda invoke --function-name stocks-fetch-nse --cli-binary-format raw-in-base64-out --payload "{\"date\":\"2026-11-06\"}" out.json && type out.json
+aws lambda invoke --function-name stocks-fetch-massive --cli-binary-format raw-in-base64-out --payload "{\"start\":\"2026-10-01\",\"end\":\"2026-10-31\"}" out.json && type out.json
+```
+
+- `{}` fetches the latest day, `{"date": ...}` one day, `{"start": ..., "end": ...}` every weekday in a range.
+- Massive backfills wait 13 seconds between days (free-plan rate limit), so keep ranges to about 60 days per call.
+- Holidays come back as `no_file` / `no_data`, not errors.
+
+Unit tests (no AWS needed): `python -m unittest discover -s tests -v`
+
+## 4. Databricks
 
 Paused. The `infra/databricks` stack still describes the old design, where Databricks read S3 directly. The free plan blocks that, so it's being rewritten for Databricks Free Edition with a Volume. Don't apply it.
 

@@ -31,3 +31,21 @@ variable "landing_noncurrent_version_days" {
   type        = number
   default     = 30
 }
+
+variable "lambda_python_runtime" {
+  description = "Lambda runtime for the fetchers."
+  type        = string
+  default     = "python3.13"
+}
+
+variable "log_retention_days" {
+  description = "Days to keep fetcher logs in CloudWatch."
+  type        = number
+  default     = 14
+}
+
+variable "schedules_enabled" {
+  description = "Turn the daily schedules on. Leave false until a manual test run succeeds."
+  type        = bool
+  default     = false
+}

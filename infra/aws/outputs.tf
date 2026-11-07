@@ -15,3 +15,12 @@ output "fetcher_role_arns" {
 output "massive_api_key_parameter" {
   value = aws_ssm_parameter.massive_api_key.name
 }
+
+output "fetcher_function_names" {
+  description = "Invoke these manually to test or backfill."
+  value       = { for k, f in aws_lambda_function.fetcher : k => f.function_name }
+}
+
+output "schedules_enabled" {
+  value = var.schedules_enabled
+}
