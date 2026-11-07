@@ -35,3 +35,4 @@ infra/aws/build/
 infra/aws/massive_*
 infra/aws/nse_*
 infra/databricks/nse_test.json
+infra/aws/sync.json
