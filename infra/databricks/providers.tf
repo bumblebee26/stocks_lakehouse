@@ -1,9 +1,16 @@
-# Both Databricks providers authenticate as the bootstrap service principal via
-# OAuth machine-to-machine. Export before running terraform:
-#   export DATABRICKS_CLIENT_ID=<terraform-sp application id>
-#   export DATABRICKS_CLIENT_SECRET=<terraform-sp OAuth secret>
-# See README "Databricks bootstrap" for how to create that service principal.
+# Databricks Free Edition has no account console or account-level APIs, so this
+# stack uses only a workspace-level provider.
+#
+# Terraform authenticates with a bootstrap personal access token you create once
+# in the UI (Settings -> Developer -> Access tokens). Export it before running:
+#   set DATABRICKS_TOKEN=dapi...
+# The workspace URL comes from terraform.tfvars.
 
+provider "databricks" {
+  host = var.databricks_workspace_url
+}
+
+# Used only to store the Lambda's Databricks token in SSM Parameter Store.
 provider "aws" {
   region = var.aws_region
 
@@ -14,25 +21,4 @@ provider "aws" {
       Stack     = "databricks"
     }
   }
-}
-
-# Account level: users, groups, service principals, workspace assignment.
-provider "databricks" {
-  alias      = "account"
-  host       = "https://accounts.cloud.databricks.com"
-  account_id = var.databricks_account_id
-}
-
-# Workspace level: Unity Catalog objects and grants.
-provider "databricks" {
-  alias = "workspace"
-  host  = var.databricks_workspace_url
-}
-
-data "aws_caller_identity" "current" {}
-data "aws_partition" "current" {}
-
-locals {
-  account_id = data.aws_caller_identity.current.account_id
-  partition  = data.aws_partition.current.partition
 }

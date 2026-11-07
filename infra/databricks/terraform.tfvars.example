@@ -1,18 +1,9 @@
 # Copy to terraform.tfvars (git-ignored) and fill in.
 
-databricks_account_id    = "00000000-0000-0000-0000-000000000000"
+# Workspace URL WITHOUT the ?o=... part
 databricks_workspace_url = "https://dbc-xxxxxxxx-xxxx.cloud.databricks.com"
-databricks_workspace_id  = 1234567890123456
 
-# From the aws stack: terraform -chdir=../aws output -raw landing_bucket_name
-landing_bucket_name = "stocks-lakehouse-landing-<aws-account-id>"
-
-# You (the email you sign in to Databricks with)
-admin_user_emails = ["you@example.com"]
-
-# Leave empty until you have someone to share gold tables with
-analyst_user_emails = []
-
-# aws_region   = "ap-southeast-2"
-# name_prefix  = "stocks"
-# catalog_name = "stocks"
+# aws_region                 = "ap-southeast-2"
+# name_prefix                = "stocks"
+# catalog_name               = "stocks"
+# pusher_token_lifetime_days = 180

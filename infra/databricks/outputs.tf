@@ -1,29 +1,24 @@
-output "pipeline_sp_application_id" {
-  description = "Set the Lakeflow pipeline and job 'Run as' to this service principal."
-  value       = databricks_service_principal.pipeline.application_id
-}
-
-output "admins_group" {
-  value = databricks_group.admins.display_name
-}
-
-output "analysts_group" {
-  value = databricks_group.analysts.display_name
-}
-
-output "landing_external_location" {
-  value = databricks_external_location.landing.name
-}
-
-output "landing_url" {
-  description = "Path for Auto Loader / read_files in the pipeline."
-  value       = databricks_external_location.landing.url
-}
-
-output "uc_landing_role_arn" {
-  value = aws_iam_role.uc_landing.arn
-}
-
 output "catalog" {
   value = databricks_catalog.stocks.name
+}
+
+output "landing_volume_path" {
+  description = "Where the Lambdas push files; Auto Loader reads from here."
+  value       = "/Volumes/${databricks_volume.landing.catalog_name}/${databricks_volume.landing.schema_name}/${databricks_volume.landing.name}"
+}
+
+output "pusher_sp_application_id" {
+  value = databricks_service_principal.pusher.application_id
+}
+
+output "pusher_token_parameter" {
+  value = aws_ssm_parameter.pusher_token.name
+}
+
+output "workspace_url_parameter" {
+  value = aws_ssm_parameter.workspace_url.name
+}
+
+output "pusher_token_expiry_days" {
+  value = var.pusher_token_lifetime_days
 }
