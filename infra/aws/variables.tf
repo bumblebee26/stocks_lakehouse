@@ -49,3 +49,15 @@ variable "schedules_enabled" {
   type        = bool
   default     = false
 }
+
+variable "databricks_push_enabled" {
+  description = "Also push each fetched file to the Databricks landing volume (needs the databricks stack applied)."
+  type        = bool
+  default     = true
+}
+
+variable "databricks_volume_path" {
+  description = "Unity Catalog volume the fetchers push into (output landing_volume_path of the databricks stack)."
+  type        = string
+  default     = "/Volumes/stocks/bronze/landing"
+}

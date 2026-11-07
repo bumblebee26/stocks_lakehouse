@@ -16,8 +16,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "fetchers"))
 sys.modules.setdefault("boto3", mock.MagicMock())  # tests don't need the real SDK
 
 import common  # noqa: E402
+import databricks_volume  # noqa: E402
 import massive  # noqa: E402
 import nse  # noqa: E402
+import sync  # noqa: E402
 
 D = dt.date
 
@@ -201,6 +203,102 @@ class HttpGet(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 common.http_get("https://example.test/f")
         sleep.assert_not_called()
+
+
+class DatabricksPush(unittest.TestCase):
+    def setUp(self):
+        databricks_volume._config = {"host": "https://dbc-x.cloud.databricks.com",
+                                     "token": "TOKEN", "volume": "/Volumes/stocks/bronze/landing"}
+        os.environ["LANDING_BUCKET"] = "test-bucket"
+        self.s3 = FakeS3()
+        common._s3 = self.s3
+
+    def tearDown(self):
+        os.environ.pop("PUSH_TO_DATABRICKS", None)
+
+    def test_upload_creates_dir_then_puts_file(self):
+        with mock.patch.object(databricks_volume, "http_request") as req:
+            path = databricks_volume.upload("nse/date=2026-11-06/f.zip", b"PK..")
+        self.assertEqual(path, "/Volumes/stocks/bronze/landing/nse/date=2026-11-06/f.zip")
+        (m1, u1), (m2, u2) = [(c.args[0], c.args[1]) for c in req.call_args_list]
+        self.assertEqual((m1, u1), ("PUT", "https://dbc-x.cloud.databricks.com/api/2.0/fs/directories"
+                                           "/Volumes/stocks/bronze/landing/nse/date=2026-11-06"))
+        self.assertEqual(m2, "PUT")
+        self.assertTrue(u2.endswith("/api/2.0/fs/files/Volumes/stocks/bronze/landing/nse/"
+                                    "date=2026-11-06/f.zip?overwrite=true"))
+        self.assertEqual(req.call_args_list[1].kwargs["data"], b"PK..")
+        self.assertEqual(req.call_args_list[1].kwargs["headers"]["Authorization"], "Bearer TOKEN")
+
+    def test_exists_maps_404_to_false(self):
+        with mock.patch.object(databricks_volume, "http_request", side_effect=common.NotFound("x")):
+            self.assertFalse(databricks_volume.exists("nse/a.zip"))
+        with mock.patch.object(databricks_volume, "http_request", return_value=b""):
+            self.assertTrue(databricks_volume.exists("nse/a.zip"))
+
+    def test_put_landing_pushes_only_when_enabled(self):
+        with mock.patch.object(databricks_volume, "upload") as up:
+            common.put_landing("nse", D(2026, 11, 6), "f.zip", b"x", "application/zip")
+            up.assert_not_called()
+            os.environ["PUSH_TO_DATABRICKS"] = "true"
+            common.put_landing("nse", D(2026, 11, 6), "f.zip", b"x", "application/zip")
+            up.assert_called_once_with("nse/date=2026-11-06/f.zip", b"x")
+        self.assertEqual(self.s3.puts[0]["Key"], "landing/nse/date=2026-11-06/f.zip")
+
+
+class FakeListingS3:
+    def __init__(self, keys):
+        self.keys = keys
+        self.list_args = None
+
+    def get_paginator(self, name):
+        outer = self
+
+        class P:
+            def paginate(self, **kw):
+                outer.list_args = kw
+                after = kw.get("StartAfter", "")
+                yield {"Contents": [{"Key": k} for k in outer.keys if k > after]}
+        return P()
+
+    def get_object(self, Bucket, Key):
+        return {"Body": io.BytesIO(Key.encode())}
+
+
+class SyncToVolume(unittest.TestCase):
+    KEYS = ["landing/massive/date=2026-11-06/g.json",
+            "landing/nse/date=2026-11-05/a.zip",
+            "landing/nse/date=2026-11-06/b.zip"]
+
+    def setUp(self):
+        os.environ["LANDING_BUCKET"] = "test-bucket"
+        common._s3 = FakeListingS3(self.KEYS)
+        self.lam = mock.MagicMock()
+        common._lambda = self.lam
+
+    def test_copies_missing_skips_existing(self):
+        existing = {"nse/date=2026-11-05/a.zip"}
+        with mock.patch.object(databricks_volume, "exists", side_effect=lambda r: r in existing), \
+             mock.patch.object(databricks_volume, "upload") as up:
+            out = sync.handler({}, None)
+        self.assertEqual(out["copied"], 2)
+        self.assertEqual(out["skipped_existing"], 1)
+        self.assertEqual([c.args[0] for c in up.call_args_list],
+                         ["massive/date=2026-11-06/g.json", "nse/date=2026-11-06/b.zip"])
+
+    def test_continues_after_last_done_key(self):
+        # No check before the first key; checks before keys 2 and 3 see 120s then 40s left.
+        ctx = FakeContext(200_000, 80_000)
+        with mock.patch.object(databricks_volume, "exists", return_value=False), \
+             mock.patch.object(databricks_volume, "upload"):
+            out = sync.handler({"prefix": "landing/"}, ctx)
+        self.assertEqual(out["copied"], 2)
+        self.assertEqual(out["continued_after"], self.KEYS[1])
+        payload = json.loads(self.lam.invoke.call_args.kwargs["Payload"])
+        self.assertEqual(payload["start_after"], self.KEYS[1])
+
+    def test_rejects_prefix_outside_landing(self):
+        with self.assertRaises(ValueError):
+            sync.handler({"prefix": "other/"}, None)
 
 
 if __name__ == "__main__":

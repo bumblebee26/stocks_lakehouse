@@ -123,6 +123,18 @@ aws lambda invoke --function-name stocks-fetch-massive --cli-binary-format raw-i
 
 Unit tests (no AWS needed): `python -m unittest discover -s tests -v`
 
+### Push to Databricks
+
+After each S3 write, the fetchers also upload the same file to `/Volumes/stocks/bronze/landing/<source>/date=YYYY-MM-DD/`
+using the Files API and the `stocks-lambda-pusher` token from SSM (`databricks_push_enabled = true` by default).
+
+`stocks-sync-volume` copies files already in S3 into the volume (skipping ones already there). Use it once after the
+backfill, and any time to repair gaps:
+
+```
+aws lambda invoke --function-name stocks-sync-volume --region ap-southeast-2 --invocation-type Event --cli-binary-format raw-in-base64-out --payload "{}" sync.json
+```
+
 ## 4. Databricks (Free Edition)
 
 Free Edition has no account-level APIs, so `infra/databricks` manages only workspace objects:

@@ -32,14 +32,15 @@ class NotFound(Exception):
     """The source has no file for that date (holiday, weekend, or not yet published)."""
 
 
-def http_get(url, headers=None, *, retries=3, backoff_seconds=5, timeout=60, log_url=None):
-    """GET a URL and return the body as bytes.
+def http_request(method, url, *, headers=None, data=None, retries=3, backoff_seconds=5,
+                 timeout=60, log_url=None):
+    """Make an HTTP request and return the response body as bytes.
 
     Retries on network errors, 429 and 5xx with linear backoff. Raises NotFound on 404.
     Pass log_url to log a redacted URL (for example without an API key).
     """
     shown = log_url or url
-    request = urllib.request.Request(url, headers=headers or {})
+    request = urllib.request.Request(url, data=data, headers=headers or {}, method=method)
     last_error = None
 
     for attempt in range(1, retries + 1):
@@ -50,25 +51,40 @@ def http_get(url, headers=None, *, retries=3, backoff_seconds=5, timeout=60, log
             if err.code == 404:
                 raise NotFound(shown) from err
             if err.code not in (429, 500, 502, 503, 504):
-                raise RuntimeError(f"HTTP {err.code} from {shown}") from err
+                detail = err.read()[:300] if hasattr(err, "read") else b""
+                raise RuntimeError(f"HTTP {err.code} from {method} {shown}: {detail!r}") from err
             last_error = err
         except urllib.error.URLError as err:
             last_error = err
 
         wait = backoff_seconds * attempt
-        log.warning("GET %s failed (attempt %d/%d): %s; retrying in %ss",
-                    shown, attempt, retries, last_error, wait)
+        log.warning("%s %s failed (attempt %d/%d): %s; retrying in %ss",
+                    method, shown, attempt, retries, last_error, wait)
         time.sleep(wait)
 
-    raise RuntimeError(f"GET {shown} failed after {retries} attempts: {last_error}")
+    raise RuntimeError(f"{method} {shown} failed after {retries} attempts: {last_error}")
+
+
+def http_get(url, headers=None, **kwargs):
+    return http_request("GET", url, headers=headers, **kwargs)
+
+
+def landing_relative_path(source, trade_date, filename):
+    """Path shared by S3 (under landing/) and the Databricks volume: <source>/date=YYYY-MM-DD/<file>."""
+    return f"{source}/date={trade_date.isoformat()}/{filename}"
 
 
 def put_landing(source, trade_date, filename, body, content_type):
-    """Write one raw file to s3://<bucket>/landing/<source>/date=YYYY-MM-DD/<filename>."""
+    """Write one raw file to S3 landing/, then (if enabled) push it to the Databricks volume."""
     bucket = os.environ["LANDING_BUCKET"]
-    key = f"landing/{source}/date={trade_date.isoformat()}/{filename}"
+    relative = landing_relative_path(source, trade_date, filename)
+    key = f"landing/{relative}"
     s3().put_object(Bucket=bucket, Key=key, Body=body, ContentType=content_type)
     log.info("Wrote s3://%s/%s (%d bytes)", bucket, key, len(body))
+
+    import databricks_volume  # local import avoids a circular import
+    if databricks_volume.enabled():
+        databricks_volume.upload(relative, body)
     return key
 
 

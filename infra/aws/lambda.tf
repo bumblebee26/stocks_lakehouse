@@ -54,8 +54,12 @@ resource "aws_lambda_function" "fetcher" {
 
   environment {
     variables = {
-      LANDING_BUCKET    = module.landing_bucket.id
-      MASSIVE_KEY_PARAM = aws_ssm_parameter.massive_api_key.name
+      LANDING_BUCKET         = module.landing_bucket.id
+      MASSIVE_KEY_PARAM      = aws_ssm_parameter.massive_api_key.name
+      PUSH_TO_DATABRICKS     = var.databricks_push_enabled ? "true" : "false"
+      DATABRICKS_URL_PARAM   = local.databricks_url_param
+      DATABRICKS_TOKEN_PARAM = local.databricks_token_param
+      LANDING_VOLUME_PATH    = var.databricks_volume_path
     }
   }
 

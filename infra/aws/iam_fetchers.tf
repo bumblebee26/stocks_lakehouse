@@ -50,6 +50,13 @@ data "aws_iam_policy_document" "fetcher" {
     ]
   }
 
+  statement {
+    sid       = "ReadDatabricksPushConfig"
+    effect    = "Allow"
+    actions   = ["ssm:GetParameter"]
+    resources = local.databricks_param_arns
+  }
+
   dynamic "statement" {
     for_each = each.value.needs_massive_key ? [1] : []
 
