@@ -6,10 +6,11 @@ Config (set by Terraform as Lambda environment variables):
   DATABRICKS_TOKEN_PARAM  SSM SecureString holding the stocks-lambda-pusher token
   LANDING_VOLUME_PATH     e.g. /Volumes/stocks/bronze/landing
 
-The token belongs to a service principal that may only read/write this one volume.
+The token is a dedicated, expiring token stored only in SSM (see infra/databricks/pusher.tf).
 """
 
 import os
+import time
 import urllib.parse
 
 import boto3
@@ -17,6 +18,8 @@ import boto3
 from common import NotFound, http_request, log
 
 _config = None
+_config_loaded_at = 0.0
+CONFIG_TTL_SECONDS = 300  # pick up a rotated token within 5 minutes
 
 
 def enabled():
@@ -24,8 +27,8 @@ def enabled():
 
 
 def config():
-    global _config
-    if _config is None:
+    global _config, _config_loaded_at
+    if _config is None or time.monotonic() - _config_loaded_at > CONFIG_TTL_SECONDS:
         ssm = boto3.client("ssm")
 
         def param(name, decrypt):
@@ -36,6 +39,7 @@ def config():
             "token": param(os.environ["DATABRICKS_TOKEN_PARAM"], True),
             "volume": os.environ["LANDING_VOLUME_PATH"].rstrip("/"),
         }
+        _config_loaded_at = time.monotonic()
     return _config
 
 

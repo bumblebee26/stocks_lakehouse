@@ -209,6 +209,7 @@ class DatabricksPush(unittest.TestCase):
     def setUp(self):
         databricks_volume._config = {"host": "https://dbc-x.cloud.databricks.com",
                                      "token": "TOKEN", "volume": "/Volumes/stocks/bronze/landing"}
+        databricks_volume._config_loaded_at = float("inf")  # never expire during tests
         os.environ["LANDING_BUCKET"] = "test-bucket"
         self.s3 = FakeS3()
         common._s3 = self.s3

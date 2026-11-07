@@ -38,3 +38,14 @@ variable "pusher_token_lifetime_days" {
   type        = number
   default     = 180
 }
+
+variable "pusher_identity" {
+  description = "Identity behind the Lambda's Databricks token: \"user\" (dedicated personal token; works on Free Edition) or \"service_principal\" (least privilege)."
+  type        = string
+  default     = "user"
+
+  validation {
+    condition     = contains(["user", "service_principal"], var.pusher_identity)
+    error_message = "pusher_identity must be \"user\" or \"service_principal\"."
+  }
+}

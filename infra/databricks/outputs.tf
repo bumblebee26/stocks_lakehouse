@@ -7,8 +7,12 @@ output "landing_volume_path" {
   value       = "/Volumes/${databricks_volume.landing.catalog_name}/${databricks_volume.landing.schema_name}/${databricks_volume.landing.name}"
 }
 
+output "pusher_identity" {
+  value = var.pusher_identity
+}
+
 output "pusher_sp_application_id" {
-  value = databricks_service_principal.pusher.application_id
+  value = local.use_sp ? databricks_service_principal.pusher[0].application_id : null
 }
 
 output "pusher_token_parameter" {
