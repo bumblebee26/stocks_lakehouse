@@ -52,7 +52,8 @@ def with_lineage(df):
 #     header               => true,
 #     pathGlobFilter       => '*.csv',
 #     inferColumnTypes     => false,
-#     schemaEvolutionMode  => 'rescue'
+#     schemaEvolutionMode  => 'rescue',
+#     partitionColumns     => ''          -- don't add a 'date' column from the folder name
 #   );
 @dp.table(
     name="stocks.bronze.nse_bhavcopy_raw",
@@ -67,6 +68,7 @@ def nse_bhavcopy_raw():
         .option("pathGlobFilter", "*.csv")  # ignore any .zip copies
         .option("cloudFiles.inferColumnTypes", "false")  # keep strings in bronze
         .option("cloudFiles.schemaEvolutionMode", "rescue")
+        .option("cloudFiles.partitionColumns", "")  # trade_date comes from with_lineage()
         .load(f"{LANDING}/nse/")
     )
 
@@ -89,19 +91,20 @@ def nse_bhavcopy_raw():
 #     format              => 'json',
 #     multiLine           => true,
 #     pathGlobFilter      => '*.json',
-#     schemaHints         => 'results ARRAY<STRUCT<T: STRING, o: DOUBLE, h: DOUBLE, l: DOUBLE, c: DOUBLE,
-#                              v: DOUBLE, vw: DOUBLE, n: BIGINT, t: BIGINT, otc: BOOLEAN>>',
-#     schemaEvolutionMode => 'rescue'
+#     schemaHints         => 'results STRING',   -- keep the array as raw JSON text (see below)
+#     schemaEvolutionMode => 'rescue',
+#     partitionColumns    => ''
 #   );
-MASSIVE_SCHEMA_HINTS = (
-    "results ARRAY<STRUCT<T: STRING, o: DOUBLE, h: DOUBLE, l: DOUBLE, c: DOUBLE, "
-    "v: DOUBLE, vw: DOUBLE, n: BIGINT, t: BIGINT, otc: BOOLEAN>>"
-)
+#
+# Why results is a STRING: each bar has fields "T" (ticker) and "t" (timestamp). Delta column
+# names are case-insensitive, so a parsed struct with both fails with DELTA_DUPLICATE_COLUMNS_FOUND.
+# Bronze stores the JSON as delivered; silver renames "t" before parsing.
+MASSIVE_SCHEMA_HINTS = "results STRING"
 
 
 @dp.table(
     name="stocks.bronze.massive_grouped_raw",
-    comment="Raw Massive grouped-daily responses, one row per file (results array = all US tickers).",
+    comment="Raw Massive grouped-daily responses, one row per file (results = JSON text, all US tickers).",
     table_properties={"quality": "bronze"},
 )
 def massive_grouped_raw():
@@ -113,5 +116,6 @@ def massive_grouped_raw():
         .option("cloudFiles.inferColumnTypes", "true")
         .option("cloudFiles.schemaHints", MASSIVE_SCHEMA_HINTS)
         .option("cloudFiles.schemaEvolutionMode", "rescue")
+        .option("cloudFiles.partitionColumns", "")
         .load(f"{LANDING}/massive/")
     )

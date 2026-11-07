@@ -29,6 +29,12 @@ VALID_OHLC = {
 }
 
 
+MASSIVE_RESULTS_SCHEMA = (
+    "ARRAY<STRUCT<T: STRING, o: DOUBLE, h: DOUBLE, l: DOUBLE, c: DOUBLE, "
+    "v: DOUBLE, vw: DOUBLE, n: BIGINT, ts: BIGINT, otc: BOOLEAN>>"
+)
+
+
 def latest_file_wins(df, keys):
     """Keep one row per key: the one from the most recently modified file."""
     w = Window.partitionBy(*keys).orderBy(F.col("_file_modified_at").desc())
@@ -108,7 +114,12 @@ def nse_eq_daily():
 #     CONSTRAINT has_trade_date     EXPECT (trade_date IS NOT NULL) ON VIOLATION DROP ROW
 #   ) AS
 #   WITH bars AS (
-#     SELECT trade_date, _source_file, _file_modified_at, explode(results) AS r
+#     SELECT trade_date, _source_file, _file_modified_at,
+#            explode(from_json(
+#              regexp_replace(results, '"t":', '"ts":'),     -- "t" clashes with "T" (case-insensitive)
+#              'ARRAY<STRUCT<T: STRING, o: DOUBLE, h: DOUBLE, l: DOUBLE, c: DOUBLE,
+#                            v: DOUBLE, vw: DOUBLE, n: BIGINT, ts: BIGINT, otc: BOOLEAN>>'
+#            )) AS r
 #     FROM stocks.bronze.massive_grouped_raw
 #   ), dedup AS (
 #     SELECT *, row_number() OVER (PARTITION BY r.T, trade_date ORDER BY _file_modified_at DESC) AS rn
@@ -129,7 +140,10 @@ def nse_eq_daily():
 @dp.expect_all_or_drop(VALID_OHLC)
 def us_daily():
     raw = spark.read.table("stocks.bronze.massive_grouped_raw")  # noqa: F821
-    bars = raw.select("trade_date", "_source_file", "_file_modified_at", F.explode("results").alias("r"))
+    # Rename "t" (timestamp) to "ts" before parsing: it clashes with "T" (ticker) because
+    # Spark/Delta column names are case-insensitive. The regex is case-sensitive, so "T" is untouched.
+    parsed = F.from_json(F.regexp_replace("results", '"t":', '"ts":'), MASSIVE_RESULTS_SCHEMA)
+    bars = raw.select("trade_date", "_source_file", "_file_modified_at", F.explode(parsed).alias("r"))
     bars = bars.filter(~F.coalesce(F.col("r.otc"), F.lit(False))).select(
         F.lit("US").alias("market"),
         F.lit("US").alias("exchange"),
