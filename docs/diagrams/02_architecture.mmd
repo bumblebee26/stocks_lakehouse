@@ -1,0 +1,91 @@
+---
+config:
+  layout: elk
+  elk:
+    mergeEdges: false
+    nodePlacementStrategy: NETWORK_SIMPLEX
+---
+flowchart TB
+    subgraph EXT["External data sources"]
+        direction LR
+        NSE["<b>NSE archives</b><br/>UDiFF bhavcopy (.csv.zip)"]
+        MAS["<b>Massive API</b><br/>grouped daily, all US tickers"]
+        FREDAPI["<b>FRED API</b><br/>14 global series"]
+    end
+
+    subgraph AWS["AWS account · free plan · ap-southeast-2 (Sydney)"]
+        direction TB
+        SCH["<b>EventBridge Scheduler</b> (Asia/Kolkata)<br/>NSE 19:30 Mon–Fri · Massive 04:30 Tue–Sat<br/>FRED 06:00 Tue–Sat · Brief 08:45 Mon–Fri"]
+        subgraph LAMBDAS["Lambda functions (Python 3.13, arm64)"]
+            direction LR
+            FNSE["stocks-fetch-nse"]
+            FMAS["stocks-fetch-massive"]
+            FFRED["stocks-fetch-fred"]
+            SYNC["stocks-sync-volume<br/><i>manual: backfill / repair</i>"]
+            PM["stocks-premarket-brief"]
+        end
+        S3[("<b>S3 landing bucket</b><br/>landing/&lt;source&gt;/date=YYYY-MM-DD/<br/>private · encrypted · versioned")]
+        SSM[["<b>SSM Parameter Store</b><br/>API keys · tokens · workspace URL"]]
+    end
+
+    subgraph DBX["Databricks Free Edition · Unity Catalog: stocks"]
+        direction TB
+        VOL[("<b>Volume</b><br/>stocks.bronze.landing")]
+        JOB["<b>Job: stocks-refresh</b><br/>file-arrival trigger"]
+        subgraph PIPE["Lakeflow pipeline: stocks-medallion (serverless)"]
+            direction LR
+            BR["<b>Bronze</b><br/>3 streaming tables<br/>Auto Loader"]
+            SI["<b>Silver</b><br/>6 materialized views<br/>typed · de-duplicated · DQ"]
+            GO["<b>Gold</b><br/>8 materialized views<br/>insights"]
+            BR --> SI --> GO
+        end
+        WH["<b>SQL warehouse</b>"]
+        DASH["<b>Dashboard</b><br/>Stocks lakehouse: India × US"]
+    end
+
+    TG["<b>Telegram</b><br/>pre-market brief"]
+
+    subgraph CTRL["Control plane"]
+        direction LR
+        GH["<b>GitHub</b><br/>dev → PR → main"]
+        GHA["<b>GitHub Actions</b><br/>CI checks · plan · apply"]
+        TFS[("<b>Terraform state</b><br/>S3, lockfile")]
+        GH --> GHA --> TFS
+    end
+
+    SCH -- "1 · invoke" --> FNSE & FMAS & FFRED
+    NSE -- "2 · download" --> FNSE
+    MAS -- "2 · download" --> FMAS
+    FREDAPI -- "2 · download" --> FFRED
+    FNSE & FMAS & FFRED -- "3 · raw file" --> S3
+    FNSE & FMAS & FFRED -- "4 · push (Files API)" --> VOL
+    SYNC -. "reads" .-> S3
+    SYNC -. "push missing" .-> VOL
+    VOL -- "5 · new file" --> JOB
+    JOB -- "6 · refresh" --> PIPE
+    GO --> WH --> DASH
+    SCH -- "7 · invoke" --> PM
+    PM -- "8 · SQL Statement API" --> WH
+    PM -- "9 · send" --> TG
+    SSM -. "secrets at runtime" .-> LAMBDAS
+    GHA -. "terraform apply" .-> AWS
+    GHA -. "terraform apply" .-> DBX
+
+    classDef ext fill:#eef2ff,stroke:#6366f1,color:#1e1b4b
+    classDef aws fill:#fff7ed,stroke:#f59e0b,color:#451a03
+    classDef store fill:#fffbeb,stroke:#d97706,color:#451a03
+    classDef dbx fill:#fef2f2,stroke:#ef4444,color:#450a0a
+    classDef bronze fill:#f5e6d3,stroke:#b45309,color:#451a03
+    classDef silver fill:#eef2f6,stroke:#64748b,color:#0f172a
+    classDef gold fill:#fef9c3,stroke:#ca8a04,color:#422006
+    classDef out fill:#ecfdf5,stroke:#10b981,color:#022c22
+    classDef ctrl fill:#f1f5f9,stroke:#475569,color:#0f172a
+    class NSE,MAS,FREDAPI ext
+    class SCH,FNSE,FMAS,FFRED,SYNC,PM aws
+    class S3,SSM store
+    class VOL,JOB,WH dbx
+    class BR bronze
+    class SI silver
+    class GO gold
+    class DASH,TG out
+    class GH,GHA,TFS ctrl

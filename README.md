@@ -6,28 +6,12 @@ A multi-market stock lakehouse on **AWS + Databricks**, built on a **medallion a
 It collects Indian, US and global market data every day, turns it into cross-market insights, shows them on
 a dashboard, and sends a **pre-market brief to Telegram** before the Indian market opens.
 
-```mermaid
-flowchart LR
-    subgraph Sources
-        NSE[NSE bhavcopy<br/>India equities]
-        MAS[Massive<br/>all US stocks]
-        FRED[FRED<br/>global indices, FX,<br/>VIX, oil, rates]
-    end
-    subgraph AWS["AWS (free plan, Sydney)"]
-        EB[EventBridge<br/>schedules] --> L[Lambda fetchers]
-        L --> S3[(S3 landing<br/>raw archive)]
-        PM[Lambda<br/>pre-market brief]
-    end
-    subgraph DBX["Databricks (Free Edition)"]
-        V[(Volume<br/>landing)] --> B[Bronze<br/>Auto Loader]
-        B --> SV[Silver<br/>clean, unified]
-        SV --> G[Gold<br/>insights]
-        G --> D[Dashboard]
-    end
-    NSE & MAS & FRED --> L
-    L -- push via Files API --> V
-    G -- SQL API --> PM --> TG[Telegram]
-```
+![Base diagram: sources → AWS ingest → Databricks lakehouse → dashboard and Telegram](docs/diagrams/01_overview.png)
+
+**Diagrams with explanations:** [docs/ARCHITECTURE_DIAGRAMS.md](docs/ARCHITECTURE_DIAGRAMS.md)
+covers the base view above, the full [architecture](docs/ARCHITECTURE_DIAGRAMS.md#2-architecture),
+[data lineage](docs/ARCHITECTURE_DIAGRAMS.md#3-data-lineage) (all 17 tables) and the
+[CI/CD flow](docs/ARCHITECTURE_DIAGRAMS.md#4-cicd-flow).
 
 ## What you get
 
@@ -62,15 +46,16 @@ infra/
   aws/             Landing bucket, Lambdas, schedules, IAM, SSM parameters, CI users
   databricks/      Catalog, schemas, volume, token, pipeline, job, dashboard
 tests/             Unit tests (no cloud access needed)
-scripts/           check_pipeline.py: pipeline wiring check (used by CI)
+scripts/           check_pipeline.py (pipeline wiring check, used by CI), render_diagrams (re-render docs/diagrams)
 .github/           CI (tests, fmt, validate) and CD (plan on PR, apply on merge)
-docs/              Full documentation (below)
+docs/              Full documentation (below); docs/diagrams/ holds the diagram sources and images
 ```
 
 ## Documentation
 
 | Doc | Read it when |
 |---|---|
+| [docs/ARCHITECTURE_DIAGRAMS.md](docs/ARCHITECTURE_DIAGRAMS.md) | You want the picture: base, architecture, lineage and CI/CD diagrams, each explained |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | You want to understand how it fits together and why it's built this way |
 | [docs/SETUP.md](docs/SETUP.md) | You're building it from scratch: every step, in order, with Windows commands |
 | [docs/OPERATIONS.md](docs/OPERATIONS.md) | Day to day: making changes, backfills, monitoring, rotating secrets |
