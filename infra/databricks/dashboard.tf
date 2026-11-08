@@ -46,10 +46,33 @@ locals {
     adr_latest = <<-SQL
       SELECT adr, nse_symbol, trade_date, adr_close_usd, nse_close_inr,
              round(implied_inr_per_usd, 2)   AS implied_inr_per_usd,
-             round(relative_premium_pct, 2)  AS relative_premium_pct
+             round(relative_premium_pct, 2)  AS relative_premium_pct,
+             round(fx_inr_per_usd, 2)        AS fx_inr_per_usd,
+             round(fx_premium_pct, 2)        AS fx_premium_pct
       FROM stocks.gold.adr_premium
       WHERE trade_date = (SELECT max(trade_date) FROM stocks.gold.adr_premium)
       ORDER BY relative_premium_pct DESC
+    SQL
+
+    global_latest = <<-SQL
+      SELECT region, name, instrument, asset_class, obs_date AS as_of,
+             round(value, 2)          AS value,
+             round(change_pct, 2)     AS change_pct,
+             round(change_5d_pct, 2)  AS change_5d_pct,
+             round(change_20d_pct, 2) AS change_20d_pct,
+             source
+      FROM stocks.gold.global_snapshot
+      ORDER BY CASE asset_class WHEN 'equity_index' THEN 1 WHEN 'equity_etf' THEN 2 WHEN 'volatility' THEN 3
+                                WHEN 'commodity' THEN 4 WHEN 'rates' THEN 5 ELSE 6 END, region
+    SQL
+
+    india_vs_global = <<-SQL
+      SELECT name, instrument, region, asset_class, CAST(sessions AS INT) AS sessions,
+             round(corr_with_india_gap, 2)    AS corr_with_india_gap,
+             round(corr_with_india_return, 2) AS corr_with_india_return,
+             round(pct_same_direction_gap, 0) AS pct_same_direction_gap
+      FROM stocks.gold.india_vs_global
+      ORDER BY abs(corr_with_india_gap) DESC
     SQL
   }
 
@@ -59,7 +82,9 @@ locals {
       us_vs_india         = ["us_return_pct", "india_gap_pct", "us_move"]
       us_vs_india_summary = ["us_move", "sessions", "avg_us_return_pct", "avg_india_gap_pct", "avg_india_return_pct", "pct_india_up_days", "pct_gap_same_direction_as_us", "corr_us_return_india_gap"]
       unusual_latest      = ["market", "symbol", "trade_date", "volume_ratio", "return_pct", "close", "currency"]
-      adr_latest          = ["adr", "nse_symbol", "trade_date", "adr_close_usd", "nse_close_inr", "implied_inr_per_usd", "relative_premium_pct"]
+      adr_latest          = ["adr", "nse_symbol", "trade_date", "adr_close_usd", "nse_close_inr", "implied_inr_per_usd", "relative_premium_pct", "fx_inr_per_usd", "fx_premium_pct"]
+      global_latest       = ["region", "name", "instrument", "asset_class", "as_of", "value", "change_pct", "change_5d_pct", "change_20d_pct", "source"]
+      india_vs_global     = ["name", "instrument", "region", "asset_class", "sessions", "corr_with_india_gap", "corr_with_india_return", "pct_same_direction_gap"]
     } : ds => [for c in cols : { name = c, expression = "`${c}`" }]
   }
 
@@ -85,7 +110,7 @@ locals {
         {
           widget = {
             name                 = "title"
-            multilineTextboxSpec = { lines = ["## Stocks lakehouse: India x US", "Daily NSE + US data. Proxies: NIFTYBEES (Nifty 50) and SPY (S&P 500). Historical tendencies, not advice."] }
+            multilineTextboxSpec = { lines = ["## Stocks lakehouse: India x US", "Daily NSE, US (Massive) and global (FRED) data. Proxies: NIFTYBEES (Nifty 50) and SPY (S&P 500). Historical tendencies, not advice."] }
           }
           position = { x = 0, y = 0, width = 12, height = 2 }
         },
@@ -180,10 +205,42 @@ locals {
               version    = 2
               widgetType = "table"
               encodings  = { columns = local.table_columns.adr_latest }
-              frame      = { showTitle = true, title = "Indian ADRs vs NSE shares (relative premium vs the day's median pair)" }
+              frame      = { showTitle = true, title = "Indian ADRs vs NSE shares (premium vs median pair, and vs USD/INR)" }
             }
           }
           position = { x = 0, y = 19, width = 12, height = 5 }
+        },
+        {
+          widget = {
+            name = "global_table"
+            queries = [{
+              name  = "main_query"
+              query = { datasetName = "global_latest", disaggregated = true, fields = local.raw_fields.global_latest }
+            }]
+            spec = {
+              version    = 2
+              widgetType = "table"
+              encodings  = { columns = local.table_columns.global_latest }
+              frame      = { showTitle = true, title = "Global markets: latest reading (FRED + US-listed country ETFs)" }
+            }
+          }
+          position = { x = 0, y = 24, width = 12, height = 8 }
+        },
+        {
+          widget = {
+            name = "india_vs_global_table"
+            queries = [{
+              name  = "main_query"
+              query = { datasetName = "india_vs_global", disaggregated = true, fields = local.raw_fields.india_vs_global }
+            }]
+            spec = {
+              version    = 2
+              widgetType = "table"
+              encodings  = { columns = local.table_columns.india_vs_global }
+              frame      = { showTitle = true, title = "Which global moves line up with India's next open? (correlation with NIFTYBEES gap)" }
+            }
+          }
+          position = { x = 0, y = 32, width = 12, height = 7 }
         },
       ]
     }]

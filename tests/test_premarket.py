@@ -32,6 +32,15 @@ SAMPLE = {
          "corr_us_return_india_gap": 0.2},
     ],
     "study_start": [{"first_day": "2024-11-12"}],
+    "global": [
+        {"instrument": "NIKKEI225", "obs_date": "2026-11-06", "value": 50120.0, "change_pct": 0.84, "change_abs": 418.0},
+        {"instrument": "VGK", "obs_date": "2026-11-06", "value": 72.1, "change_pct": -0.31, "change_abs": -0.22},
+        {"instrument": "FXI", "obs_date": "2026-11-06", "value": 38.0, "change_pct": 1.2, "change_abs": 0.45},
+        {"instrument": "VIXCLS", "obs_date": "2026-11-06", "value": 17.4, "change_pct": -6.0, "change_abs": -1.1},
+        {"instrument": "DCOILBRENTEU", "obs_date": "2026-11-02", "value": 68.25, "change_pct": -0.9, "change_abs": -0.6},
+        {"instrument": "DGS10", "obs_date": "2026-11-06", "value": 4.12, "change_pct": 0.7, "change_abs": 0.03},
+        {"instrument": "DEXINUS", "obs_date": "2026-10-30", "value": 88.12, "change_pct": 0.1, "change_abs": 0.09},
+    ],
     "unusual_in": [
         {"symbol": "ABC&CO", "trade_date": "2026-11-06", "close": 120.0, "return_pct": 4.3, "volume_ratio": 5.2},
         {"symbol": "XYZ", "trade_date": "2026-11-06", "close": 50.0, "return_pct": -2.1, "volume_ratio": 3.4},
@@ -51,6 +60,9 @@ class BuildMessage(unittest.TestCase):
         self.assertIn("INFY +2.30% · HDB -0.40%", msg)
         self.assertIn("1. ABC&amp;CO · 5.2× avg volume · +4.3%", msg)  # symbol HTML-escaped
         self.assertNotIn("⚠️", msg)
+        self.assertIn("Nikkei 225 +0.84% · Europe -0.31% · China +1.20%", msg)
+        self.assertIn("VIX 17.4 (-1.1) · Brent $68.2 (-0.9%) (as of Mon 02 Nov) · US 10Y 4.12% (+3 bp)", msg)
+        self.assertIn("USD/INR 88.12 (as of Fri 30 Oct)", msg)
 
     def test_flat_day_uses_flat_bucket(self):
         data = json.loads(json.dumps(SAMPLE))
@@ -68,6 +80,7 @@ class BuildMessage(unittest.TestCase):
         self.assertIn("No US index data.", msg)
         self.assertIn("Not enough history", msg)
         self.assertIn("None above the threshold.", msg)
+        self.assertNotIn("<b>Global</b>", msg)  # section hidden when there is no global data
 
     def test_handler_dry_run_does_not_send(self):
         with mock.patch.object(databricks_sql, "query", side_effect=lambda sql: []), \

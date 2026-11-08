@@ -4,7 +4,10 @@
   stocks.gold.market_breadth               advances/declines and % above 20-day average, per market/day
   stocks.gold.nifty_after_us_moves         each Indian session next to the US session before it
   stocks.gold.nifty_after_us_moves_summary how India opens/closes after big US up/down days
-  stocks.gold.adr_premium                  Indian ADRs in New York vs their NSE shares
+  stocks.gold.adr_premium                  Indian ADRs in New York vs their NSE shares (+ USD/INR premium)
+  stocks.gold.global_markets_daily         global instruments with 1/5/20-day changes
+  stocks.gold.global_snapshot              latest reading per global instrument
+  stocks.gold.india_vs_global              which global moves line up with India's next open
 
 Market proxies (no index data in these sources): NIFTYBEES (Nifty 50 ETF on NSE)
 and SPY (S&P 500 ETF). Change them with pipeline configuration keys
@@ -229,9 +232,11 @@ def nifty_after_us_moves_summary():
 # ---------------------------------------------------------------------------
 # ADR premium (Indian ADRs in New York vs their NSE shares)
 # ---------------------------------------------------------------------------
-# No FX feed is needed: for each pair, implied_inr_per_usd = NSE close x shares per ADR / ADR close.
-# The median across all pairs that day is the reference rate; a pair's premium is how far its
-# implied rate sits from that reference. Positive = the ADR is expensive relative to the others.
+# For each pair, implied_inr_per_usd = NSE close x shares per ADR / ADR close.
+#   relative_premium_pct: vs the median implied rate across pairs that day (needs no FX feed).
+#   fx_premium_pct:       vs the actual USD/INR rate from FRED (DEXINUS, released weekly, so the
+#                         latest rate up to 10 days old is used; fx_date shows which one).
+# Positive = the ADR is expensive compared with buying the shares in India.
 #
 # SQL equivalent:
 #   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.adr_premium AS
@@ -248,11 +253,19 @@ def nifty_after_us_moves_summary():
 #     JOIN stocks.silver.daily_bars n ON n.market = 'IN' AND n.series = 'EQ'
 #                                    AND n.symbol = p.nse_symbol AND n.trade_date = u.trade_date
 #   )
-#   SELECT *,
-#          percentile_approx(implied_inr_per_usd, 0.5) OVER (PARTITION BY trade_date) AS reference_inr_per_usd,
-#          (percentile_approx(implied_inr_per_usd, 0.5) OVER (PARTITION BY trade_date)
-#             / implied_inr_per_usd - 1) * 100 AS relative_premium_pct
-#   FROM joined;
+#   ), fx AS (   -- latest USD/INR (FRED DEXINUS) on or before each trade date, at most 10 days old
+#     SELECT j.adr, j.trade_date, f.value AS fx_inr_per_usd, f.obs_date AS fx_date,
+#            row_number() OVER (PARTITION BY j.adr, j.trade_date ORDER BY f.obs_date DESC) AS rn
+#     FROM joined j JOIN stocks.silver.fred_daily f
+#       ON f.series_id = 'DEXINUS' AND f.obs_date <= j.trade_date AND f.obs_date >= date_sub(j.trade_date, 10)
+#   )
+#   SELECT j.*,
+#          percentile_approx(implied_inr_per_usd, 0.5) OVER (PARTITION BY j.trade_date) AS reference_inr_per_usd,
+#          (percentile_approx(implied_inr_per_usd, 0.5) OVER (PARTITION BY j.trade_date)
+#             / implied_inr_per_usd - 1) * 100 AS relative_premium_pct,
+#          fx.fx_inr_per_usd, fx.fx_date,
+#          (fx.fx_inr_per_usd / implied_inr_per_usd - 1) * 100 AS fx_premium_pct
+#   FROM joined j LEFT JOIN fx ON fx.adr = j.adr AND fx.trade_date = j.trade_date AND fx.rn = 1;
 @dp.materialized_view(
     name="stocks.gold.adr_premium",
     comment="Indian ADRs vs NSE shares: implied INR/USD per pair and premium vs the day's median pair.",
@@ -276,9 +289,138 @@ def adr_premium():
         )
     )
     day = Window.partitionBy("trade_date")
-    return joined.withColumn(
+    joined = joined.withColumn(
         "reference_inr_per_usd", F.percentile_approx("implied_inr_per_usd", 0.5).over(day)
     ).withColumn(
         "relative_premium_pct",
         (F.col("reference_inr_per_usd") / F.col("implied_inr_per_usd") - 1) * 100,
+    )
+
+    fx = (
+        spark.read.table("stocks.silver.fred_daily")  # noqa: F821
+        .filter(F.col("series_id") == "DEXINUS")
+        .select(F.col("obs_date").alias("fx_date"), F.col("value").alias("fx_inr_per_usd"))
+    )
+    with_fx = joined.join(
+        fx,
+        (F.col("fx_date") <= F.col("trade_date")) & (F.col("fx_date") >= F.date_sub(F.col("trade_date"), 10)),
+        "left",
+    )
+    latest_fx = Window.partitionBy("adr", "trade_date").orderBy(F.col("fx_date").desc_nulls_last())
+    return (
+        with_fx.withColumn("_rn", F.row_number().over(latest_fx))
+        .filter("_rn = 1")
+        .drop("_rn")
+        .withColumn("fx_premium_pct", (F.col("fx_inr_per_usd") / F.col("implied_inr_per_usd") - 1) * 100)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Global markets with changes over 1, 5 and 20 observations
+# ---------------------------------------------------------------------------
+# change_pct suits prices and FX; for rates (asset_class = 'rates', in percent) use change_abs
+# (e.g. +0.05 = +5 basis points).
+#
+# SQL equivalent:
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.global_markets_daily AS
+#   SELECT *,
+#          value - lag(value) OVER w                       AS change_abs,
+#          (value / lag(value)     OVER w - 1) * 100       AS change_pct,
+#          (value / lag(value, 5)  OVER w - 1) * 100       AS change_5d_pct,
+#          (value / lag(value, 20) OVER w - 1) * 100       AS change_20d_pct
+#   FROM stocks.silver.global_daily
+#   WINDOW w AS (PARTITION BY instrument ORDER BY obs_date);
+@dp.materialized_view(
+    name="stocks.gold.global_markets_daily",
+    comment="Global instruments (indices, country ETFs, FX, VIX, oil, rates) with 1/5/20-observation changes.",
+    table_properties={"quality": "gold"},
+)
+def global_markets_daily():
+    w = Window.partitionBy("instrument").orderBy("obs_date")
+    g = spark.read.table("stocks.silver.global_daily")  # noqa: F821
+    return (
+        g.withColumn("change_abs", F.col("value") - F.lag("value").over(w))
+        .withColumn("change_pct", (F.col("value") / F.lag("value").over(w) - 1) * 100)
+        .withColumn("change_5d_pct", (F.col("value") / F.lag("value", 5).over(w) - 1) * 100)
+        .withColumn("change_20d_pct", (F.col("value") / F.lag("value", 20).over(w) - 1) * 100)
+    )
+
+
+# SQL equivalent:
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.global_snapshot AS
+#   SELECT * EXCEPT (rn) FROM (
+#     SELECT *, row_number() OVER (PARTITION BY instrument ORDER BY obs_date DESC) AS rn
+#     FROM stocks.gold.global_markets_daily
+#   ) WHERE rn = 1;
+@dp.materialized_view(
+    name="stocks.gold.global_snapshot",
+    comment="Latest reading per global instrument, with its changes and as-of date.",
+    table_properties={"quality": "gold"},
+)
+def global_snapshot():
+    latest = Window.partitionBy("instrument").orderBy(F.col("obs_date").desc())
+    return (
+        spark.read.table("stocks.gold.global_markets_daily")  # noqa: F821
+        .withColumn("_rn", F.row_number().over(latest))
+        .filter("_rn = 1")
+        .drop("_rn")
+    )
+
+
+# ---------------------------------------------------------------------------
+# Which global moves line up with India's next open?
+# ---------------------------------------------------------------------------
+# For each Indian session (Nifty proxy), take each instrument's latest change dated strictly
+# BEFORE the Indian date (information available before 09:15 IST), then measure over history:
+# correlation with India's opening gap and full-day return, and how often they share a direction.
+#
+# SQL equivalent:
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.india_vs_global AS
+#   WITH pairs AS (
+#     SELECT i.india_date, i.india_gap_pct, i.india_return_pct,
+#            g.instrument, g.name, g.region, g.asset_class, g.change_pct,
+#            row_number() OVER (PARTITION BY i.india_date, g.instrument ORDER BY g.obs_date DESC) AS rn
+#     FROM stocks.gold.nifty_after_us_moves i
+#     JOIN stocks.gold.global_markets_daily g
+#       ON g.obs_date < i.india_date AND g.obs_date >= date_sub(i.india_date, 7)
+#     WHERE g.change_pct IS NOT NULL
+#   )
+#   SELECT instrument, name, region, asset_class,
+#          count(*)                                AS sessions,
+#          corr(change_pct, india_gap_pct)         AS corr_with_india_gap,
+#          corr(change_pct, india_return_pct)      AS corr_with_india_return,
+#          100 * avg(CASE WHEN sign(change_pct) = sign(india_gap_pct) THEN 1 ELSE 0 END) AS pct_same_direction_gap
+#   FROM pairs WHERE rn = 1
+#   GROUP BY instrument, name, region, asset_class
+#   HAVING count(*) >= 30;
+@dp.materialized_view(
+    name="stocks.gold.india_vs_global",
+    comment="Per global instrument: how its previous move relates to India's next open and day (Nifty proxy).",
+    table_properties={"quality": "gold"},
+)
+def india_vs_global():
+    india = spark.read.table("stocks.gold.nifty_after_us_moves").select(  # noqa: F821
+        "india_date", "india_gap_pct", "india_return_pct"
+    )
+    g = (
+        spark.read.table("stocks.gold.global_markets_daily")  # noqa: F821
+        .filter(F.col("change_pct").isNotNull())
+        .select("instrument", "name", "region", "asset_class", "obs_date", "change_pct")
+    )
+    pairs = india.join(
+        g,
+        (F.col("obs_date") < F.col("india_date")) & (F.col("obs_date") >= F.date_sub(F.col("india_date"), 7)),
+    )
+    latest = Window.partitionBy("india_date", "instrument").orderBy(F.col("obs_date").desc())
+    pairs = pairs.withColumn("_rn", F.row_number().over(latest)).filter("_rn = 1").drop("_rn")
+    same_dir = F.when(F.signum("change_pct") == F.signum("india_gap_pct"), 1).otherwise(0)
+    return (
+        pairs.groupBy("instrument", "name", "region", "asset_class")
+        .agg(
+            F.count("*").alias("sessions"),
+            F.corr("change_pct", "india_gap_pct").alias("corr_with_india_gap"),
+            F.corr("change_pct", "india_return_pct").alias("corr_with_india_return"),
+            (100 * F.avg(same_dir)).alias("pct_same_direction_gap"),
+        )
+        .filter(F.col("sessions") >= 30)
     )

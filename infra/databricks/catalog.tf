@@ -39,3 +39,17 @@ resource "databricks_volume" "landing" {
   volume_type  = "MANAGED"
   comment      = "Raw files pushed by the AWS Lambda fetchers. Managed by Terraform."
 }
+
+# Make sure each source folder exists in the landing volume, so Auto Loader has
+# a path to watch even before a source's first file arrives (e.g. FRED until its
+# API key is set). The pipeline only reads *.csv / *.json, so these are ignored.
+resource "databricks_file" "landing_readme" {
+  for_each = {
+    nse     = "NSE equities bhavcopy (UDiFF CSV, unzipped by the Lambda). One folder per trading date."
+    massive = "Massive grouped daily (all US stocks, raw JSON). One folder per US trading date."
+    fred    = "FRED global markets (newline-delimited JSON). One folder per fetch date; each file covers a date range."
+  }
+
+  path           = "/Volumes/${databricks_volume.landing.catalog_name}/${databricks_volume.landing.schema_name}/${databricks_volume.landing.name}/${each.key}/_README.txt"
+  content_base64 = base64encode("${each.value}\nWritten by the AWS Lambda fetchers. Managed by Terraform.\n")
+}

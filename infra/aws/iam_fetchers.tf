@@ -67,6 +67,17 @@ data "aws_iam_policy_document" "fetcher" {
       resources = [aws_ssm_parameter.massive_api_key.arn]
     }
   }
+
+  dynamic "statement" {
+    for_each = each.value.needs_fred_key ? [1] : []
+
+    content {
+      sid       = "ReadFredApiKey"
+      effect    = "Allow"
+      actions   = ["ssm:GetParameter"]
+      resources = [aws_ssm_parameter.fred_api_key.arn]
+    }
+  }
 }
 
 resource "aws_iam_role_policy" "fetcher" {

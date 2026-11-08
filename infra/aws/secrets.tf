@@ -15,3 +15,17 @@ resource "aws_ssm_parameter" "massive_api_key" {
     ignore_changes = [value]
   }
 }
+
+# FRED (global markets) API key. Free: https://fredaccount.stlouisfed.org/apikeys
+# Set the real value outside Terraform:
+#   aws ssm put-parameter --name /stocks/fred-api-key --type SecureString --overwrite --value YOUR_KEY
+resource "aws_ssm_parameter" "fred_api_key" {
+  name        = "/${var.name_prefix}/fred-api-key"
+  description = "FRED API key for the global-markets fetcher. Real value set outside Terraform."
+  type        = "SecureString"
+  value       = "SET_ME_OUTSIDE_TERRAFORM"
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}

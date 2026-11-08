@@ -1,5 +1,5 @@
 # Lambda fetchers + EventBridge Scheduler.
-# Both functions ship in one zip built from ../../fetchers (stdlib + boto3 only).
+# All functions ship in one zip built from ../../fetchers (stdlib + boto3 only).
 
 locals {
   functions = {
@@ -10,6 +10,7 @@ locals {
       description = "NSE equities bhavcopy (UDiFF) -> landing/nse/"
       # 19:30 IST, Monday-Friday (NSE publishes in the early evening)
       schedule = "cron(30 19 ? * MON-FRI *)"
+      enabled  = true
     }
     massive = {
       handler     = "massive.handler"
@@ -18,6 +19,16 @@ locals {
       description = "Massive grouped daily (all US stocks) -> landing/massive/"
       # 04:30 IST, Tuesday-Saturday = after the US close the previous evening
       schedule = "cron(30 4 ? * TUE-SAT *)"
+      enabled  = true
+    }
+    fred = {
+      handler     = "fred.handler"
+      role_key    = "global"
+      timeout     = 300
+      description = "FRED global markets (indices, FX, VIX, oil, rates) -> landing/fred/"
+      # 06:00 IST, Tuesday-Saturday = after the previous US day's data is posted
+      schedule = "cron(0 6 ? * TUE-SAT *)"
+      enabled  = var.fred_enabled
     }
   }
 }
@@ -59,6 +70,7 @@ resource "aws_lambda_function" "fetcher" {
     variables = {
       LANDING_BUCKET         = module.landing_bucket.id
       MASSIVE_KEY_PARAM      = aws_ssm_parameter.massive_api_key.name
+      FRED_KEY_PARAM         = aws_ssm_parameter.fred_api_key.name
       PUSH_TO_DATABRICKS     = var.databricks_push_enabled ? "true" : "false"
       DATABRICKS_URL_PARAM   = local.databricks_url_param
       DATABRICKS_TOKEN_PARAM = local.databricks_token_param
@@ -121,7 +133,7 @@ resource "aws_scheduler_schedule" "fetcher" {
 
   name        = "${var.name_prefix}-fetch-${each.key}"
   description = each.value.description
-  state       = var.schedules_enabled ? "ENABLED" : "DISABLED"
+  state       = var.schedules_enabled && each.value.enabled ? "ENABLED" : "DISABLED"
 
   schedule_expression          = each.value.schedule
   schedule_expression_timezone = "Asia/Kolkata"

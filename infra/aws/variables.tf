@@ -19,10 +19,12 @@ variable "fetchers" {
   type = map(object({
     landing_prefixes  = list(string)
     needs_massive_key = bool
+    needs_fred_key    = bool
   }))
   default = {
-    nse = { landing_prefixes = ["nse"], needs_massive_key = false }
-    us  = { landing_prefixes = ["massive", "stooq"], needs_massive_key = true }
+    nse    = { landing_prefixes = ["nse"], needs_massive_key = false, needs_fred_key = false }
+    us     = { landing_prefixes = ["massive"], needs_massive_key = true, needs_fred_key = false }
+    global = { landing_prefixes = ["fred"], needs_massive_key = false, needs_fred_key = true }
   }
 }
 
@@ -85,4 +87,10 @@ variable "big_move_pct" {
   description = "A US day counts as a big move at or beyond this % change. Keep in sync with the databricks stack."
   type        = number
   default     = 1.0
+}
+
+variable "fred_enabled" {
+  description = "Run the daily FRED (global markets) fetch. Turn on after the FRED API key is stored in SSM."
+  type        = bool
+  default     = false
 }
