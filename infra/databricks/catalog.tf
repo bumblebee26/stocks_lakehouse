@@ -48,8 +48,9 @@ resource "databricks_file" "landing_readme" {
     nse     = "NSE equities bhavcopy (UDiFF CSV, unzipped by the Lambda). One folder per trading date."
     massive = "Massive grouped daily (all US stocks, raw JSON). One folder per US trading date."
     fred    = "FRED global markets (newline-delimited JSON). One folder per fetch date; each file covers a date range."
+    trades  = "Paper-trader journal (dummy money, JSON lines), pushed daily at 15:45 IST by stocks-trader-guardian (bumblebee26/paper-trader)."
   }
 
   path           = "/Volumes/${databricks_volume.landing.catalog_name}/${databricks_volume.landing.schema_name}/${databricks_volume.landing.name}/${each.key}/_README.txt"
-  content_base64 = base64encode("${each.value}\nWritten by the AWS Lambda fetchers. Managed by Terraform.\n")
+  content_base64 = base64encode("${each.value}\nWritten by AWS Lambda. Managed by Terraform.\n")
 }

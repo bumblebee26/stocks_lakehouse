@@ -20,6 +20,7 @@ CI/CD diagrams.
 | **Dashboard** | AI/BI (Lakeview) dashboard on the gold tables, defined in Terraform. |
 | **Pre-market Lambda** | Queries gold through the Databricks SQL Statement API and sends a Telegram message. |
 | **Sync Lambda** | Copies anything in S3 that's missing from the volume. Used after backfills and to repair gaps. |
+| **Paper-trader feed** | [paper-trader](https://github.com/bumblebee26/paper-trader)'s `stocks-trader-guardian` Lambda pushes the day's trade journal to `landing/trades/` at 15:45 IST (same Files API and pusher token). It's both a backup copy of the trader's S3 journal and the input to the `trad*` gold tables and the "Paper trading" dashboard page. |
 | **CI/CD** | GitHub Actions: checks on every push, plan on PR, apply on merge to `main`. |
 
 ## Why it's built this way
