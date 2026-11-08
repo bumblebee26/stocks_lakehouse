@@ -91,6 +91,26 @@ class BuildMessage(unittest.TestCase):
         self.assertIn("Pre-market brief", out["message"])
 
 
+class SoftFailure(unittest.TestCase):
+    def test_one_failed_query_still_sends_with_warning(self):
+        def fake_query(sql):
+            if "global_snapshot" in sql:
+                raise RuntimeError("TABLE_OR_VIEW_NOT_FOUND stocks.gold.global_snapshot")
+            if "daily_bars" in sql:
+                return SAMPLE["us_bars"]
+            return []
+
+        with mock.patch.object(databricks_sql, "query", side_effect=fake_query), \
+             mock.patch.object(telegram, "send") as send:
+            out = premarket.handler({}, None)
+        send.assert_called_once()
+        self.assertEqual(out["failed_queries"], ["global"])
+        msg = send.call_args.args[0]
+        self.assertIn("⚠️ Unavailable today: global markets", msg)
+        self.assertIn("S&amp;P 500 (SPY) +1.42%", msg)   # the rest of the brief is intact
+        self.assertNotIn("<b>Global</b>", msg)
+
+
 class DatabricksSql(unittest.TestCase):
     def setUp(self):
         databricks_sql._config = {"host": "https://dbc-x.cloud.databricks.com", "token": "T", "warehouse_id": "W1"}

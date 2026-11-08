@@ -71,6 +71,31 @@ QUERIES = {
 }
 
 
+# Friendly names for the "unavailable" warning when a query fails.
+SECTION_NAMES = {
+    "us_bars": "US session and ADRs",
+    "us_breadth": "US breadth",
+    "global": "global markets",
+    "summary": "what usually follows",
+    "study_start": "what usually follows",
+    "unusual_in": "India unusual volume",
+}
+
+
+def fetch_all(queries):
+    """Run every query; a failed one becomes [] and is reported, so one missing
+    table (e.g. a new gold table before its first pipeline run) can't stop the brief."""
+    data, failed = {}, []
+    for name, sql in queries.items():
+        try:
+            data[name] = databricks_sql.query(sql)
+        except Exception as err:  # noqa: BLE001 - any failure: skip the section, keep the brief
+            log.error("Query %s failed: %s", name, err)
+            data[name] = []
+            failed.append(name)
+    return data, failed
+
+
 def pct(value, digits=2):
     return "n/a" if value is None else f"{value:+.{digits}f}%"
 
@@ -122,10 +147,14 @@ def global_lines(rows, today):
     return lines
 
 
-def build_message(data, today):
+def build_message(data, today, failed=()):
     bars = {r["symbol"]: r for r in data["us_bars"]}
     us_date = data["us_bars"][0]["trade_date"] if data["us_bars"] else None
     lines = [f"<b>Pre-market brief · {today:%a %d %b %Y}</b>", ""]
+
+    if failed:
+        missing = sorted({SECTION_NAMES.get(n, n) for n in failed})
+        lines += [f"⚠️ Unavailable today: {esc(', '.join(missing))} (check the Databricks pipeline).", ""]
 
     if us_date and (today - dt.date.fromisoformat(us_date)).days > STALE_AFTER_DAYS:
         lines += [f"⚠️ Latest US data is from {nice_date(us_date)}; the pipeline may be behind.", ""]
@@ -183,10 +212,10 @@ def build_message(data, today):
 
 def handler(event, context):
     event = event or {}
-    data = {name: databricks_sql.query(sql) for name, sql in QUERIES.items()}
-    message = build_message(data, dt.datetime.now(IST).date())
+    data, failed = fetch_all(QUERIES)
+    message = build_message(data, dt.datetime.now(IST).date(), failed)
     if event.get("dry_run"):
         log.info("Dry run; message not sent:\n%s", message)
-        return {"sent": False, "message": message}
+        return {"sent": False, "failed_queries": failed, "message": message}
     telegram.send(message)
-    return {"sent": True, "chars": len(message)}
+    return {"sent": True, "failed_queries": failed, "chars": len(message)}
