@@ -3,6 +3,7 @@
 import datetime as dt
 import json
 import os
+import re
 import sys
 import unittest
 from unittest import mock
@@ -14,6 +15,12 @@ import databricks_sql  # noqa: E402
 import premarket  # noqa: E402
 import telegram  # noqa: E402
 
+
+def g(instrument, obs_date, value, change_pct, change_5d_pct=None, change_abs=None):
+    return {"instrument": instrument, "obs_date": obs_date, "value": value, "change_pct": change_pct,
+            "change_5d_pct": change_5d_pct, "change_abs": change_abs}
+
+
 SAMPLE = {
     "us_bars": [
         {"trade_date": "2026-11-06", "symbol": "SPY", "close": 650.0, "return_pct": 1.42},
@@ -23,6 +30,22 @@ SAMPLE = {
     ],
     "us_breadth": [{"trade_date": "2026-11-06", "advances": 3210.0, "declines": 1980.0,
                     "pct_above_ma20": 61.6, "median_return_pct": 0.5}],
+    "global": [
+        g("NIKKEI225", "2026-11-06", 50120.0, -5.96, -3.1, -3180.0),
+        g("EWY", "2026-11-06", 71.0, 4.07, 6.2, 2.8),
+        g("FXI", "2026-11-06", 38.0, 0.03, 1.1, 0.01),
+        g("VGK", "2026-11-05", 72.1, -1.26, -2.0, -0.9),
+        g("INDA", "2026-11-06", 52.0, 0.4, 0.9, 0.2),
+        g("VIXCLS", "2026-11-06", 28.2, 70.0, None, 11.6),
+        g("DGS10", "2026-11-06", 4.84, -1.2, None, -0.06),
+        g("DCOILBRENTEU", "2026-11-03", 107.0, -0.3, None, -0.3),
+        g("DEXINUS", "2026-10-30", 94.94, 0.1, None, 0.09),
+        g("DEXUSEU", "2026-10-30", 1.0712, -0.2, None, -0.002),
+    ],
+    "linked": [
+        {"instrument": "EWY", "corr_with_india_gap": 0.41, "sessions": 380.0},
+        {"instrument": "NIKKEI225", "corr_with_india_gap": 0.37, "sessions": 370.0},
+    ],
     "summary": [
         {"us_move": "US up big", "sessions": 48.0, "avg_us_return_pct": 1.6, "avg_india_gap_pct": 0.35,
          "avg_india_return_pct": 0.2, "pct_india_up_days": 64.0, "pct_gap_same_direction_as_us": 71.0,
@@ -32,15 +55,6 @@ SAMPLE = {
          "corr_us_return_india_gap": 0.2},
     ],
     "study_start": [{"first_day": "2024-11-12"}],
-    "global": [
-        {"instrument": "NIKKEI225", "obs_date": "2026-11-06", "value": 50120.0, "change_pct": 0.84, "change_abs": 418.0},
-        {"instrument": "VGK", "obs_date": "2026-11-06", "value": 72.1, "change_pct": -0.31, "change_abs": -0.22},
-        {"instrument": "FXI", "obs_date": "2026-11-06", "value": 38.0, "change_pct": 1.2, "change_abs": 0.45},
-        {"instrument": "VIXCLS", "obs_date": "2026-11-06", "value": 17.4, "change_pct": -6.0, "change_abs": -1.1},
-        {"instrument": "DCOILBRENTEU", "obs_date": "2026-11-02", "value": 68.25, "change_pct": -0.9, "change_abs": -0.6},
-        {"instrument": "DGS10", "obs_date": "2026-11-06", "value": 4.12, "change_pct": 0.7, "change_abs": 0.03},
-        {"instrument": "DEXINUS", "obs_date": "2026-10-30", "value": 88.12, "change_pct": 0.1, "change_abs": 0.09},
-    ],
     "unusual_in": [
         {"symbol": "ABC&CO", "trade_date": "2026-11-06", "close": 120.0, "return_pct": 4.3, "volume_ratio": 5.2},
         {"symbol": "XYZ", "trade_date": "2026-11-06", "close": 50.0, "return_pct": -2.1, "volume_ratio": 3.4},
@@ -48,21 +62,48 @@ SAMPLE = {
 }
 
 
+def pre_blocks(msg):
+    return re.findall(r"<pre>(.*?)</pre>", msg, re.S)
+
+
 class BuildMessage(unittest.TestCase):
-    def test_full_message(self):
-        msg = premarket.build_message(SAMPLE, dt.date(2026, 11, 9))
-        self.assertIn("Pre-market brief · Mon 09 Nov 2026", msg)
-        self.assertIn("US session (Fri 06 Nov)", msg)
-        self.assertIn("S&amp;P 500 (SPY) +1.42%", msg)
-        self.assertIn("3,210 up / 1,980 down", msg)
-        self.assertIn("After a <i>big US up day</i> (48 sessions since Tue 12 Nov)", msg)
-        self.assertIn("NIFTYBEES opened +0.35%", msg)
-        self.assertIn("INFY +2.30% · HDB -0.40%", msg)
-        self.assertIn("1. ABC&amp;CO · 5.2× avg volume · +4.3%", msg)  # symbol HTML-escaped
-        self.assertNotIn("⚠️", msg)
-        self.assertIn("Nikkei 225 +0.84% · Europe -0.31% · China +1.20%", msg)
-        self.assertIn("VIX 17.4 (-1.1) · Brent $68.2 (-0.9%) (as of Mon 02 Nov) · US 10Y 4.12% (+3 bp)", msg)
-        self.assertIn("USD/INR 88.12 (as of Fri 30 Oct)", msg)
+    def setUp(self):
+        self.msg = premarket.build_message(SAMPLE, dt.date(2026, 11, 9))
+
+    def test_header_and_takeaways(self):
+        m = self.msg
+        self.assertIn("📊 <b>Pre-market brief</b> · Mon 09 Nov 2026", m)
+        self.assertIn("<i>Markets as of the Fri 06 Nov close</i>", m)
+        self.assertIn("• <b>US:</b> S&amp;P +1.42%, Nasdaq +1.91%, a big US up day.", m)
+        self.assertIn("• <b>World:</b> weakest Japan -5.96%, strongest Korea +4.07%.", m)
+        self.assertIn("• <b>Risk:</b> VIX 28.2 (+11.6), elevated · Brent $107 · USD/INR 94.94.", m)
+        self.assertIn("• <b>India:</b> after similar US days, NIFTYBEES opened +0.35% on average.", m)
+        self.assertNotIn("⚠️", m)
+
+    def test_tables_are_aligned_and_escaped(self):
+        blocks = pre_blocks(self.msg)
+        self.assertEqual(len(blocks), 6)  # US, world, macro, India stats, ADRs, unusual
+        for block in blocks:
+            rows = block.split("\n")
+            self.assertLessEqual(max(len(r) for r in rows), 40, block)  # fits a phone screen
+        world = blocks[1]
+        self.assertIn("Japan", world)
+        self.assertIn("Europe*", world)  # earlier session than the US close
+        self.assertRegex(world, r"Korea\s+\+4\.07\s+\+6\.20")
+        self.assertIn("ABC&amp;CO", blocks[5])  # escaped inside <pre>
+        self.assertIn("* = earlier session.", self.msg)
+
+    def test_macro_formats(self):
+        macro = pre_blocks(self.msg)[2]
+        self.assertRegex(macro, r"VIX\s+28\.20\s+\+11\.6\s+06 Nov")
+        self.assertRegex(macro, r"US 10Y\s+4\.84%\s+-6bp\s+06 Nov")
+        self.assertRegex(macro, r"USD/INR\s+94\.94\s+\+0\.1%\s+30 Oct")
+        self.assertRegex(macro, r"EUR/USD\s+1\.0712\s+-0\.2%\s+30 Oct")
+
+    def test_india_setup_and_linked(self):
+        self.assertIn("After a <i>big US up day</i> (48 sessions since Nov 2024):", self.msg)
+        self.assertRegex(pre_blocks(self.msg)[3], r"Avg opening gap\s+\+0\.35%")
+        self.assertIn("Most linked to India's open: Korea +4.1% (r=0.41) · Japan -6.0% (r=0.37)", self.msg)
 
     def test_flat_day_uses_flat_bucket(self):
         data = json.loads(json.dumps(SAMPLE))
@@ -80,7 +121,10 @@ class BuildMessage(unittest.TestCase):
         self.assertIn("No US index data.", msg)
         self.assertIn("Not enough history", msg)
         self.assertIn("None above the threshold.", msg)
-        self.assertNotIn("<b>Global</b>", msg)  # section hidden when there is no global data
+        self.assertNotIn("World markets", msg)
+
+    def test_fits_one_telegram_message(self):
+        self.assertLess(len(self.msg), telegram.MAX_LENGTH)
 
     def test_handler_dry_run_does_not_send(self):
         with mock.patch.object(databricks_sql, "query", side_effect=lambda sql: []), \
@@ -106,9 +150,9 @@ class SoftFailure(unittest.TestCase):
         send.assert_called_once()
         self.assertEqual(out["failed_queries"], ["global"])
         msg = send.call_args.args[0]
-        self.assertIn("⚠️ Unavailable today: global markets", msg)
-        self.assertIn("S&amp;P 500 (SPY) +1.42%", msg)   # the rest of the brief is intact
-        self.assertNotIn("<b>Global</b>", msg)
+        self.assertIn("⚠️ Unavailable today: world markets", msg)
+        self.assertIn("S&amp;P 500", msg)  # the rest of the brief is intact
+        self.assertNotIn("World markets", msg)
 
 
 class DatabricksSql(unittest.TestCase):
