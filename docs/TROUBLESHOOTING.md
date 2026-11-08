@@ -181,6 +181,26 @@ outright: a missing table only drops its section, and the message says "⚠️ U
 
 The pipeline is behind. Check the Massive fetcher log and the `stocks-refresh` job runs.
 
+## Paper trading tables
+
+### The Paper trading page shows `TABLE_OR_VIEW_NOT_FOUND`
+**Cause:** The pipeline hasn't run since the trading tables were deployed.
+**Fix:** Run the `stocks-refresh` job once (Jobs & Pipelines → stocks-refresh → Run now). The tables stay
+empty until the first 15:45 export from paper-trader.
+
+### No trades for a day that had trading
+**Cause:** The 15:45 export didn't run or failed (e.g. expired Databricks pusher token).
+**Fix:** In paper-trader, check `aws logs tail /aws/lambda/stocks-trader-guardian --since 1d --region ap-southeast-2`,
+then re-send the day: see paper-trader's OPERATIONS.md ("Re-send a day to the lakehouse"). Re-sends replace the
+day's file; silver keeps one copy per `event_id`, so nothing is double-counted.
+
+### `trading_daily.reconciliation` says `MISMATCH`
+**Cause:** The P&L rebuilt from the day's events differs from the trader ledger's own figure by Rs 1 or more:
+an event is missing from the export, or the ledger was edited or reset during the day.
+**Fix:** Compare `reconciliation_diff_rs` with the trader's S3 copy (`exports/date=<day>/events.jsonl`) and
+`state/ledger.json` history (the bucket is versioned). Re-export the day if the journal has more events than
+the volume file.
+
 ## GitHub / CI
 
 ### `git push` rejected (`fetch first` / non-fast-forward)

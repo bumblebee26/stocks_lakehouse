@@ -26,6 +26,10 @@ flowchart TB
         end
         S3[("<b>S3 landing bucket</b><br/>landing/&lt;source&gt;/date=YYYY-MM-DD/<br/>private · encrypted · versioned")]
         SSM[["<b>SSM Parameter Store</b><br/>API keys · tokens · workspace URL"]]
+        subgraph PT["paper-trader · same account (bumblebee26/paper-trader)"]
+            direction LR
+            GUARD["stocks-trader-guardian<br/><i>15:45 journal export</i>"]
+        end
     end
 
     subgraph DBX["Databricks Free Edition · Unity Catalog: stocks"]
@@ -34,9 +38,9 @@ flowchart TB
         JOB["<b>Job: stocks-refresh</b><br/>file-arrival trigger"]
         subgraph PIPE["Lakeflow pipeline: stocks-medallion (serverless)"]
             direction LR
-            BR["<b>Bronze</b><br/>3 streaming tables<br/>Auto Loader"]
-            SI["<b>Silver</b><br/>6 materialized views<br/>typed · de-duplicated · DQ"]
-            GO["<b>Gold</b><br/>8 materialized views<br/>insights"]
+            BR["<b>Bronze</b><br/>4 streaming tables<br/>Auto Loader"]
+            SI["<b>Silver</b><br/>7 materialized views<br/>typed · de-duplicated · DQ"]
+            GO["<b>Gold</b><br/>13 materialized views<br/>markets + paper trading"]
             BR --> SI --> GO
         end
         WH["<b>SQL warehouse</b>"]
@@ -44,6 +48,7 @@ flowchart TB
     end
 
     TG["<b>Telegram</b><br/>pre-market brief"]
+    SESS["<b>paper-trader session</b><br/>GitHub Actions · Claude Code"]
 
     subgraph CTRL["Control plane"]
         direction LR
@@ -67,6 +72,8 @@ flowchart TB
     SCH -- "7 · invoke" --> PM
     PM -- "8 · SQL Statement API" --> WH
     PM -- "9 · send" --> TG
+    GUARD -- "10 · journal (Files API)" --> VOL
+    SESS -- "11 · SQL (pre-market context)" --> WH
     SSM -. "secrets at runtime" .-> LAMBDAS
     GHA -. "terraform apply" .-> AWS
     GHA -. "terraform apply" .-> DBX
@@ -88,4 +95,6 @@ flowchart TB
     class SI silver
     class GO gold
     class DASH,TG out
+    classDef trader fill:#f5f3ff,stroke:#8b5cf6,color:#2e1065
+    class GUARD,SESS trader
     class GH,GHA,TFS ctrl

@@ -1,6 +1,7 @@
 # Architecture diagrams
 
-Four views of the stocks lakehouse, from the simplest to the most detailed. Each diagram is followed by an
+Five views of the stocks lakehouse, from the simplest to the most detailed, plus the platform it shares with
+[paper-trader](https://github.com/bumblebee26/paper-trader). Each diagram is followed by an
 explanation of what it shows and how to read it.
 
 | # | Diagram | Answers |
@@ -9,6 +10,7 @@ explanation of what it shows and how to read it.
 | 2 | [Architecture](#2-architecture) | Which components exist, where do they run, and how does data move between them? |
 | 3 | [Data lineage](#3-data-lineage) | Which table is built from which, from raw file to insight? |
 | 4 | [CI/CD flow](#4-cicd-flow) | How does a change get from a commit into production? |
+| 5 | [Platform with paper-trader](#5-platform-with-paper-trader) | How do the lakehouse and the paper trader fit together? |
 
 The diagrams are written in Mermaid (`docs/diagrams/*.mmd`) and rendered to SVG and PNG. To change one, edit
 its `.mmd` file and re-render (see [Updating the diagrams](#updating-the-diagrams)).
@@ -45,7 +47,8 @@ bucket, but outbound calls from Lambda are allowed.
 | **External data sources** | NSE archives, Massive API, FRED API | NSE needs browser-like headers; Massive and FRED need free API keys. |
 | **AWS account** (free plan, `ap-southeast-2` Sydney) | EventBridge Scheduler, 5 Lambda functions, S3 landing bucket, SSM Parameter Store | The free plan only allows the project's region (plus `us-east-1` / `us-west-2`), so everything runs in Sydney. |
 | **Databricks Free Edition** (Unity Catalog `stocks`) | Volume, refresh job, Lakeflow pipeline (bronze → silver → gold), SQL warehouse, dashboard | Serverless only. One pipeline, one job. |
-| **Telegram** | Your chat with the bot | Receives the brief. |
+| **Telegram** | Your chat with the bot | Receives the brief (and the paper trader's messages, same bot). |
+| **paper-trader** (purple) | `stocks-trader-guardian` Lambda in the same account; the trading session in GitHub Actions | Not managed by this repo. Shown where it touches the lakehouse: flows 10 and 11. |
 | **Control plane** | GitHub, GitHub Actions, Terraform state in S3 | Deploys everything above. Not involved in the daily data flow. |
 
 ### Lambda functions
@@ -74,6 +77,8 @@ with the remaining dates, so one command can load years.
 | **7** | Scheduler → brief | At 08:45 IST the brief Lambda starts. |
 | **8** | Brief → SQL warehouse | It runs about 8 queries on gold tables through the SQL Statement API. If one fails, that section is skipped and the message says so. |
 | **9** | Brief → Telegram | The formatted message (takeaways, tables) is sent through the Telegram Bot API. |
+| **10** | Guardian → Volume | At 15:45 IST paper-trader's guardian Lambda pushes the day's trade journal to `landing/trades/date=YYYY-MM-DD/events.jsonl` with the same Files API and pusher token. Steps 5–6 then build the trading tables. |
+| **11** | Session → SQL warehouse | Around 09:10 IST the trading session reads the same gold tables as the brief (US move, VIX, India's usual gap, unusual volume, ADRs) to set the day's risk and focus list. |
 
 Dotted arrows are not part of the daily run: **secrets at runtime** (SSM → Lambdas), the manual **sync**
 path (S3 → sync → volume), and **terraform apply** from GitHub Actions into both clouds.
@@ -105,6 +110,7 @@ columns are kept as delivered, plus lineage columns (`_source_file`, `_ingested_
   case-insensitive Delta).
 - `fred_observations_raw`: one row per series per date, with an explicit schema so it works even before the
   first file.
+- `trades_raw`: one row per paper-trader journal event (dummy money), explicit schema.
 
 **Silver**: cleaned and unified.
 - `nse_eq_daily` and `us_daily` type the data, drop bad rows (data-quality expectations: positive prices,
@@ -114,6 +120,7 @@ columns are kept as delivered, plus lineage columns (`_source_file`, `_ingested_
 - `trading_days` is each market's calendar, derived from the data.
 - `fred_daily` de-duplicates FRED; **`global_daily`** combines it with 12 US-listed country ETFs from
   `us_daily` into one long table of world instruments.
+- `trade_events` types the paper-trader events and keeps the newest copy of each `event_id`.
 
 **Gold**: the insights.
 
@@ -125,6 +132,10 @@ columns are kept as delivered, plus lineage columns (`_source_file`, `_ingested_
 | `adr_premium` | daily_bars + fred_daily (USD/INR) | Are Indian ADRs rich or cheap versus their NSE shares? |
 | `global_markets_daily` → `global_snapshot` | global_daily | How did each world market move (1/5/20 days), and what's the latest? |
 | `india_vs_global` | global_markets_daily + nifty_after_us_moves | Which world markets' moves line up with India's next open? |
+| **`trades`** | trade_events | Each paper trade from entry to exit: net P&L, R multiple |
+| `trading_daily` | trades + trade_events | Each day's activity and P&L, reconciled against the trader's ledger |
+| `trading_by_setup`, `trading_by_hour` | trades | Which setups and hours make money? |
+| `trading_decisions` | trades + trade_events | Did the YES/NO choices help? |
 
 Column-level detail: [DATA_MODEL.md](DATA_MODEL.md).
 
@@ -154,6 +165,27 @@ More detail: [OPERATIONS.md](OPERATIONS.md#making-a-change).
 
 ---
 
+## 5. Platform with paper-trader
+
+![Platform: stocks_lakehouse and paper-trader across AWS, GitHub Actions, Databricks and Telegram](diagrams/05_platform.png)
+
+The lakehouse and [paper-trader](https://github.com/bumblebee26/paper-trader) share one AWS account (free
+plan, Sydney), one Databricks workspace, one Telegram bot and the same CI/CD pattern. They meet at two points:
+
+| When (IST) | Direction | What |
+|---|---|---|
+| ~09:10 | lakehouse → trader | The trading session reads gold tables over SQL to set the day's risk (from VIX), bias (India's usual gap after similar US days) and focus list (unusual volume, ADR moves). |
+| 15:45 | trader → lakehouse | The guardian Lambda pushes the day's journal to `landing/trades/`; the pipeline builds the `trad*` gold tables and the dashboard's Paper trading page. |
+
+Shared resources: the Terraform state bucket (trader key `paper-trader/aws/…`), the CI users
+`stocks-gha-plan` / `stocks-gha-apply` (trader resources are named `stocks-trader-*` so the apply user may
+manage them), and the `/stocks/telegram-*` and `/stocks/databricks-*` parameters. Secrets and deployments are
+left out of this picture; see [ARCHITECTURE.md](ARCHITECTURE.md#security-model) and [diagram 4](#4-cicd-flow).
+
+The same `.mmd` file is in paper-trader as `docs/diagrams/01_platform.mmd`; change both together.
+
+---
+
 ## Updating the diagrams
 
 The sources are in `docs/diagrams/`:
@@ -164,6 +196,7 @@ The sources are in `docs/diagrams/`:
 | `02_architecture.mmd` | Architecture (ELK layout) |
 | `03_lineage.mmd` | Data lineage (ELK layout) |
 | `04_cicd.mmd` | CI/CD flow |
+| `05_platform.mmd` | Platform with paper-trader (ELK layout; identical copy in paper-trader) |
 | `theme.json` | Shared fonts and colours |
 
 Edit the `.mmd` file, then re-render SVG and PNG with the Mermaid CLI
@@ -178,4 +211,4 @@ Commit both the `.mmd` source and the rendered files. The pages embed the PNGs, 
 viewer. The SVGs are there for zooming without blur; open them directly in a browser.
 
 Colour key used throughout: **blue**: external sources and CI checks; **orange**: AWS; **red**: Databricks;
-**bronze / silver / gold**: medallion layers; **green**: outputs and deployments; **grey**: control plane.
+**bronze / silver / gold**: medallion layers; **green**: outputs and deployments; **grey**: control plane; **purple**: paper-trader.

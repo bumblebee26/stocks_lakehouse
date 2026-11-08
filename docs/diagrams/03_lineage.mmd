@@ -11,6 +11,7 @@ flowchart LR
         LN["nse/*.csv"]
         LM["massive/*.json"]
         LF["fred/*.json"]
+        LT["trades/*.jsonl<br/><i>paper-trader</i>"]
     end
 
     subgraph B["🥉 Bronze · streaming tables"]
@@ -18,6 +19,7 @@ flowchart LR
         B1["nse_bhavcopy_raw"]
         B2["massive_grouped_raw"]
         B3["fred_observations_raw"]
+        B4["trades_raw"]
     end
 
     subgraph S["🥈 Silver · materialized views"]
@@ -28,6 +30,7 @@ flowchart LR
         S4["trading_days"]
         S5["fred_daily"]
         S6["<b>global_daily</b><br/><i>FRED + 12 country ETFs</i>"]
+        S7["trade_events"]
     end
 
     subgraph G["🥇 Gold · materialized views"]
@@ -40,6 +43,11 @@ flowchart LR
         G6["global_markets_daily"]
         G7["global_snapshot"]
         G8["india_vs_global"]
+        G9["<b>trades</b>"]
+        G10["trading_daily<br/><i>+ reconciliation</i>"]
+        G11["trading_by_setup"]
+        G12["trading_by_hour"]
+        G13["trading_decisions"]
     end
 
     LN --> B1 --> S1 --> S3
@@ -55,12 +63,19 @@ flowchart LR
     S6 --> G6 --> G7
     G6 --> G8
     G3 --> G8
+    LT --> B4 --> S7 --> G9
+    G9 --> G10
+    S7 --> G10
+    G9 --> G11
+    G9 --> G12
+    G9 --> G13
+    S7 --> G13
 
     classDef land fill:#fff7ed,stroke:#f59e0b,color:#451a03
     classDef bronze fill:#f5e6d3,stroke:#b45309,color:#451a03
     classDef silver fill:#eef2f6,stroke:#64748b,color:#0f172a
     classDef gold fill:#fef9c3,stroke:#ca8a04,color:#422006
-    class LN,LM,LF land
-    class B1,B2,B3 bronze
-    class S1,S2,S3,S4,S5,S6 silver
-    class G1,G2,G3,G4,G5,G6,G7,G8 gold
+    class LN,LM,LF,LT land
+    class B1,B2,B3,B4 bronze
+    class S1,S2,S3,S4,S5,S6,S7 silver
+    class G1,G2,G3,G4,G5,G6,G7,G8,G9,G10,G11,G12,G13 gold

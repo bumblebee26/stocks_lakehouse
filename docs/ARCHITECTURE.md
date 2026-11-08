@@ -8,6 +8,10 @@ Each component and numbered flow in this diagram is explained in
 [ARCHITECTURE_DIAGRAMS.md](ARCHITECTURE_DIAGRAMS.md#2-architecture), which also has the base, lineage and
 CI/CD diagrams.
 
+This repo is half of a platform: [paper-trader](https://github.com/bumblebee26/paper-trader) reads the gold
+tables before the market opens and sends its trade journal back at 15:45 IST. How the two fit together:
+[diagram 5](ARCHITECTURE_DIAGRAMS.md#5-platform-with-paper-trader).
+
 ## Components
 
 | Component | What it does |

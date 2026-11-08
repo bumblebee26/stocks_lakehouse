@@ -10,8 +10,9 @@ a dashboard, and sends a **pre-market brief to Telegram** before the Indian mark
 
 **Diagrams with explanations:** [docs/ARCHITECTURE_DIAGRAMS.md](docs/ARCHITECTURE_DIAGRAMS.md)
 covers the base view above, the full [architecture](docs/ARCHITECTURE_DIAGRAMS.md#2-architecture),
-[data lineage](docs/ARCHITECTURE_DIAGRAMS.md#3-data-lineage) (all 17 tables) and the
-[CI/CD flow](docs/ARCHITECTURE_DIAGRAMS.md#4-cicd-flow).
+[data lineage](docs/ARCHITECTURE_DIAGRAMS.md#3-data-lineage) (all 24 tables) and the
+[CI/CD flow](docs/ARCHITECTURE_DIAGRAMS.md#4-cicd-flow), and the
+[platform shared with paper-trader](docs/ARCHITECTURE_DIAGRAMS.md#5-platform-with-paper-trader).
 
 ## What you get
 
@@ -57,7 +58,7 @@ docs/              Full documentation (below); docs/diagrams/ holds the diagram 
 
 | Doc | Read it when |
 |---|---|
-| [docs/ARCHITECTURE_DIAGRAMS.md](docs/ARCHITECTURE_DIAGRAMS.md) | You want the picture: base, architecture, lineage and CI/CD diagrams, each explained |
+| [docs/ARCHITECTURE_DIAGRAMS.md](docs/ARCHITECTURE_DIAGRAMS.md) | You want the picture: base, architecture, lineage, CI/CD and platform diagrams, each explained |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | You want to understand how it fits together and why it's built this way |
 | [docs/SETUP.md](docs/SETUP.md) | You're building it from scratch: every step, in order, with Windows commands |
 | [docs/OPERATIONS.md](docs/OPERATIONS.md) | Day to day: making changes, backfills, monitoring, rotating secrets |
