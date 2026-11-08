@@ -55,7 +55,7 @@ jobs:
       matrix:
         stack: [aws, databricks]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -130,7 +130,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -155,7 +155,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:

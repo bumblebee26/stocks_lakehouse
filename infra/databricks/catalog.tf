@@ -19,7 +19,7 @@ resource "databricks_catalog" "stocks" {
 
   # The UI assigns Default Storage; don't let Terraform try to change or replace it.
   lifecycle {
-    ignore_changes = [storage_root, comment]
+    ignore_changes  = [storage_root, comment]
     prevent_destroy = true
   }
 }

@@ -77,10 +77,10 @@ locals {
     ]
 
     pages = [{
-      name           = "overview"
-      displayName    = "Overview"
-      pageType       = "PAGE_TYPE_CANVAS"
-      layoutVersion  = "GRID_V1"
+      name          = "overview"
+      displayName   = "Overview"
+      pageType      = "PAGE_TYPE_CANVAS"
+      layoutVersion = "GRID_V1"
       layout = [
         {
           widget = {
@@ -95,8 +95,8 @@ locals {
             queries = [{
               name = "main_query"
               query = {
-                datasetName    = "breadth"
-                disaggregated  = false
+                datasetName   = "breadth"
+                disaggregated = false
                 fields = [
                   { name = "trade_date", expression = "`trade_date`" },
                   { name = "market", expression = "`market`" },
