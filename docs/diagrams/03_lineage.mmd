@@ -1,0 +1,66 @@
+---
+config:
+  layout: elk
+  elk:
+    mergeEdges: false
+    nodePlacementStrategy: NETWORK_SIMPLEX
+---
+flowchart LR
+    subgraph LAND["Landing volume"]
+        direction TB
+        LN["nse/*.csv"]
+        LM["massive/*.json"]
+        LF["fred/*.json"]
+    end
+
+    subgraph B["🥉 Bronze · streaming tables"]
+        direction TB
+        B1["nse_bhavcopy_raw"]
+        B2["massive_grouped_raw"]
+        B3["fred_observations_raw"]
+    end
+
+    subgraph S["🥈 Silver · materialized views"]
+        direction TB
+        S1["nse_eq_daily"]
+        S2["us_daily"]
+        S3["<b>daily_bars</b><br/><i>India + US, one schema</i>"]
+        S4["trading_days"]
+        S5["fred_daily"]
+        S6["<b>global_daily</b><br/><i>FRED + 12 country ETFs</i>"]
+    end
+
+    subgraph G["🥇 Gold · materialized views"]
+        direction TB
+        G1["unusual_volume"]
+        G2["market_breadth"]
+        G3["nifty_after_us_moves"]
+        G4["nifty_after_us_moves_summary"]
+        G5["adr_premium"]
+        G6["global_markets_daily"]
+        G7["global_snapshot"]
+        G8["india_vs_global"]
+    end
+
+    LN --> B1 --> S1 --> S3
+    LM --> B2 --> S2 --> S3
+    LF --> B3 --> S5 --> S6
+    S2 --> S6
+    S3 --> S4
+    S3 --> G1
+    S3 --> G2
+    S3 --> G3 --> G4
+    S3 --> G5
+    S5 -- "USD/INR" --> G5
+    S6 --> G6 --> G7
+    G6 --> G8
+    G3 --> G8
+
+    classDef land fill:#fff7ed,stroke:#f59e0b,color:#451a03
+    classDef bronze fill:#f5e6d3,stroke:#b45309,color:#451a03
+    classDef silver fill:#eef2f6,stroke:#64748b,color:#0f172a
+    classDef gold fill:#fef9c3,stroke:#ca8a04,color:#422006
+    class LN,LM,LF land
+    class B1,B2,B3 bronze
+    class S1,S2,S3,S4,S5,S6 silver
+    class G1,G2,G3,G4,G5,G6,G7,G8 gold

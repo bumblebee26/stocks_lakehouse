@@ -2,52 +2,11 @@
 
 ## Overview
 
-```mermaid
-flowchart TB
-    subgraph src["Sources (public APIs)"]
-        NSE["NSE archives<br/>BhavCopy_NSE_CM_..._F_0000.csv.zip"]
-        MAS["Massive API<br/>/v2/aggs/grouped/.../{date}"]
-        FRED["FRED API<br/>/fred/series/observations"]
-    end
+![Architecture](diagrams/02_architecture.png)
 
-    subgraph aws["AWS account (free plan, ap-southeast-2)"]
-        SCH["EventBridge Scheduler<br/>(Asia/Kolkata cron)"]
-        FN["Lambda: stocks-fetch-nse<br/>stocks-fetch-massive<br/>stocks-fetch-fred"]
-        SYNC["Lambda: stocks-sync-volume<br/>(manual, repair/backfill)"]
-        PM["Lambda: stocks-premarket-brief"]
-        S3[("S3 stocks-lakehouse-landing-&lt;acct&gt;<br/>landing/&lt;source&gt;/date=YYYY-MM-DD/")]
-        SSM[["SSM Parameter Store<br/>API keys, tokens, URLs"]]
-        SCH --> FN
-        SCH --> PM
-        FN --> S3
-        SYNC -. reads .-> S3
-        FN -. reads .-> SSM
-        PM -. reads .-> SSM
-    end
-
-    subgraph dbx["Databricks workspace (Free Edition)"]
-        VOL[("Volume stocks.bronze.landing")]
-        JOB["Job stocks-refresh<br/>(file-arrival trigger)"]
-        subgraph pipe["Lakeflow pipeline stocks-medallion (serverless)"]
-            BR["Bronze: streaming tables<br/>Auto Loader"]
-            SI["Silver: materialized views<br/>typed, de-duplicated, quality-checked"]
-            GO["Gold: materialized views<br/>insights"]
-            BR --> SI --> GO
-        end
-        WH["SQL warehouse"]
-        DASH["Dashboard"]
-        VOL --> JOB --> pipe
-        GO --> WH --> DASH
-    end
-
-    NSE --> FN
-    MAS --> FN
-    FRED --> FN
-    FN -- "Files API (push)" --> VOL
-    SYNC -- "Files API (push)" --> VOL
-    PM -- "SQL Statement API" --> WH
-    PM --> TG["Telegram Bot API"]
-```
+Each component and numbered flow in this diagram is explained in
+[ARCHITECTURE_DIAGRAMS.md](ARCHITECTURE_DIAGRAMS.md#2-architecture), which also has the base, lineage and
+CI/CD diagrams.
 
 ## Components
 
