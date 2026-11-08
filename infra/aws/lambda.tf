@@ -27,6 +27,9 @@ data "archive_file" "fetchers" {
   source_dir  = "${path.module}/../../fetchers"
   output_path = "${path.module}/build/fetchers.zip"
   excludes    = ["__pycache__"]
+
+  # Same permissions on Windows and Linux so the zip hash matches across machines.
+  output_file_mode = "0644"
 }
 
 resource "aws_cloudwatch_log_group" "fetcher" {
