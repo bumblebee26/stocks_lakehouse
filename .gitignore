@@ -44,3 +44,4 @@ infra/aws/brief.json
 # Terraform plan output (CI)
 **/plan.txt
 **/tfplan
+infra/aws/fred_bf.json

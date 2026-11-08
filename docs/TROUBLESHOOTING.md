@@ -169,6 +169,14 @@ Check in order:
    least one message.
 4. A cold SQL warehouse can take a minute or two to start; the Lambda waits up to 4 minutes.
 
+### `TABLE_OR_VIEW_NOT_FOUND` for a gold table (e.g. `stocks.gold.global_snapshot`)
+
+**Cause:** New tables only exist after the pipeline has run with the new code. Merging deploys the code; the
+tables appear on the next pipeline run (triggered by the next file, or **Run now**). It also happens if that run
+failed.
+**Fix:** Run the `stocks-refresh` job (or the pipeline) and check every table is green. The brief no longer fails
+outright: a missing table only drops its section, and the message says "⚠️ Unavailable today: ...".
+
 ### Message says "⚠️ Latest US data is from ..."
 
 The pipeline is behind. Check the Massive fetcher log and the `stocks-refresh` job runs.
