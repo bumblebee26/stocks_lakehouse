@@ -9,6 +9,13 @@
   stocks.gold.global_snapshot              latest reading per global instrument
   stocks.gold.india_vs_global              which global moves line up with India's next open
 
+Paper trading (dummy money, from bumblebee26/paper-trader via stocks.silver.trade_events):
+  stocks.gold.trades                       one row per trade: entry, exit, net P&L, R multiple
+  stocks.gold.trading_daily                per day: activity, P&L, balance, reconciliation vs the ledger
+  stocks.gold.trading_by_setup             results per setup and side
+  stocks.gold.trading_by_hour              results per entry hour (IST)
+  stocks.gold.trading_decisions            your YES/NO choices: taken trades vs what skipped ones would have made
+
 Market proxies (no index data in these sources): NIFTYBEES (Nifty 50 ETF on NSE)
 and SPY (S&P 500 ETF). Change them with pipeline configuration keys
 stocks.india_proxy / stocks.us_proxy.
@@ -423,4 +430,241 @@ def india_vs_global():
             (100 * F.avg(same_dir)).alias("pct_same_direction_gap"),
         )
         .filter(F.col("sessions") >= 30)
+    )
+
+
+# ===========================================================================
+# Paper trading (dummy money). Source: stocks.silver.trade_events
+# ===========================================================================
+# Money flow in the trader's ledger, which these tables reproduce:
+#   fill:  balance -= brokerage                         (fees_rs on the 'filled' event)
+#   exit:  balance += gross P&L - brokerage             (pnl_rs on 'exited'/'squared_off' is already net
+#                                                         of the exit brokerage; fees_rs shows it)
+#   net P&L of a trade = exit pnl_rs - entry fees_rs
+# Slippage is already inside the fill and exit prices.
+
+
+def _trade_events_df():
+    return spark.read.table("stocks.silver.trade_events")  # noqa: F821
+
+
+# SQL equivalent:
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.trades AS
+#   WITH fills AS (
+#     SELECT trade_date, proposal_id, symbol, setup, side, qty, risk_rs, entry AS planned_entry, stop, target,
+#            fill_price AS entry_price, event_ts AS entry_time, fees_rs AS entry_fees_rs
+#     FROM stocks.silver.trade_events WHERE event = 'filled'),
+#   exits AS (
+#     SELECT trade_date, proposal_id, exit_price, exit_reason, event_ts AS exit_time,
+#            pnl_rs AS exit_pnl_rs, fees_rs AS exit_fees_rs
+#     FROM stocks.silver.trade_events WHERE event IN ('exited', 'squared_off'))
+#   SELECT f.*, e.exit_price, e.exit_reason, e.exit_time,
+#          CASE WHEN e.proposal_id IS NULL THEN 'open' ELSE 'closed' END            AS status,
+#          e.exit_pnl_rs - f.entry_fees_rs                                          AS net_pnl_rs,
+#          f.entry_fees_rs + coalesce(e.exit_fees_rs, 0)                            AS fees_rs,
+#          (e.exit_pnl_rs - f.entry_fees_rs) / f.risk_rs                            AS r_multiple,
+#          (unix_timestamp(e.exit_time) - unix_timestamp(f.entry_time)) / 60        AS holding_minutes,
+#          hour(f.entry_time)                                                       AS entry_hour,
+#          e.exit_pnl_rs - f.entry_fees_rs > 0                                      AS is_win
+#   FROM fills f LEFT JOIN exits e USING (trade_date, proposal_id);
+@dp.materialized_view(
+    name="stocks.gold.trades",
+    comment="Paper trades (dummy money), one row per trade: entry, exit, fees, net P&L, R multiple.",
+    table_properties={"quality": "gold"},
+)
+def trades():
+    ev = _trade_events_df()
+    fills = ev.filter("event = 'filled'").select(
+        "trade_date", "proposal_id", "symbol", "setup", "side", "qty", "risk_rs",
+        F.col("entry").alias("planned_entry"), "stop", "target",
+        F.col("fill_price").alias("entry_price"),
+        F.col("event_ts").alias("entry_time"),
+        F.col("fees_rs").alias("entry_fees_rs"),
+    )
+    exits = ev.filter("event IN ('exited', 'squared_off')").select(
+        "trade_date", "proposal_id", "exit_price", "exit_reason",
+        F.col("event_ts").alias("exit_time"),
+        F.col("pnl_rs").alias("exit_pnl_rs"),
+        F.col("fees_rs").alias("exit_fees_rs"),
+    )
+    net = F.col("exit_pnl_rs") - F.col("entry_fees_rs")
+    return (
+        fills.join(exits, ["trade_date", "proposal_id"], "left")
+        .withColumn("status", F.when(F.col("exit_time").isNull(), "open").otherwise("closed"))
+        .withColumn("net_pnl_rs", net)
+        .withColumn("fees_rs", F.col("entry_fees_rs") + F.coalesce(F.col("exit_fees_rs"), F.lit(0.0)))
+        .withColumn("r_multiple", net / F.col("risk_rs"))
+        .withColumn("holding_minutes",
+                    (F.unix_timestamp("exit_time") - F.unix_timestamp("entry_time")) / 60)
+        .withColumn("entry_hour", F.hour("entry_time"))
+        .withColumn("is_win", net > 0)
+        .drop("exit_pnl_rs")
+    )
+
+
+# SQL equivalent (abridged):
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.trading_daily AS
+#   WITH ev AS (
+#     SELECT trade_date,
+#            count_if(event = 'proposed')                AS proposals,
+#            count_if(event = 'blocked_by_risk_gate')    AS blocked_by_risk_gate,
+#            count_if(event = 'rejected')                AS rejected,
+#            count(DISTINCT CASE WHEN event = 'expired' THEN proposal_id END) AS expired,
+#            count_if(event = 'skipped_after_approval')  AS skipped_after_approval,
+#            count_if(event = 'filled')                  AS trades_opened,
+#            sum(CASE WHEN event IN ('exited','squared_off') THEN pnl_rs END)
+#              - coalesce(sum(CASE WHEN event = 'filled' THEN fees_rs END), 0) AS realized_from_events_rs,
+#            sum(CASE WHEN event = 'passed_outcome' THEN pnl_rs END)           AS passed_hypothetical_pnl_rs
+#     FROM stocks.silver.trade_events GROUP BY trade_date),
+#   t AS (SELECT trade_date, count(*) AS trades_closed, count_if(is_win) AS wins, sum(net_pnl_rs) AS net_pnl_rs,
+#                sum(fees_rs) AS fees_rs FROM stocks.gold.trades WHERE status = 'closed' GROUP BY trade_date),
+#   s AS (SELECT trade_date, balance, starting_capital, realized_today
+#         FROM stocks.silver.trade_events WHERE event = 'ledger_snapshot')
+#   SELECT ev.*, t.trades_closed, t.wins, 100 * t.wins / t.trades_closed AS win_rate_pct, t.net_pnl_rs, t.fees_rs,
+#          s.balance AS end_balance_rs, s.balance - s.starting_capital AS total_pnl_since_start_rs,
+#          s.realized_today AS ledger_realized_rs,
+#          round(coalesce(ev.realized_from_events_rs, 0) - s.realized_today, 2) AS reconciliation_diff_rs,
+#          CASE WHEN s.realized_today IS NULL THEN 'no snapshot'
+#               WHEN abs(coalesce(ev.realized_from_events_rs, 0) - s.realized_today) < 1 THEN 'ok'
+#               ELSE 'MISMATCH' END AS reconciliation
+#   FROM ev LEFT JOIN t USING (trade_date) LEFT JOIN s USING (trade_date);
+@dp.materialized_view(
+    name="stocks.gold.trading_daily",
+    comment="Paper trading per day: proposals and decisions, P&L, end balance, and a reconciliation of "
+            "the P&L rebuilt from events against the trader's S3 ledger snapshot.",
+    table_properties={"quality": "gold"},
+)
+def trading_daily():
+    ev = _trade_events_df()
+
+    def count_if(cond):
+        return F.sum(F.when(F.expr(cond), 1).otherwise(0))
+
+    activity = ev.groupBy("trade_date").agg(
+        count_if("event = 'proposed'").alias("proposals"),
+        count_if("event = 'blocked_by_risk_gate'").alias("blocked_by_risk_gate"),
+        count_if("event = 'rejected'").alias("rejected"),
+        F.countDistinct(F.when(F.col("event") == "expired", F.col("proposal_id"))).alias("expired"),
+        count_if("event = 'skipped_after_approval'").alias("skipped_after_approval"),
+        count_if("event = 'filled'").alias("trades_opened"),
+        (F.coalesce(F.sum(F.when(F.col("event").isin("exited", "squared_off"), F.col("pnl_rs"))), F.lit(0.0))
+         - F.coalesce(F.sum(F.when(F.col("event") == "filled", F.col("fees_rs"))), F.lit(0.0))
+         ).alias("realized_from_events_rs"),
+        F.sum(F.when(F.col("event") == "passed_outcome", F.col("pnl_rs"))).alias("passed_hypothetical_pnl_rs"),
+    )
+    closed = (
+        spark.read.table("stocks.gold.trades")  # noqa: F821
+        .filter("status = 'closed'")
+        .groupBy("trade_date")
+        .agg(
+            F.count("*").alias("trades_closed"),
+            F.sum(F.col("is_win").cast("int")).alias("wins"),
+            F.sum("net_pnl_rs").alias("net_pnl_rs"),
+            F.sum("fees_rs").alias("fees_rs"),
+        )
+    )
+    snap = ev.filter("event = 'ledger_snapshot'").select(
+        "trade_date",
+        F.col("balance").alias("end_balance_rs"),
+        "starting_capital",
+        F.col("realized_today").alias("ledger_realized_rs"),
+    )
+    diff = F.col("realized_from_events_rs") - F.col("ledger_realized_rs")
+    return (
+        activity.join(closed, "trade_date", "left")
+        .join(snap, "trade_date", "left")
+        .withColumn("win_rate_pct", 100 * F.col("wins") / F.col("trades_closed"))
+        .withColumn("total_pnl_since_start_rs", F.col("end_balance_rs") - F.col("starting_capital"))
+        .withColumn("reconciliation_diff_rs", F.round(diff, 2))
+        .withColumn(
+            "reconciliation",
+            F.when(F.col("ledger_realized_rs").isNull(), "no snapshot")
+            .when(F.abs(diff) < 1, "ok")
+            .otherwise("MISMATCH"),
+        )
+        .drop("starting_capital")
+    )
+
+
+def _results(group_cols):
+    t = spark.read.table("stocks.gold.trades").filter("status = 'closed'")  # noqa: F821
+    return (
+        t.groupBy(*group_cols)
+        .agg(
+            F.count("*").alias("trades"),
+            F.sum(F.col("is_win").cast("int")).alias("wins"),
+            F.sum("net_pnl_rs").alias("net_pnl_rs"),
+            F.avg("net_pnl_rs").alias("avg_pnl_per_trade_rs"),
+            F.avg("r_multiple").alias("avg_r_multiple"),
+            F.max("net_pnl_rs").alias("best_trade_rs"),
+            F.min("net_pnl_rs").alias("worst_trade_rs"),
+            F.sum("fees_rs").alias("fees_rs"),
+        )
+        .withColumn("win_rate_pct", 100 * F.col("wins") / F.col("trades"))
+    )
+
+
+# SQL equivalent:
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.trading_by_setup AS
+#   SELECT setup, side, count(*) AS trades, count_if(is_win) AS wins, sum(net_pnl_rs) AS net_pnl_rs,
+#          avg(net_pnl_rs) AS avg_pnl_per_trade_rs, avg(r_multiple) AS avg_r_multiple,
+#          max(net_pnl_rs) AS best_trade_rs, min(net_pnl_rs) AS worst_trade_rs, sum(fees_rs) AS fees_rs,
+#          100 * count_if(is_win) / count(*) AS win_rate_pct
+#   FROM stocks.gold.trades WHERE status = 'closed' GROUP BY setup, side;
+@dp.materialized_view(
+    name="stocks.gold.trading_by_setup",
+    comment="Paper trading results per setup and side (closed trades): win rate, P&L, average R.",
+    table_properties={"quality": "gold"},
+)
+def trading_by_setup():
+    return _results(["setup", "side"])
+
+
+# SQL equivalent: as trading_by_setup, grouped by entry_hour (IST hour of the fill).
+@dp.materialized_view(
+    name="stocks.gold.trading_by_hour",
+    comment="Paper trading results per entry hour (IST), closed trades.",
+    table_properties={"quality": "gold"},
+)
+def trading_by_hour():
+    return _results(["entry_hour"])
+
+
+# SQL equivalent:
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.trading_decisions AS
+#   SELECT trade_date,
+#          count_if(event = 'filled')                                   AS taken,
+#          count_if(event = 'passed_outcome')                           AS passed,
+#          count_if(event = 'passed_outcome' AND user_reply = 'rejected') AS passed_by_no,
+#          count_if(event = 'passed_outcome' AND user_reply = 'expired')  AS passed_by_no_reply,
+#          sum(CASE WHEN event = 'passed_outcome' THEN pnl_rs END)      AS passed_would_have_made_rs,
+#          count_if(event = 'passed_outcome' AND pnl_rs > 0)            AS passed_would_have_won
+#   FROM stocks.silver.trade_events GROUP BY trade_date;
+#   (+ taken_net_pnl_rs from stocks.gold.trades, and saved_by_skipping_rs = -passed_would_have_made_rs)
+@dp.materialized_view(
+    name="stocks.gold.trading_decisions",
+    comment="Your YES/NO decisions per day: P&L of taken trades vs what the skipped proposals would have "
+            "made. saved_by_skipping_rs > 0 means skipping helped.",
+    table_properties={"quality": "gold"},
+)
+def trading_decisions():
+    ev = _trade_events_df()
+    passed = F.col("event") == "passed_outcome"
+    decisions = ev.groupBy("trade_date").agg(
+        F.sum(F.when(F.col("event") == "filled", 1).otherwise(0)).alias("taken"),
+        F.sum(F.when(passed, 1).otherwise(0)).alias("passed"),
+        F.sum(F.when(passed & (F.col("user_reply") == "rejected"), 1).otherwise(0)).alias("passed_by_no"),
+        F.sum(F.when(passed & (F.col("user_reply") == "expired"), 1).otherwise(0)).alias("passed_by_no_reply"),
+        F.sum(F.when(passed, F.col("pnl_rs"))).alias("passed_would_have_made_rs"),
+        F.sum(F.when(passed & (F.col("pnl_rs") > 0), 1).otherwise(0)).alias("passed_would_have_won"),
+    )
+    taken_pnl = (
+        spark.read.table("stocks.gold.trades")  # noqa: F821
+        .filter("status = 'closed'")
+        .groupBy("trade_date")
+        .agg(F.sum("net_pnl_rs").alias("taken_net_pnl_rs"))
+    )
+    return (
+        decisions.join(taken_pnl, "trade_date", "left")
+        .withColumn("saved_by_skipping_rs", -F.coalesce(F.col("passed_would_have_made_rs"), F.lit(0.0)))
     )

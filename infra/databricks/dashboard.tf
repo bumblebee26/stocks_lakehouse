@@ -74,6 +74,63 @@ locals {
       FROM stocks.gold.india_vs_global
       ORDER BY abs(corr_with_india_gap) DESC
     SQL
+
+    # --- Paper trading (dummy money, bumblebee26/paper-trader) ---
+    trading_daily = <<-SQL
+      SELECT trade_date,
+             CAST(proposals AS INT) AS proposals, CAST(trades_opened AS INT) AS trades,
+             CAST(rejected AS INT) AS said_no, CAST(expired AS INT) AS no_reply,
+             round(win_rate_pct, 0)             AS win_rate_pct,
+             round(net_pnl_rs, 0)               AS net_pnl_rs,
+             round(passed_hypothetical_pnl_rs, 0) AS skipped_would_have_made_rs,
+             round(end_balance_rs, 0)           AS end_balance_rs,
+             reconciliation
+      FROM stocks.gold.trading_daily
+      ORDER BY trade_date DESC
+    SQL
+
+    trading_equity = <<-SQL
+      SELECT trade_date, end_balance_rs
+      FROM stocks.gold.trading_daily
+      WHERE end_balance_rs IS NOT NULL
+    SQL
+
+    trading_by_setup = <<-SQL
+      SELECT setup, side, CAST(trades AS INT) AS trades,
+             round(win_rate_pct, 0)          AS win_rate_pct,
+             round(net_pnl_rs, 0)            AS net_pnl_rs,
+             round(avg_pnl_per_trade_rs, 0)  AS avg_pnl_per_trade_rs,
+             round(avg_r_multiple, 2)        AS avg_r_multiple
+      FROM stocks.gold.trading_by_setup
+      ORDER BY net_pnl_rs DESC
+    SQL
+
+    trading_by_hour = <<-SQL
+      SELECT entry_hour, CAST(trades AS INT) AS trades, round(win_rate_pct, 0) AS win_rate_pct,
+             round(net_pnl_rs, 0) AS net_pnl_rs, round(avg_r_multiple, 2) AS avg_r_multiple
+      FROM stocks.gold.trading_by_hour
+      ORDER BY entry_hour
+    SQL
+
+    trading_decisions = <<-SQL
+      SELECT CAST(sum(taken) AS INT)                     AS trades_taken,
+             round(sum(taken_net_pnl_rs), 0)             AS taken_net_pnl_rs,
+             CAST(sum(passed) AS INT)                    AS proposals_skipped,
+             CAST(sum(passed_would_have_won) AS INT)     AS skipped_that_would_have_won,
+             round(sum(passed_would_have_made_rs), 0)    AS skipped_would_have_made_rs,
+             round(sum(saved_by_skipping_rs), 0)         AS saved_by_skipping_rs
+      FROM stocks.gold.trading_decisions
+    SQL
+
+    trading_recent = <<-SQL
+      SELECT trade_date, symbol, side, setup, CAST(qty AS INT) AS qty,
+             entry_price, exit_price, exit_reason,
+             round(net_pnl_rs, 0) AS net_pnl_rs, round(r_multiple, 2) AS r_multiple,
+             round(holding_minutes, 0) AS holding_minutes
+      FROM stocks.gold.trades
+      ORDER BY entry_time DESC
+      LIMIT 50
+    SQL
   }
 
   # Helpers to keep widget definitions short.
@@ -85,6 +142,12 @@ locals {
       adr_latest          = ["adr", "nse_symbol", "trade_date", "adr_close_usd", "nse_close_inr", "implied_inr_per_usd", "relative_premium_pct", "fx_inr_per_usd", "fx_premium_pct"]
       global_latest       = ["region", "name", "instrument", "asset_class", "as_of", "value", "change_pct", "change_5d_pct", "change_20d_pct", "source"]
       india_vs_global     = ["name", "instrument", "region", "asset_class", "sessions", "corr_with_india_gap", "corr_with_india_return", "pct_same_direction_gap"]
+      trading_daily       = ["trade_date", "proposals", "trades", "said_no", "no_reply", "win_rate_pct", "net_pnl_rs", "skipped_would_have_made_rs", "end_balance_rs", "reconciliation"]
+      trading_equity      = ["trade_date", "end_balance_rs"]
+      trading_by_setup    = ["setup", "side", "trades", "win_rate_pct", "net_pnl_rs", "avg_pnl_per_trade_rs", "avg_r_multiple"]
+      trading_by_hour     = ["entry_hour", "trades", "win_rate_pct", "net_pnl_rs", "avg_r_multiple"]
+      trading_decisions   = ["trades_taken", "taken_net_pnl_rs", "proposals_skipped", "skipped_that_would_have_won", "skipped_would_have_made_rs", "saved_by_skipping_rs"]
+      trading_recent      = ["trade_date", "symbol", "side", "setup", "qty", "entry_price", "exit_price", "exit_reason", "net_pnl_rs", "r_multiple", "holding_minutes"]
     } : ds => [for c in cols : { name = c, expression = "`${c}`" }]
   }
 
@@ -241,6 +304,119 @@ locals {
             }
           }
           position = { x = 0, y = 32, width = 12, height = 7 }
+        },
+      ]
+      }, {
+      name          = "paper_trading"
+      displayName   = "Paper trading"
+      pageType      = "PAGE_TYPE_CANVAS"
+      layoutVersion = "GRID_V1"
+      layout = [
+        {
+          widget = {
+            name                 = "trading_title"
+            multilineTextboxSpec = { lines = ["## Paper trading (dummy money)", "Mock NSE intraday trades from bumblebee26/paper-trader, approved on Telegram. Exported daily at 15:45 IST. Reconciliation compares P&L rebuilt from events with the trader's ledger."] }
+          }
+          position = { x = 0, y = 0, width = 12, height = 2 }
+        },
+        {
+          widget = {
+            name = "trading_equity_chart"
+            queries = [{
+              name  = "main_query"
+              query = { datasetName = "trading_equity", disaggregated = true, fields = local.raw_fields.trading_equity }
+            }]
+            spec = {
+              version    = 3
+              widgetType = "line"
+              encodings = {
+                x = { fieldName = "trade_date", scale = { type = "temporal" }, displayName = "Date" }
+                y = { fieldName = "end_balance_rs", scale = { type = "quantitative" }, displayName = "Dummy balance (Rs)" }
+              }
+              frame = { showTitle = true, title = "Equity curve: dummy balance at the end of each day" }
+            }
+          }
+          position = { x = 0, y = 2, width = 12, height = 6 }
+        },
+        {
+          widget = {
+            name = "trading_decisions_table"
+            queries = [{
+              name  = "main_query"
+              query = { datasetName = "trading_decisions", disaggregated = true, fields = local.raw_fields.trading_decisions }
+            }]
+            spec = {
+              version    = 2
+              widgetType = "table"
+              encodings  = { columns = local.table_columns.trading_decisions }
+              frame      = { showTitle = true, title = "Did your YES/NO choices help? (all days)" }
+            }
+          }
+          position = { x = 0, y = 8, width = 12, height = 3 }
+        },
+        {
+          widget = {
+            name = "trading_daily_table"
+            queries = [{
+              name  = "main_query"
+              query = { datasetName = "trading_daily", disaggregated = true, fields = local.raw_fields.trading_daily }
+            }]
+            spec = {
+              version    = 2
+              widgetType = "table"
+              encodings  = { columns = local.table_columns.trading_daily }
+              frame      = { showTitle = true, title = "Day by day (reconciliation: ok = events match the ledger)" }
+            }
+          }
+          position = { x = 0, y = 11, width = 12, height = 7 }
+        },
+        {
+          widget = {
+            name = "trading_by_setup_table"
+            queries = [{
+              name  = "main_query"
+              query = { datasetName = "trading_by_setup", disaggregated = true, fields = local.raw_fields.trading_by_setup }
+            }]
+            spec = {
+              version    = 2
+              widgetType = "table"
+              encodings  = { columns = local.table_columns.trading_by_setup }
+              frame      = { showTitle = true, title = "Results by setup" }
+            }
+          }
+          position = { x = 0, y = 18, width = 12, height = 5 }
+        },
+        {
+          widget = {
+            name = "trading_by_hour_table"
+            queries = [{
+              name  = "main_query"
+              query = { datasetName = "trading_by_hour", disaggregated = true, fields = local.raw_fields.trading_by_hour }
+            }]
+            spec = {
+              version    = 2
+              widgetType = "table"
+              encodings  = { columns = local.table_columns.trading_by_hour }
+              frame      = { showTitle = true, title = "Results by entry hour (IST)" }
+            }
+          }
+          position = { x = 0, y = 23, width = 12, height = 5 }
+        },
+        {
+          widget = {
+            name = "trading_recent_table"
+            queries = [{
+              name  = "main_query"
+              query = { datasetName = "trading_recent", disaggregated = true, fields = local.raw_fields.trading_recent }
+            }]
+            spec = {
+              version    = 2
+              widgetType = "table"
+              encodings  = { columns = local.table_columns.trading_recent }
+              frame      = { showTitle = true, title = "Latest trades" }
+            }
+          }
+          position = { x = 0, y = 28, width = 12, height = 8 }
         },
       ]
     }]

@@ -14,6 +14,7 @@ Same layout in S3 (`s3://stocks-lakehouse-landing-<account-id>/landing/`) and in
 | `nse/date=YYYY-MM-DD/bhavcopy_cm_YYYYMMDD.csv` | Same, unzipped (volume only) | CSV |
 | `massive/date=YYYY-MM-DD/grouped_daily_YYYYMMDD.json` | Massive grouped daily, all US tickers | JSON |
 | `fred/date=YYYY-MM-DD/fred_<start>_<end>.json` | FRED observations for a date range | NDJSON |
+| `trades/date=YYYY-MM-DD/events.jsonl` | Paper-trader journal (dummy money), pushed 15:45 IST by `stocks-trader-guardian` (volume; S3 copy in the trader's own bucket) | NDJSON |
 | `<source>/_README.txt` | Folder marker (volume only) | text |
 
 ## Bronze (streaming tables, Auto Loader)
@@ -26,6 +27,7 @@ Each new file is read once. Every bronze table has these lineage columns: `_sour
 | `bronze.nse_bhavcopy_raw` | instrument × day × file | All UDiFF columns as strings (`TckrSymb`, `SctySrs`, `ISIN`, `OpnPric`, `ClsPric`, `TtlTradgVol`...). Unknown columns go to `_rescued_data`. |
 | `bronze.massive_grouped_raw` | file (one US day) | `results` kept as **JSON text** (fields `T` and `t` clash, see ARCHITECTURE), plus `status`, `resultsCount`, `adjusted`. |
 | `bronze.fred_observations_raw` | series × date × file | `series_id`, `date`, `value`, `name`, `region`, `asset_class`, `unit`. Explicit schema. |
+| `bronze.trades_raw` | event × file | Paper-trader events: `event_id`, `proposal_id`, `timestamp_ist`, `event`, `symbol`, `setup`, `side`, prices, `qty`, `risk_rs`, `pnl_rs`, `fees_rs`, `user_reply`; snapshot fields `balance`, `starting_capital`, `realized_today`. Explicit schema. |
 
 ## Silver (materialized views)
 
@@ -36,10 +38,11 @@ Each new file is read once. Every bronze table has these lineage columns: `_sour
 | `silver.daily_bars` | market × symbol × (series) × day | **Unified India + US**: `market` (`IN`/`US`), `exchange`, `symbol`, `series` (NSE only), `isin`, `trade_date`, OHLC, `prev_close`, `volume`, `turnover`, `vwap`, `trades`, `currency` | — |
 | `silver.trading_days` | market × day | `trade_date`, `prev_trade_date`, `symbols`. A day counts if the market published data. | — |
 | `silver.fred_daily` | series × date | `series_id`, `obs_date`, `value`, `name`, `region`, `asset_class`, `unit` | series, date and value present |
+| `silver.trade_events` | event | Typed paper-trader events (`event_ts` timestamp IST). Events: `proposed`, `blocked_by_risk_gate`, `rejected`, `expired`, `skipped_after_approval`, `filled`, `exited`, `squared_off`, `passed_outcome`, `day_plan`, `ledger_snapshot`. | event_id, event and time present |
 | `silver.global_daily` | instrument × date | `instrument`, `name`, `region`, `asset_class`, `unit`, `source` (`FRED`/`Massive`), `obs_date`, `value`. FRED series + 12 country ETFs. | — |
 
 De-duplication: when a day or observation is fetched more than once, the row from the most recently modified
-file wins.
+file wins (for trades: per `event_id`, so a re-exported day replaces its old copy).
 
 For NSE, `series = 'EQ'` is the main board. Gold uses `EQ` only.
 
@@ -55,6 +58,11 @@ For NSE, `series = 'EQ'` is the main board. Gold uses `EQ` only.
 | `gold.global_markets_daily` | instrument × date | Global instruments with changes | `change_abs`, `change_pct`, `change_5d_pct`, `change_20d_pct` |
 | `gold.global_snapshot` | instrument | The latest reading of every global instrument | same, latest row only |
 | `gold.india_vs_global` | instrument | Which global moves line up with India's next open? | `sessions`, `corr_with_india_gap`, `corr_with_india_return`, `pct_same_direction_gap` |
+| `gold.trades` | paper trade | Each dummy-money trade from entry to exit | `entry_price`, `exit_price`, `exit_reason`, `status`, `net_pnl_rs`, `fees_rs`, `r_multiple`, `holding_minutes`, `entry_hour`, `is_win` |
+| `gold.trading_daily` | day | How did the day go, and does it match the ledger? | `proposals`, `rejected`, `expired`, `trades_opened`, `trades_closed`, `win_rate_pct`, `net_pnl_rs`, `end_balance_rs`, `reconciliation_diff_rs`, `reconciliation` |
+| `gold.trading_by_setup` | setup × side | Which setups make money? | `trades`, `win_rate_pct`, `net_pnl_rs`, `avg_pnl_per_trade_rs`, `avg_r_multiple` |
+| `gold.trading_by_hour` | entry hour (IST) | When in the day do trades work? | same as by setup |
+| `gold.trading_decisions` | day | Did your YES/NO choices help? | `taken`, `taken_net_pnl_rs`, `passed`, `passed_would_have_made_rs`, `saved_by_skipping_rs` |
 
 ### Definitions
 
@@ -70,6 +78,13 @@ For NSE, `series = 'EQ'` is the main board. Gold uses `EQ` only.
     old, shown in `fx_date`).
   - ADR ratios: INFY 1, WIT 1, HDB 3, IBN 2, RDY 1. Check them after splits.
 - **Rates:** for `DGS10` (percent), read `change_abs` (`+0.05` = +5 basis points), not `change_pct`.
+- **Paper trade net P&L:** `exit pnl_rs − entry fees_rs`. The exit's `pnl_rs` is already net of the exit
+  brokerage; slippage is inside the fill prices. `r_multiple = net P&L / risk_rs` (−1 ≈ a normal stop-out).
+- **Reconciliation:** each day, P&L rebuilt from events (exits − entry fees) is compared with the trader's own
+  `realized_today` in the `ledger_snapshot` line. `ok` if they differ by less than Rs 1; `MISMATCH` means the
+  two records disagree and the S3 ledger should be checked.
+- **Skipped proposals:** `passed_outcome` events carry what a NO / no-reply proposal would have made (entry at
+  the next minute's open, then stop, target or 15:10). `saved_by_skipping_rs > 0` means skipping helped.
 
 ### Global instruments
 

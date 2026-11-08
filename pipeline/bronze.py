@@ -167,3 +167,51 @@ def fred_observations_raw():
         .schema(FRED_SCHEMA)
         .load(f"{LANDING}/fred/")
     )
+
+
+# ---------------------------------------------------------------------------
+# Paper trades (bumblebee26/paper-trader): the day's journal as JSON lines
+# ---------------------------------------------------------------------------
+# Pushed once a day at 15:45 IST by the stocks-trader-guardian Lambda to
+#   /Volumes/stocks/bronze/landing/trades/date=YYYY-MM-DD/events.jsonl
+# One line per event (proposed, filled, exited, rejected, ...), a unique event_id on each,
+# and a final ledger_snapshot line (balance and realized P&L at export time).
+# A re-export overwrites the same file; silver keeps the newest copy of each event_id.
+#
+# SQL equivalent:
+#   CREATE OR REFRESH STREAMING TABLE stocks.bronze.trades_raw
+#   COMMENT 'Raw paper-trader journal events (dummy money), one row per event per file'
+#   TBLPROPERTIES ('quality' = 'bronze')
+#   AS SELECT *, _metadata.file_path AS _source_file, ... (same lineage columns as above)
+#   FROM STREAM read_files(
+#     '/Volumes/stocks/bronze/landing/trades/',
+#     format            => 'json',
+#     pathGlobFilter    => '*.jsonl',
+#     schema            => '<TRADES_SCHEMA below>',
+#     rescuedDataColumn => '_rescued_data',
+#     partitionColumns  => ''
+#   );
+TRADES_SCHEMA = (
+    "event_id STRING, proposal_id STRING, timestamp_ist STRING, event STRING, symbol STRING, "
+    "setup STRING, side STRING, entry DOUBLE, stop DOUBLE, target DOUBLE, qty DOUBLE, "
+    "risk_rs DOUBLE, rr DOUBLE, reasons STRING, user_reply STRING, fill_price DOUBLE, "
+    "exit_price DOUBLE, exit_reason STRING, pnl_rs DOUBLE, fees_rs DOUBLE, note STRING, "
+    "balance DOUBLE, starting_capital DOUBLE, realized_today DOUBLE"
+)
+
+
+@dp.table(
+    name="stocks.bronze.trades_raw",
+    comment="Raw paper-trader journal events (dummy money), one row per event per file.",
+    table_properties={"quality": "bronze"},
+)
+def trades_raw():
+    return with_lineage(
+        spark.readStream.format("cloudFiles")  # noqa: F821
+        .option("cloudFiles.format", "json")
+        .option("pathGlobFilter", "*.jsonl")
+        .option("rescuedDataColumn", "_rescued_data")
+        .option("cloudFiles.partitionColumns", "")
+        .schema(TRADES_SCHEMA)
+        .load(f"{LANDING}/trades/")
+    )

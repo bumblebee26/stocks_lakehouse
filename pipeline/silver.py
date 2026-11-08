@@ -4,6 +4,7 @@
   stocks.silver.us_daily       US stocks from Massive (exploded, OTC excluded)
   stocks.silver.daily_bars     both markets in ONE schema  <- what gold reads
   stocks.silver.trading_days   each market's trading calendar, derived from the data
+  stocks.silver.trade_events   paper-trader journal events (dummy money), one row per event_id
 
 Materialized views: they recompute incrementally where possible, and make
 de-duplication simple (a re-fetched day replaces the old copy: latest file wins).
@@ -323,3 +324,45 @@ def global_daily():
         )
     )
     return fred.select(*GLOBAL_COLUMNS).unionByName(etfs.select(*GLOBAL_COLUMNS))
+
+
+# ---------------------------------------------------------------------------
+# Paper trades (dummy money) from bumblebee26/paper-trader
+# ---------------------------------------------------------------------------
+# SQL equivalent:
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.silver.trade_events (
+#     CONSTRAINT has_event_id EXPECT (event_id IS NOT NULL) ON VIOLATION DROP ROW,
+#     CONSTRAINT has_event    EXPECT (event IS NOT NULL)    ON VIOLATION DROP ROW,
+#     CONSTRAINT has_time     EXPECT (event_ts IS NOT NULL) ON VIOLATION DROP ROW
+#   ) AS
+#   SELECT * EXCEPT (rn) FROM (
+#     SELECT trade_date, event_id, proposal_id,
+#            to_timestamp(timestamp_ist, 'yyyy-MM-dd HH:mm:ss') AS event_ts,
+#            event, symbol, setup, side, entry, stop, target, CAST(qty AS INT) AS qty, risk_rs, rr,
+#            reasons, user_reply, fill_price, exit_price, exit_reason, pnl_rs, fees_rs, note,
+#            balance, starting_capital, realized_today, _source_file, _file_modified_at,
+#            row_number() OVER (PARTITION BY event_id ORDER BY _file_modified_at DESC) AS rn
+#     FROM stocks.bronze.trades_raw
+#   ) WHERE rn = 1;
+@dp.materialized_view(
+    name="stocks.silver.trade_events",
+    comment="Paper-trader journal events (dummy money), typed, one row per event_id (newest export wins).",
+    table_properties={"quality": "silver"},
+)
+@dp.expect_all_or_drop({
+    "has_event_id": "event_id IS NOT NULL",
+    "has_event": "event IS NOT NULL",
+    "has_time": "event_ts IS NOT NULL",
+})
+def trade_events():
+    raw = spark.read.table("stocks.bronze.trades_raw")  # noqa: F821
+    typed = raw.select(
+        "trade_date", "event_id", "proposal_id",
+        F.to_timestamp("timestamp_ist", "yyyy-MM-dd HH:mm:ss").alias("event_ts"),
+        "event", "symbol", "setup", "side", "entry", "stop", "target",
+        F.col("qty").cast("int").alias("qty"),
+        "risk_rs", "rr", "reasons", "user_reply", "fill_price", "exit_price", "exit_reason",
+        "pnl_rs", "fees_rs", "note", "balance", "starting_capital", "realized_today",
+        "_source_file", "_file_modified_at",
+    )
+    return latest_file_wins(typed, ["event_id"])

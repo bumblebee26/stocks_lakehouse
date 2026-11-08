@@ -21,6 +21,7 @@ covers the base view above, the full [architecture](docs/ARCHITECTURE_DIAGRAMS.m
 | 17 bronze/silver/gold tables | Unity Catalog `stocks.*` | Refreshed when new files land |
 | Dashboard "Stocks lakehouse: India x US" | Databricks workspace | Always current |
 | Pre-market brief | Your Telegram | 08:45 IST, Mon–Fri |
+| Paper-trading analysis ([paper-trader](https://github.com/bumblebee26/paper-trader)) | `stocks.gold.trad*` tables + dashboard page "Paper trading" | After the 15:45 IST export |
 
 Gold insights include: how India opens after big US moves, which global markets line up with India's open,
 market breadth, unusual volume, Indian ADR premium vs USD/INR, and a global markets snapshot.
@@ -33,6 +34,7 @@ market breadth, unusual volume, Indian ADR premium vs USD/INR, and a global mark
 | 06:00 Tue–Sat | FRED: global indices, FX, VIX, oil, rates (rolling 21-day window) |
 | after each file | Databricks job refreshes the pipeline (file-arrival trigger) |
 | 08:45 Mon–Fri | Pre-market brief to Telegram |
+| 15:45 Mon–Fri | paper-trader pushes the day's trade journal to `landing/trades/` |
 | 19:30 Mon–Fri | NSE: today's equities bhavcopy |
 
 ## Repository layout
