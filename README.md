@@ -212,6 +212,35 @@ aws lambda invoke --function-name stocks-premarket-brief --region ap-southeast-2
 aws lambda invoke --function-name stocks-premarket-brief --region ap-southeast-2 --cli-binary-format raw-in-base64-out --payload "{}" brief.json && type brief.json
 ```
 
+## 7. CI/CD (GitHub Actions)
+
+| Workflow | When | What |
+|---|---|---|
+| `ci.yml` | Every PR, every push to `dev` | Unit tests, pipeline wiring check, `terraform fmt -check`, `terraform validate` (all stacks). No cloud access. |
+| `terraform.yml` | PR into `main` | `terraform plan` for `aws` and `databricks`, posted as a PR comment (read-only identity) |
+| `terraform.yml` | Merge to `main` | `terraform apply` for `aws`, then `databricks` (environment `production`) |
+
+The AWS free plan blocks IAM identity providers, so GitHub OIDC isn't possible. CI uses two IAM users created by the
+aws stack (`infra/aws/github_ci.tf`): `stocks-gha-plan` (ReadOnlyAccess) and `stocks-gha-apply` (PowerUserAccess +
+IAM limited to `stocks-*` roles and CI users). Their access keys are created outside Terraform:
+
+```
+aws iam create-access-key --user-name stocks-gha-plan
+aws iam create-access-key --user-name stocks-gha-apply
+```
+
+GitHub settings:
+
+| Where | Name | Value |
+|---|---|---|
+| Settings → Secrets and variables → Actions → **Variables** | `TF_STATE_BUCKET` | `stocks-lakehouse-tfstate-<account-id>` |
+| same → **Variables** | `DATABRICKS_WORKSPACE_URL` | workspace URL without `?o=` |
+| same → **Secrets** | `AWS_PLAN_ACCESS_KEY_ID`, `AWS_PLAN_SECRET_ACCESS_KEY` | `stocks-gha-plan` key |
+| same → **Secrets** | `DATABRICKS_TOKEN` | a Databricks personal access token |
+| Settings → **Environments** → `production` → secrets | `AWS_APPLY_ACCESS_KEY_ID`, `AWS_APPLY_SECRET_ACCESS_KEY` | `stocks-gha-apply` key |
+
+Shared, non-secret settings live in committed `project.auto.tfvars` files so local runs and CI apply the same values.
+
 ## Notes
 
 - The free plan has a fixed number of days and credits; check AWS Settings → Projects. When it ends you'll need to upgrade or move the data elsewhere.

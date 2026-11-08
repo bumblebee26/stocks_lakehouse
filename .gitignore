@@ -37,3 +37,10 @@ infra/aws/nse_*
 infra/databricks/nse_test.json
 infra/aws/sync.json
 infra/aws/brief.json
+
+# Shared, non-secret settings used by both local runs and CI/CD
+!infra/*/project.auto.tfvars
+
+# Terraform plan output (CI)
+**/plan.txt
+**/tfplan
