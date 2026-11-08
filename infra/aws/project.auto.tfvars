@@ -2,5 +2,5 @@
 # and CI/CD apply the same values. (*.auto.tfvars loads automatically and takes
 # precedence over terraform.tfvars.) Put secrets in SSM or GitHub secrets, never here.
 
-schedules_enabled = true  # NSE + Massive daily fetches
-premarket_enabled = false # Telegram brief; set true after the dry run looks right
+schedules_enabled = true # NSE + Massive daily fetches
+premarket_enabled = true # Telegram brief at 08:45 IST Mon-Fri
