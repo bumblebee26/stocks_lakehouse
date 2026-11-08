@@ -1,0 +1,70 @@
+# Fast checks that need no cloud access. Runs on every pull request and every push to dev.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TF_VERSION: "1.x"
+
+jobs:
+  python:
+    name: Python tests and pipeline wiring
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Unit tests (fetchers, pre-market brief)
+        run: python -m unittest discover -s tests -v
+
+      - name: Pipeline wiring (tables defined, dependencies resolve)
+        run: python scripts/check_pipeline.py pipeline
+
+  terraform-fmt:
+    name: terraform fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Check formatting (fix locally with "terraform fmt -recursive infra")
+        run: terraform fmt -check -recursive -diff infra
+
+  terraform-validate:
+    name: terraform validate (${{ matrix.stack }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        stack: [bootstrap, aws, databricks, modules/secure_bucket]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Validate
+        working-directory: infra/${{ matrix.stack }}
+        run: |
+          terraform init -input=false -backend=false
+          terraform validate -no-color

@@ -1,0 +1,5 @@
+# Copy to terraform.tfvars (git-ignored). Every value here has a default,
+# so you only need to uncomment what you want to change.
+
+# aws_region  = "ap-southeast-2"
+# name_prefix = "stocks"
