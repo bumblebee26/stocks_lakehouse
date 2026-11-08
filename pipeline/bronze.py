@@ -119,3 +119,51 @@ def massive_grouped_raw():
         .option("cloudFiles.partitionColumns", "")
         .load(f"{LANDING}/massive/")
     )
+
+
+# ---------------------------------------------------------------------------
+# FRED global markets (newline-delimited JSON, one observation per line)
+# ---------------------------------------------------------------------------
+# SQL equivalent:
+#   CREATE OR REFRESH STREAMING TABLE stocks.bronze.fred_observations_raw
+#   COMMENT 'Raw FRED observations: global indices, FX, VIX, oil, rates. One row per series per date per file'
+#   TBLPROPERTIES ('quality' = 'bronze')
+#   AS SELECT
+#     *,
+#     _metadata.file_path              AS _source_file,
+#     _metadata.file_modification_time AS _file_modified_at,
+#     current_timestamp()              AS _ingested_at,
+#     to_date(regexp_extract(_metadata.file_path, 'date=(\\d{4}-\\d{2}-\\d{2})', 1)) AS trade_date
+#   FROM STREAM read_files(
+#     '/Volumes/stocks/bronze/landing/fred/',
+#     format            => 'json',
+#     pathGlobFilter    => '*.json',
+#     schema            => 'series_id STRING, date STRING, value DOUBLE, name STRING,
+#                           region STRING, asset_class STRING, unit STRING',
+#     rescuedDataColumn => '_rescued_data',
+#     partitionColumns  => ''
+#   );
+#
+# The schema is given explicitly (we write these files ourselves), so the table works even
+# before the first FRED file arrives; inference would fail on an empty folder.
+FRED_SCHEMA = (
+    "series_id STRING, date STRING, value DOUBLE, name STRING, "
+    "region STRING, asset_class STRING, unit STRING"
+)
+
+
+@dp.table(
+    name="stocks.bronze.fred_observations_raw",
+    comment="Raw FRED observations: global indices, FX, VIX, oil, rates. One row per series per date per file.",
+    table_properties={"quality": "bronze"},
+)
+def fred_observations_raw():
+    return with_lineage(
+        spark.readStream.format("cloudFiles")  # noqa: F821
+        .option("cloudFiles.format", "json")
+        .option("pathGlobFilter", "*.json")
+        .option("rescuedDataColumn", "_rescued_data")
+        .option("cloudFiles.partitionColumns", "")
+        .schema(FRED_SCHEMA)
+        .load(f"{LANDING}/fred/")
+    )

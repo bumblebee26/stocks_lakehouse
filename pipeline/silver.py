@@ -229,3 +229,97 @@ def trading_days():
     )
     w = Window.partitionBy("market").orderBy("trade_date")
     return days.withColumn("prev_trade_date", F.lag("trade_date").over(w))
+
+
+# ---------------------------------------------------------------------------
+# FRED series, de-duplicated (each run re-fetches a window; latest file wins)
+# ---------------------------------------------------------------------------
+# SQL equivalent:
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.silver.fred_daily (
+#     CONSTRAINT has_series EXPECT (series_id IS NOT NULL) ON VIOLATION DROP ROW,
+#     CONSTRAINT has_date   EXPECT (obs_date IS NOT NULL)  ON VIOLATION DROP ROW,
+#     CONSTRAINT has_value  EXPECT (value IS NOT NULL)     ON VIOLATION DROP ROW
+#   ) AS
+#   SELECT series_id, obs_date, value, name, region, asset_class, unit, _source_file, _file_modified_at
+#   FROM (
+#     SELECT *, to_date(date) AS obs_date,
+#            row_number() OVER (PARTITION BY series_id, to_date(date) ORDER BY _file_modified_at DESC) AS rn
+#     FROM stocks.bronze.fred_observations_raw
+#   ) WHERE rn = 1;
+@dp.materialized_view(
+    name="stocks.silver.fred_daily",
+    comment="FRED series (global indices, FX, VIX, oil, rates), one row per series per date.",
+    table_properties={"quality": "silver"},
+)
+@dp.expect_all_or_drop({
+    "has_series": "series_id IS NOT NULL",
+    "has_date": "obs_date IS NOT NULL",
+    "has_value": "value IS NOT NULL",
+})
+def fred_daily():
+    raw = spark.read.table("stocks.bronze.fred_observations_raw")  # noqa: F821
+    typed = raw.select(
+        "series_id",
+        F.to_date("date").alias("obs_date"),
+        F.col("value").cast("double").alias("value"),
+        "name", "region", "asset_class", "unit",
+        "_source_file", "_file_modified_at",
+    )
+    return latest_file_wins(typed, ["series_id", "obs_date"])
+
+
+# ---------------------------------------------------------------------------
+# Global instruments in one long table: FRED series + US-listed country ETFs
+# ---------------------------------------------------------------------------
+# Country ETFs come from the Massive data we already load, giving daily equity
+# coverage for markets FRED doesn't carry (Europe, China, Korea, Brazil...).
+COUNTRY_ETFS = [
+    # (ticker, name, region)
+    ("EWJ", "Japan (iShares MSCI Japan)", "Japan"),
+    ("EWG", "Germany (iShares MSCI Germany)", "Germany"),
+    ("EWU", "UK (iShares MSCI United Kingdom)", "UK"),
+    ("EZU", "Eurozone (iShares MSCI Eurozone)", "Eurozone"),
+    ("VGK", "Europe (Vanguard FTSE Europe)", "Europe"),
+    ("FXI", "China large caps (iShares China Large-Cap)", "China"),
+    ("EWH", "Hong Kong (iShares MSCI Hong Kong)", "Hong Kong"),
+    ("EWY", "South Korea (iShares MSCI South Korea)", "South Korea"),
+    ("EWT", "Taiwan (iShares MSCI Taiwan)", "Taiwan"),
+    ("EWZ", "Brazil (iShares MSCI Brazil)", "Brazil"),
+    ("EEM", "Emerging markets (iShares MSCI EM)", "Emerging markets"),
+    ("INDA", "India (iShares MSCI India)", "India"),
+]
+
+GLOBAL_COLUMNS = ["instrument", "name", "region", "asset_class", "unit", "source", "obs_date", "value"]
+
+
+# SQL equivalent:
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.silver.global_daily AS
+#   SELECT series_id AS instrument, name, region, asset_class, unit, 'FRED' AS source, obs_date, value
+#   FROM stocks.silver.fred_daily
+#   UNION ALL
+#   SELECT u.symbol, e.name, e.region, 'equity_etf', 'USD', 'Massive', u.trade_date, u.close
+#   FROM stocks.silver.us_daily u
+#   JOIN (VALUES ('EWJ', 'Japan (iShares MSCI Japan)', 'Japan'), ... ) AS e(ticker, name, region)
+#     ON u.symbol = e.ticker;
+@dp.materialized_view(
+    name="stocks.silver.global_daily",
+    comment="Global instruments (FRED series + US-listed country ETFs), one row per instrument per date.",
+    table_properties={"quality": "silver"},
+)
+def global_daily():
+    fred = spark.read.table("stocks.silver.fred_daily").select(  # noqa: F821
+        F.col("series_id").alias("instrument"), "name", "region", "asset_class", "unit",
+        F.lit("FRED").alias("source"), "obs_date", "value",
+    )
+    etf_list = spark.createDataFrame(COUNTRY_ETFS, "symbol STRING, name STRING, region STRING")  # noqa: F821
+    etfs = (
+        spark.read.table("stocks.silver.us_daily")  # noqa: F821
+        .join(etf_list, "symbol")
+        .select(
+            F.col("symbol").alias("instrument"), "name", "region",
+            F.lit("equity_etf").alias("asset_class"), F.lit("USD").alias("unit"),
+            F.lit("Massive").alias("source"),
+            F.col("trade_date").alias("obs_date"), F.col("close").alias("value"),
+        )
+    )
+    return fred.select(*GLOBAL_COLUMNS).unionByName(etfs.select(*GLOBAL_COLUMNS))

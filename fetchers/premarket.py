@@ -2,6 +2,7 @@
 
 Reads the gold/silver tables through Databricks SQL and summarises:
   - the previous US session (index ETFs, breadth)
+  - global markets: Asia/Europe/EM equities, VIX, oil, US 10-year, USD/INR
   - what the Nifty proxy has historically done after a US day like that
   - Indian ADRs overnight
   - India's unusual-volume names from the last Indian session
@@ -27,6 +28,12 @@ STALE_AFTER_DAYS = 4
 
 US_INDEX_ETFS = [(US_PROXY, "S&amp;P 500"), ("QQQ", "Nasdaq 100"), ("DIA", "Dow"), ("IWM", "Russell 2000")]
 ADRS = ["INFY", "WIT", "HDB", "IBN", "RDY"]
+# (instrument, label, kind) for the Global section; kind decides how the change is shown.
+GLOBAL_EQUITIES = [("NIKKEI225", "Nikkei 225"), ("VGK", "Europe"), ("FXI", "China"),
+                   ("EWY", "Korea"), ("EEM", "EM")]
+GLOBAL_RISK = [("VIXCLS", "VIX", "level"), ("DCOILBRENTEU", "Brent", "usd"),
+               ("DGS10", "US 10Y", "rate"), ("DTWEXBGS", "Dollar index", "level"),
+               ("DEXINUS", "USD/INR", "fx")]
 BUCKET_PHRASE = {"US up big": "big US up day", "US down big": "big US down day", "US flat": "flat US day"}
 
 
@@ -46,6 +53,11 @@ QUERIES = {
         SELECT trade_date, advances, declines, pct_above_ma20, median_return_pct
         FROM stocks.gold.market_breadth WHERE market = 'US'
         ORDER BY trade_date DESC LIMIT 1
+    """,
+    "global": f"""
+        SELECT instrument, obs_date, value, change_pct, change_abs
+        FROM stocks.gold.global_snapshot
+        WHERE instrument IN ({_in_list([i for i, _ in GLOBAL_EQUITIES] + [i for i, _, _ in GLOBAL_RISK])})
     """,
     "summary": "SELECT * FROM stocks.gold.nifty_after_us_moves_summary",
     "study_start": "SELECT min(india_date) AS first_day FROM stocks.gold.nifty_after_us_moves",
@@ -77,6 +89,39 @@ def us_move_bucket(return_pct):
     return "US flat"
 
 
+def global_lines(rows, today):
+    """One line for equities, one for risk gauges; as-of dates shown when older than 4 days."""
+    by_id = {r["instrument"]: r for r in rows}
+
+    def stale(r):
+        days = (today - dt.date.fromisoformat(r["obs_date"])).days
+        return f" (as of {nice_date(r['obs_date'])})" if days > STALE_AFTER_DAYS else ""
+
+    eq = [f"{label} {pct(by_id[i]['change_pct'])}{stale(by_id[i])}" for i, label in GLOBAL_EQUITIES if i in by_id]
+    risk = []
+    for i, label, kind in GLOBAL_RISK:
+        r = by_id.get(i)
+        if not r:
+            continue
+        if kind == "rate":
+            change = "" if r["change_abs"] is None else f" ({r['change_abs'] * 100:+.0f} bp)"
+            risk.append(f"{label} {r['value']:.2f}%{change}{stale(r)}")
+        elif kind == "usd":
+            risk.append(f"{label} ${r['value']:.1f} ({pct(r['change_pct'], 1)}){stale(r)}")
+        elif kind == "fx":
+            risk.append(f"{label} {r['value']:.2f} (as of {nice_date(r['obs_date'])})")
+        else:
+            change = "" if r["change_abs"] is None else f" ({r['change_abs']:+.1f})"
+            risk.append(f"{label} {r['value']:.1f}{change}{stale(r)}")
+
+    lines = []
+    if eq:
+        lines.append(" · ".join(eq))
+    if risk:
+        lines.append(" · ".join(risk))
+    return lines
+
+
 def build_message(data, today):
     bars = {r["symbol"]: r for r in data["us_bars"]}
     us_date = data["us_bars"][0]["trade_date"] if data["us_bars"] else None
@@ -94,6 +139,11 @@ def build_message(data, today):
         lines.append(f"Breadth: {int(b['advances']):,} up / {int(b['declines']):,} down · "
                      f"{b['pct_above_ma20']:.0f}% above 20-day avg")
     lines.append("")
+
+    # Global markets
+    glob = global_lines(data.get("global", []), today)
+    if glob:
+        lines += ["<b>Global</b>", *glob, ""]
 
     # What usually follows
     proxy_return = bars.get(US_PROXY, {}).get("return_pct")
@@ -127,7 +177,7 @@ def build_message(data, today):
     else:
         lines.append("None above the threshold.")
 
-    lines += ["", "<i>Sources: NSE bhavcopy, Massive. Historical tendencies, not advice.</i>"]
+    lines += ["", "<i>Sources: NSE bhavcopy, Massive, FRED. Historical tendencies, not advice.</i>"]
     return "\n".join(lines)
 
 
