@@ -21,6 +21,15 @@ locals {
       schedule = "cron(30 4 ? * TUE-SAT *)"
       enabled  = true
     }
+    news = {
+      handler     = "news.handler"
+      role_key    = "news"
+      timeout     = 120
+      description = "NSE company news RSS (announcements, results, board meetings, corporate actions) -> news volume"
+      # Every 30 minutes, 08:00-19:30 IST, Monday-Friday
+      schedule = "cron(0/30 8-19 ? * MON-FRI *)"
+      enabled  = var.news_enabled
+    }
     fred = {
       handler     = "fred.handler"
       role_key    = "global"
@@ -75,6 +84,7 @@ resource "aws_lambda_function" "fetcher" {
       DATABRICKS_URL_PARAM   = local.databricks_url_param
       DATABRICKS_TOKEN_PARAM = local.databricks_token_param
       LANDING_VOLUME_PATH    = var.databricks_volume_path
+      NEWS_VOLUME_PATH       = var.databricks_news_volume_path
     }
   }
 

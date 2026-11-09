@@ -34,6 +34,7 @@ market breadth, unusual volume, Indian ADR premium vs USD/INR, and a global mark
 | 04:30 Tue–Sat | Massive: previous US session (all US stocks) |
 | 06:00 Tue–Sat | FRED: global indices, FX, VIX, oil, rates (rolling 21-day window) |
 | after each file | Databricks job refreshes the pipeline (file-arrival trigger) |
+| every 30 min, 08:00–19:30 Mon–Fri | NSE company news (announcements, results, board meetings, corporate actions) |
 | 08:45 Mon–Fri | Pre-market brief to Telegram |
 | 15:45 Mon–Fri | paper-trader pushes the day's trade journal to `landing/trades/` |
 | 19:30 Mon–Fri | NSE: today's equities bhavcopy |
@@ -83,6 +84,7 @@ or emergencies.
 |---|---|---|---|
 | NSE UDiFF bhavcopy | All NSE cash-market securities | From 8 Jul 2024 (format change) | Free |
 | Massive grouped daily | All US stocks and ETFs | Rolling 2 years on the free Basic plan | Free (API key) |
+| NSE RSS feeds | Company announcements, financial results, board meetings, corporate actions | What the feeds carry at each 30-minute fetch | Free |
 | FRED | 14 series: S&P 500, Dow, Nasdaq, Nikkei 225, VIX, USD/INR, USD/JPY, EUR/USD, GBP/USD, USD/CNY, dollar index, Brent, WTI, US 10Y | Decades | Free (API key) |
 
 Country ETFs (Japan, Germany, UK, Eurozone, Europe, China, Hong Kong, Korea, Taiwan, Brazil, EM, India)

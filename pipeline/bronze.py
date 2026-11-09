@@ -18,6 +18,7 @@ except ImportError:  # older runtimes: Delta Live Tables API, same decorators
 from pyspark.sql import functions as F
 
 LANDING = spark.conf.get("stocks.landing_path", "/Volumes/stocks/bronze/landing")  # noqa: F821
+NEWS = spark.conf.get("stocks.news_path", "/Volumes/stocks/bronze/news")  # noqa: F821
 
 
 def with_lineage(df):
@@ -214,4 +215,42 @@ def trades_raw():
         .option("cloudFiles.partitionColumns", "")
         .schema(TRADES_SCHEMA)
         .load(f"{LANDING}/trades/")
+    )
+
+
+# ---------------------------------------------------------------------------
+# Company news: NSE RSS feeds, fetched every 30 minutes by the stocks-fetch-news Lambda
+# ---------------------------------------------------------------------------
+# Lands in its own volume (not landing/), so news doesn't trigger a pipeline refresh every
+# 30 minutes; it is picked up at the normal refreshes. Each run writes snap_HHMM.jsonl; the
+# same item appears in many snapshots, and silver keeps one row per id.
+# latest.jsonl (a copy of the newest snapshot, read by the paper trader) is skipped here.
+#
+# SQL equivalent:
+#   CREATE OR REFRESH STREAMING TABLE stocks.bronze.news_raw
+#   COMMENT 'Raw NSE company news items, one row per item per snapshot'
+#   AS SELECT *, <lineage columns> FROM STREAM read_files(
+#     '/Volumes/stocks/bronze/news/', format => 'json', pathGlobFilter => 'snap_*.jsonl',
+#     schema => '<NEWS_SCHEMA below>', rescuedDataColumn => '_rescued_data', partitionColumns => '');
+NEWS_SCHEMA = (
+    "id STRING, feed STRING, symbol STRING, company STRING, category STRING, title STRING, "
+    "description STRING, link STRING, published_ist STRING, published_raw STRING, fetched_at_ist STRING"
+)
+
+
+@dp.table(
+    name="stocks.bronze.news_raw",
+    comment="Raw NSE company news items (announcements, results, board meetings, corporate actions), "
+            "one row per item per 30-minute snapshot.",
+    table_properties={"quality": "bronze"},
+)
+def news_raw():
+    return with_lineage(
+        spark.readStream.format("cloudFiles")  # noqa: F821
+        .option("cloudFiles.format", "json")
+        .option("pathGlobFilter", "snap_*.jsonl")
+        .option("rescuedDataColumn", "_rescued_data")
+        .option("cloudFiles.partitionColumns", "")
+        .schema(NEWS_SCHEMA)
+        .load(f"{NEWS}/")
     )

@@ -25,6 +25,7 @@ variable "fetchers" {
     nse    = { landing_prefixes = ["nse"], needs_massive_key = false, needs_fred_key = false }
     us     = { landing_prefixes = ["massive"], needs_massive_key = true, needs_fred_key = false }
     global = { landing_prefixes = ["fred"], needs_massive_key = false, needs_fred_key = true }
+    news   = { landing_prefixes = ["news"], needs_massive_key = false, needs_fred_key = false }
   }
 }
 
@@ -62,6 +63,18 @@ variable "databricks_volume_path" {
   description = "Unity Catalog volume the fetchers push into (output landing_volume_path of the databricks stack)."
   type        = string
   default     = "/Volumes/stocks/bronze/landing"
+}
+
+variable "databricks_news_volume_path" {
+  description = "Unity Catalog volume for company news (kept out of the landing volume so news doesn't trigger a pipeline refresh every 30 minutes)."
+  type        = string
+  default     = "/Volumes/stocks/bronze/news"
+}
+
+variable "news_enabled" {
+  description = "Fetch NSE company news every 30 minutes, 08:00-19:30 IST Mon-Fri."
+  type        = bool
+  default     = false
 }
 
 # ----- Pre-market brief -------------------------------------------------------
