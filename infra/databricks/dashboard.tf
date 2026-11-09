@@ -499,7 +499,7 @@ locals {
           }
           position = { x = 0, y = 18, width = 12, height = 4 }
         },
-        ], [local.table_widget.summary_overview, local.chart.ov_unusual, local.chart.ov_global, local.chart.ov_corr, local.chart.ov_adr])
+      ], [local.table_widget.summary_overview, local.chart.ov_unusual, local.chart.ov_global, local.chart.ov_corr, local.chart.ov_adr])
       }, {
       name          = "portfolio"
       displayName   = "Portfolio"
