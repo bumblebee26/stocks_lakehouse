@@ -167,6 +167,12 @@ More detail: [OPERATIONS.md](OPERATIONS.md#making-a-change).
 
 ## 5. Platform with paper-trader
 
+**At a glance** (blue = this repo, orange = paper-trader):
+
+![Platform at a glance: AWS Sydney, GitHub Actions and Databricks, meeting at the morning SQL read and the 15:45 journal export](diagrams/platform_overview.png)
+
+**In detail:**
+
 ![Platform: stocks_lakehouse and paper-trader across AWS, GitHub Actions, Databricks and Telegram](diagrams/05_platform.png)
 
 The lakehouse and [paper-trader](https://github.com/bumblebee26/paper-trader) share one AWS account (free
@@ -197,6 +203,7 @@ The sources are in `docs/diagrams/`:
 | `03_lineage.mmd` | Data lineage (ELK layout) |
 | `04_cicd.mmd` | CI/CD flow |
 | `05_platform.mmd` | Platform with paper-trader (ELK layout; identical copy in paper-trader) |
+| `platform_overview.png` | Platform at a glance. Not Mermaid: exported from the shared "Stocks Platform Architecture" doc; same image in paper-trader |
 | `theme.json` | Shared fonts and colours |
 
 Edit the `.mmd` file, then re-render SVG and PNG with the Mermaid CLI
