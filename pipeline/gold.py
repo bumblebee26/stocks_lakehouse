@@ -21,6 +21,7 @@ Paper trading (dummy money, from bumblebee26/paper-trader via stocks.silver.trad
   stocks.gold.company_fundamentals         per company: profitability, debt, cash, growth, P/E and the long-term pool's quality tests
   stocks.gold.portfolio_daily              whole dummy portfolio per day: value, P&L, return, fall from peak, NIFTYBEES alongside
   stocks.gold.holdings_latest              current holdings with P&L, weight and days held
+  stocks.gold.longterm_candidates          long-term pool: Nifty 200 companies ranked, this week's 10 picks with target weights and reasons
 
 Market proxies (no index data in these sources): NIFTYBEES (Nifty 50 ETF on NSE)
 and SPY (S&P 500 ETF). Change them with pipeline configuration keys
@@ -924,3 +925,76 @@ def holdings_latest():
             .withColumn("days_held", F.datediff("snapshot_date", "opened"))
             .select("snapshot_date", "pool", "symbol", "sector", "qty", "avg_cost", "last_price", "value", "pnl",
                     "pnl_pct", "weight_pct", "opened", "days_held"))
+
+
+
+# ---------------------------------------------------------------------------
+# Long-term pool selection (system plan, phase 4)
+# ---------------------------------------------------------------------------
+# Who qualifies: Nifty 200 members (all companies if the list hasn't arrived yet) with at least 3
+# quality tests available, a quality score of 0.6 or more, a positive P/E, and no profit fall two
+# quarters in a row.
+# Ranking: score = 100 x quality_score + growth bonus (3-year profit growth, capped at 30%, / 3)
+#                  - price penalty (P/E percentile / 5). Higher is better.
+# Diversification: at most 2 picks per industry (2 x 9% stays under the 25% industry cap).
+# Picks: the top 10 after the industry cap; 90% of the pool invested in equal parts (max 15% each),
+# 10% kept as cash. Each row carries its reasons in plain words.
+#
+# SQL equivalent (abridged):
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.longterm_candidates AS
+#   WITH eligible AS (SELECT f.*, m.company, m.industry, <score> AS score FROM stocks.gold.company_fundamentals f
+#                     LEFT JOIN stocks.silver.index_members m USING (symbol) WHERE <eligibility>),
+#        capped AS (SELECT *, row_number() OVER (PARTITION BY coalesce(industry, symbol) ORDER BY score DESC) AS in_industry
+#                   FROM eligible)
+#   SELECT *, row_number() OVER (ORDER BY in_industry > 2, score DESC) AS rank, ... FROM capped;
+PICKS = 10
+PER_INDUSTRY = 2
+INVESTED_PCT = 90.0
+
+
+@dp.materialized_view(
+    name="stocks.gold.longterm_candidates",
+    comment="Long-term pool candidates: eligible Nifty 200 companies ranked by quality, growth and price; "
+            "is_pick marks this week's 10 picks (max 2 per industry) with target weights and plain-words reasons.",
+    table_properties={"quality": "gold"},
+)
+def longterm_candidates():
+    f = spark.read.table("stocks.gold.company_fundamentals")  # noqa: F821
+    m = spark.read.table("stocks.silver.index_members")  # noqa: F821
+    members = m.agg(F.count(F.lit(1)).alias("member_count"))
+    df = (f.join(m.select("symbol", "company", "industry"), "symbol", "left").crossJoin(members)
+          .filter((F.col("member_count") == 0) | F.col("company").isNotNull())
+          .filter((F.col("tests_available") >= 3) & (F.col("quality_score") >= 0.6) & (F.col("pe") > 0)
+                  & ~F.coalesce(F.col("profit_down_2q"), F.lit(False))))
+    score = (F.col("quality_score") * 100
+             + F.least(F.greatest(F.coalesce("profit_cagr_3y_pct", F.lit(0)), F.lit(0)), F.lit(30)) / 3
+             - F.coalesce("pe_percentile", F.lit(50)) / 5)
+    df = df.withColumn("score", F.round(score, 1))
+    in_ind = Window.partitionBy(F.coalesce("industry", "symbol")).orderBy(F.col("score").desc(), "symbol")
+    df = df.withColumn("in_industry", F.row_number().over(in_ind))
+    overall = Window.orderBy((F.col("in_industry") > PER_INDUSTRY).asc(), F.col("score").desc(), "symbol")
+    df = df.withColumn("rank", F.row_number().over(overall))
+    df = df.withColumn("is_pick", (F.col("rank") <= PICKS) & (F.col("in_industry") <= PER_INDUSTRY))
+    n_picks = df.agg(F.sum(F.col("is_pick").cast("int")).alias("n_picks"))
+    df = df.crossJoin(n_picks).withColumn(
+        "target_weight_pct", F.when(F.col("is_pick"), F.round(F.least(F.lit(INVESTED_PCT) / F.col("n_picks"), F.lit(15.0)), 1)))
+
+    def fmt(c, d=1):
+        return F.format_number(F.col(c), d)
+
+    reason = F.concat_ws(" ",
+        F.when(F.col("is_financial"), F.concat(F.lit("Return on assets "), fmt("roa_pct", 2), F.lit("% (a bank or lender)."))
+         ).otherwise(F.concat(F.lit("Return on capital "), fmt("roce_pct"), F.lit("%."))),
+        F.when(~F.col("is_financial") & F.col("debt_to_equity").isNotNull(),
+               F.concat(F.lit("Debt "), fmt("debt_to_equity", 2), F.lit("x equity."))),
+        F.when(F.col("profit_cagr_3y_pct").isNotNull(),
+               F.concat(F.lit("Profit grew "), fmt("profit_cagr_3y_pct"), F.lit("% a year over 3 years."))),
+        F.concat(F.lit("P/E "), fmt("pe"), F.lit(", cheaper than "), F.format_number(F.lit(100) - F.col("pe_percentile"), 0),
+                 F.lit("% of the large companies checked.")),
+        F.when(F.col("ocf_years") > 0, F.concat(F.lit("Operating cash flow positive in "), F.col("ocf_positive_years").cast("string"),
+                                                F.lit(" of "), F.col("ocf_years").cast("string"), F.lit(" years."))),
+    )
+    return df.withColumn("reasons", reason).select(
+        "rank", "is_pick", "symbol", "company", "industry", "score", "quality_score", "tests_passed", "tests_available",
+        "roce_pct", "roa_pct", "debt_to_equity", "revenue_cagr_3y_pct", "profit_cagr_3y_pct", "pe", "pe_percentile",
+        "close", "price_date", "target_weight_pct", "reasons", "is_financial", "fiscal_year_end")
