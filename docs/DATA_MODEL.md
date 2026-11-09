@@ -17,7 +17,7 @@ Same layout in S3 (`s3://stocks-lakehouse-landing-<account-id>/landing/`) and in
 | `trades/date=YYYY-MM-DD/events.jsonl` | Paper-trader journal (dummy money), pushed 15:45 IST by `stocks-trader-guardian` (volume; S3 copy in the trader's own bucket) | NDJSON |
 | `index_members/date=YYYY-MM-DD/nifty200.jsonl` | NSE's Nifty 200 list (symbol, company, industry, ISIN), pushed weekly with the fundamentals (volume only) | NDJSON |
 | `portfolio/date=YYYY-MM-DD/portfolio.jsonl` | Paper-trader pools (capital, cash, equity) and holdings (qty, cost, last price, value, P&L), pushed daily at 15:45 IST with the journal (volume only) | NDJSON |
-| `fundamentals/date=YYYY-MM-DD/fundamentals.jsonl` | Company financials for ~250 large NSE companies, pushed weekly (Sat 07:15 IST) by paper-trader's *Company fundamentals* workflow (volume only) | NDJSON |
+| `fundamentals/date=YYYY-MM-DD/fundamentals.jsonl` | Company financials for NSE's Nifty 200 list plus paper-trader's watchlist (the 250 most traded NSE stocks if the list can't be read), pushed weekly (Sat 07:15 IST) by paper-trader's *Company fundamentals* workflow (volume only) | NDJSON |
 | `<source>/_README.txt` | Folder marker (volume only) | text |
 
 Company news has **its own volume**, `/Volumes/stocks/bronze/news/` (S3 copy under `landing/news/`), so news
@@ -90,6 +90,8 @@ For NSE, `series = 'EQ'` is the main board. Gold uses `EQ` only.
 | `gold.longterm_candidates` | company | What would the long-term pool buy this week? | `rank`, `is_pick` (top 10, max 2 per industry), `score` (100 × quality + growth bonus − price penalty), `target_weight_pct` (90% invested in equal parts, max 15%), `reasons` (plain words) |
 | `gold.company_fundamentals` | company | Which large companies pass the long-term pool's quality tests? | `roce_pct` (`roa_pct` for banks/lenders), `debt_to_equity`, `ocf_positive_years`, `revenue_cagr_3y_pct`, `profit_cagr_3y_pct`, `eps_ttm`, `pe`, `pe_percentile` (0 = cheapest), `profit_down_2q`, `pass_capital/balance/cash/growth/price`, `tests_passed`, `quality_score`. Not in this source: promoter pledges, bad-loan ratios, P/E history |
 | `gold.events_calendar` | symbol × meeting date | Which companies have a board meeting (often results) coming up? | `event_date`, `purpose`, `link`, `announced_ts` |
+| `gold.dashboard_summary_facts` | dashboard page | Short facts per page from the latest numbers (not a pipeline table: rebuilt by `sql/dashboard_summary.sql` after every refresh) | `page`, `facts` |
+| `gold.dashboard_summary` | dashboard page | The "In plain words" text on each dashboard page | `page`, `facts`, `ai_text` (`ai_summarize` of the facts; the dashboard shows the facts when it is empty), `generated_at` |
 
 ### Definitions
 

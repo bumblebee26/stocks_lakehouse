@@ -11,16 +11,18 @@ flowchart TB
         NSE["<b>NSE archives</b><br/>UDiFF bhavcopy (.csv.zip)"]
         MAS["<b>Massive API</b><br/>grouped daily, all US tickers"]
         FREDAPI["<b>FRED API</b><br/>14 global series"]
+        NSERSS["<b>NSE RSS feeds</b><br/>announcements · results · board meetings"]
     end
 
     subgraph AWS["AWS account · free plan · ap-southeast-2 (Sydney)"]
         direction TB
-        SCH["<b>EventBridge Scheduler</b> (Asia/Kolkata)<br/>NSE 19:30 Mon–Fri · Massive 04:30 Tue–Sat<br/>FRED 06:00 Tue–Sat · Brief 08:45 Mon–Fri"]
+        SCH["<b>EventBridge Scheduler</b> (Asia/Kolkata)<br/>NSE 19:30 Mon–Fri · Massive 04:30 Tue–Sat<br/>FRED 06:00 Tue–Sat · Brief 08:45 Mon–Fri<br/>News every 30 min 08:00–19:30 Mon–Fri"]
         subgraph LAMBDAS["Lambda functions (Python 3.13, arm64)"]
             direction LR
             FNSE["stocks-fetch-nse"]
             FMAS["stocks-fetch-massive"]
             FFRED["stocks-fetch-fred"]
+            FNEWS["stocks-fetch-news"]
             SYNC["stocks-sync-volume<br/><i>manual: backfill / repair</i>"]
             PM["stocks-premarket-brief"]
         end
@@ -28,19 +30,20 @@ flowchart TB
         SSM[["<b>SSM Parameter Store</b><br/>API keys · tokens · workspace URL"]]
         subgraph PT["paper-trader · same account (bumblebee26/paper-trader)"]
             direction LR
-            GUARD["stocks-trader-guardian<br/><i>15:45 journal export</i>"]
+            GUARD["stocks-trader-guardian<br/><i>15:45 journal + portfolio export</i>"]
         end
     end
 
     subgraph DBX["Databricks Free Edition · Unity Catalog: stocks"]
         direction TB
         VOL[("<b>Volume</b><br/>stocks.bronze.landing")]
-        JOB["<b>Job: stocks-refresh</b><br/>file-arrival trigger"]
+        NVOL[("<b>News volume</b><br/>stocks.bronze.news")]
+        JOB["<b>Job: stocks-refresh</b><br/>file-arrival trigger<br/>pipeline, then dashboard summaries"]
         subgraph PIPE["Lakeflow pipeline: stocks-medallion (serverless)"]
             direction LR
-            BR["<b>Bronze</b><br/>4 streaming tables<br/>Auto Loader"]
-            SI["<b>Silver</b><br/>7 materialized views<br/>typed · de-duplicated · DQ"]
-            GO["<b>Gold</b><br/>13 materialized views<br/>markets + paper trading"]
+            BR["<b>Bronze</b><br/>8 streaming tables<br/>Auto Loader"]
+            SI["<b>Silver</b><br/>12 materialized views<br/>typed · de-duplicated · DQ"]
+            GO["<b>Gold</b><br/>20 materialized views<br/>markets · news · trading · portfolio · long-term"]
             BR --> SI --> GO
         end
         WH["<b>SQL warehouse</b>"]
@@ -49,6 +52,7 @@ flowchart TB
 
     TG["<b>Telegram</b><br/>pre-market brief"]
     SESS["<b>paper-trader session</b><br/>GitHub Actions · Claude Code"]
+    FUND["<b>paper-trader fundamentals</b><br/>GitHub Actions · Sat 07:15"]
 
     subgraph CTRL["Control plane"]
         direction LR
@@ -58,12 +62,15 @@ flowchart TB
         GH --> GHA --> TFS
     end
 
-    SCH -- "1 · invoke" --> FNSE & FMAS & FFRED
+    SCH -- "1 · invoke" --> FNSE & FMAS & FFRED & FNEWS
     NSE -- "2 · download" --> FNSE
     MAS -- "2 · download" --> FMAS
     FREDAPI -- "2 · download" --> FFRED
-    FNSE & FMAS & FFRED -- "3 · raw file" --> S3
+    NSERSS -- "2 · download" --> FNEWS
+    FNSE & FMAS & FFRED & FNEWS -- "3 · raw file" --> S3
     FNSE & FMAS & FFRED -- "4 · push (Files API)" --> VOL
+    FNEWS -- "4 · push (Files API)" --> NVOL
+    NVOL -. "read at the next refresh" .-> PIPE
     SYNC -. "reads" .-> S3
     SYNC -. "push missing" .-> VOL
     VOL -- "5 · new file" --> JOB
@@ -72,8 +79,10 @@ flowchart TB
     SCH -- "7 · invoke" --> PM
     PM -- "8 · SQL Statement API" --> WH
     PM -- "9 · send" --> TG
-    GUARD -- "10 · journal (Files API)" --> VOL
+    GUARD -- "10 · journal + portfolio (Files API)" --> VOL
     SESS -- "11 · SQL (pre-market context)" --> WH
+    NVOL -- "12 · latest.jsonl (Files API)" --> SESS
+    FUND -- "13 · fundamentals + Nifty 200 (Files API)" --> VOL
     SSM -. "secrets at runtime" .-> LAMBDAS
     GHA -. "terraform apply" .-> AWS
     GHA -. "terraform apply" .-> DBX
@@ -87,14 +96,14 @@ flowchart TB
     classDef gold fill:#fef9c3,stroke:#ca8a04,color:#422006
     classDef out fill:#ecfdf5,stroke:#10b981,color:#022c22
     classDef ctrl fill:#f1f5f9,stroke:#475569,color:#0f172a
-    class NSE,MAS,FREDAPI ext
-    class SCH,FNSE,FMAS,FFRED,SYNC,PM aws
+    class NSE,MAS,FREDAPI,NSERSS ext
+    class SCH,FNSE,FMAS,FFRED,FNEWS,SYNC,PM aws
     class S3,SSM store
-    class VOL,JOB,WH dbx
+    class VOL,NVOL,JOB,WH dbx
     class BR bronze
     class SI silver
     class GO gold
     class DASH,TG out
     classDef trader fill:#f5f3ff,stroke:#8b5cf6,color:#2e1065
-    class GUARD,SESS trader
+    class GUARD,SESS,FUND trader
     class GH,GHA,TFS ctrl

@@ -12,6 +12,10 @@ flowchart LR
         LM["massive/*.json"]
         LF["fred/*.json"]
         LT["trades/*.jsonl<br/><i>paper-trader</i>"]
+        LP["portfolio/*.jsonl<br/><i>paper-trader</i>"]
+        LU["fundamentals/*.jsonl<br/><i>paper-trader</i>"]
+        LI["index_members/*.jsonl<br/><i>paper-trader</i>"]
+        LW["news volume<br/>snap_*.jsonl"]
     end
 
     subgraph B["🥉 Bronze · streaming tables"]
@@ -20,6 +24,10 @@ flowchart LR
         B2["massive_grouped_raw"]
         B3["fred_observations_raw"]
         B4["trades_raw"]
+        B5["portfolio_raw"]
+        B6["fundamentals_raw"]
+        B7["index_members_raw"]
+        B8["news_raw"]
     end
 
     subgraph S["🥈 Silver · materialized views"]
@@ -31,6 +39,11 @@ flowchart LR
         S5["fred_daily"]
         S6["<b>global_daily</b><br/><i>FRED + 12 country ETFs</i>"]
         S7["trade_events"]
+        S8["portfolio_pools"]
+        S9["portfolio_holdings"]
+        S10["fundamentals"]
+        S11["index_members<br/><i>latest Nifty 200</i>"]
+        S12["news"]
     end
 
     subgraph G["🥇 Gold · materialized views"]
@@ -48,6 +61,13 @@ flowchart LR
         G11["trading_by_setup"]
         G12["trading_by_hour"]
         G13["trading_decisions"]
+        G14["portfolio_daily"]
+        G15["holdings_latest"]
+        G16["company_fundamentals"]
+        G17["<b>longterm_candidates</b>"]
+        G18["news_recent"]
+        G19["news_by_symbol"]
+        G20["events_calendar"]
     end
 
     LN --> B1 --> S1 --> S3
@@ -70,12 +90,25 @@ flowchart LR
     G9 --> G12
     G9 --> G13
     S7 --> G13
+    LP --> B5
+    B5 --> S8
+    B5 --> S9
+    S8 --> G14
+    S1 -- "NIFTYBEES" --> G14
+    S9 --> G15
+    S8 --> G15
+    LU --> B6 --> S10 --> G16
+    S1 -- "price, P/E" --> G16
+    LI --> B7 --> S11 --> G17
+    G16 --> G17
+    LW --> B8 --> S12 --> G18 --> G19
+    S12 --> G20
 
     classDef land fill:#fff7ed,stroke:#f59e0b,color:#451a03
     classDef bronze fill:#f5e6d3,stroke:#b45309,color:#451a03
     classDef silver fill:#eef2f6,stroke:#64748b,color:#0f172a
     classDef gold fill:#fef9c3,stroke:#ca8a04,color:#422006
-    class LN,LM,LF,LT land
-    class B1,B2,B3,B4 bronze
-    class S1,S2,S3,S4,S5,S6,S7 silver
-    class G1,G2,G3,G4,G5,G6,G7,G8,G9,G10,G11,G12,G13 gold
+    class LN,LM,LF,LT,LP,LU,LI,LW land
+    class B1,B2,B3,B4,B5,B6,B7,B8 bronze
+    class S1,S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12 silver
+    class G1,G2,G3,G4,G5,G6,G7,G8,G9,G10,G11,G12,G13,G14,G15,G16,G17,G18,G19,G20 gold
