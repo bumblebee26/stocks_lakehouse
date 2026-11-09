@@ -19,6 +19,8 @@ Paper trading (dummy money, from bumblebee26/paper-trader via stocks.silver.trad
   stocks.gold.news_by_symbol               per stock: news counts (7 and 30 days), latest headline, categories
   stocks.gold.events_calendar              upcoming board meetings (results dates) per stock
   stocks.gold.company_fundamentals         per company: profitability, debt, cash, growth, P/E and the long-term pool's quality tests
+  stocks.gold.portfolio_daily              whole dummy portfolio per day: value, P&L, return, fall from peak, NIFTYBEES alongside
+  stocks.gold.holdings_latest              current holdings with P&L, weight and days held
 
 Market proxies (no index data in these sources): NIFTYBEES (Nifty 50 ETF on NSE)
 and SPY (S&P 500 ETF). Change them with pipeline configuration keys
@@ -854,3 +856,71 @@ def company_fundamentals():
                     "roe_pct", "roa_pct", "debt_to_equity", "ocf_positive_years", "ocf_years",
                     "revenue_cagr_3y_pct", "profit_cagr_3y_pct", "eps_ttm", "close", "price_date", "pe",
                     "pe_percentile", "profit_down_2q", *tests, "tests_passed", "tests_available", "quality_score"))
+
+
+
+# ---------------------------------------------------------------------------
+# Paper-trader portfolio (dummy money): the dashboard's Portfolio page
+# ---------------------------------------------------------------------------
+# SQL equivalent:
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.portfolio_daily AS
+#   SELECT snapshot_date, sum(equity) AS total_value_rs, sum(capital) AS capital_rs, ...,
+#          100 * total / first(total) AS portfolio_index, 100 * nifty / first(nifty) AS nifty_index,
+#          100 * (total / max(total) OVER (ORDER BY snapshot_date) - 1) AS drawdown_pct
+#   FROM stocks.silver.portfolio_pools GROUP BY snapshot_date ...;
+@dp.materialized_view(
+    name="stocks.gold.portfolio_daily",
+    comment="The whole dummy portfolio per day: value by pool and in total, P&L and return on capital, fall from "
+            "the peak, and NIFTYBEES on the same days (both indexed to 100 on the first day).",
+    table_properties={"quality": "gold"},
+)
+def portfolio_daily():
+    pools = spark.read.table("stocks.silver.portfolio_pools")  # noqa: F821
+    by_pool = F.sum(F.when(F.col("pool") == "intraday", F.col("equity")))
+    day = (pools.groupBy("snapshot_date").agg(
+        F.round(F.sum("equity"), 2).alias("total_value_rs"),
+        F.round(F.sum("capital"), 2).alias("capital_rs"),
+        F.round(F.sum("cash"), 2).alias("cash_rs"),
+        F.round(by_pool, 2).alias("intraday_rs"),
+        F.round(F.sum(F.when(F.col("pool") == "swing", F.col("equity"))), 2).alias("swing_rs"),
+        F.round(F.sum(F.when(F.col("pool") == "long_term", F.col("equity"))), 2).alias("long_term_rs")))
+    nifty = (spark.read.table("stocks.silver.nse_eq_daily")  # noqa: F821
+             .filter("symbol = 'NIFTYBEES' AND series = 'EQ'").select(F.col("trade_date"), F.col("close")))
+    last_nifty = (day.join(nifty, nifty.trade_date <= day.snapshot_date, "left")
+                  .groupBy("snapshot_date").agg(F.max_by("close", "trade_date").alias("niftybees_close")))
+    order = Window.orderBy("snapshot_date")
+    whole = Window.orderBy("snapshot_date").rowsBetween(Window.unboundedPreceding, Window.unboundedFollowing)
+    upto = Window.orderBy("snapshot_date").rowsBetween(Window.unboundedPreceding, 0)
+    return (day.join(last_nifty, "snapshot_date", "left")
+            .withColumn("pnl_rs", F.round(F.col("total_value_rs") - F.col("capital_rs"), 2))
+            .withColumn("return_pct", F.round((F.col("total_value_rs") / F.col("capital_rs") - 1) * 100, 2))
+            .withColumn("peak_rs", F.max("total_value_rs").over(upto))
+            .withColumn("drawdown_pct", F.round((F.col("total_value_rs") / F.col("peak_rs") - 1) * 100, 2))
+            .withColumn("portfolio_index", F.round(F.col("total_value_rs") / F.first("total_value_rs").over(whole) * 100, 2))
+            .withColumn("nifty_index", F.round(F.col("niftybees_close") / F.first("niftybees_close", ignorenulls=True).over(whole) * 100, 2))
+            .withColumn("day_change_rs", F.round(F.col("total_value_rs") - F.lag("total_value_rs").over(order), 2)))
+
+
+# SQL equivalent:
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.holdings_latest AS
+#   SELECT h.*, 100 * pnl / (value - pnl) AS pnl_pct, 100 * value / total AS weight_pct,
+#          datediff(snapshot_date, opened) AS days_held
+#   FROM stocks.silver.portfolio_holdings h WHERE snapshot_date = (SELECT max(snapshot_date) ...);
+@dp.materialized_view(
+    name="stocks.gold.holdings_latest",
+    comment="Current holdings across pools (latest snapshot): quantity, average cost, last price, value, P&L in Rs "
+            "and %, weight in the whole portfolio, days held.",
+    table_properties={"quality": "gold"},
+)
+def holdings_latest():
+    h = spark.read.table("stocks.silver.portfolio_holdings")  # noqa: F821
+    pools = spark.read.table("stocks.silver.portfolio_pools")  # noqa: F821
+    last = h.agg(F.max("snapshot_date").alias("snapshot_date"))
+    total = (pools.join(last, "snapshot_date").agg(F.sum("equity").alias("portfolio_value")))
+    return (h.join(last, "snapshot_date").crossJoin(total)
+            .withColumn("cost", F.col("value") - F.col("pnl"))
+            .withColumn("pnl_pct", F.round(F.when(F.col("cost") > 0, F.col("pnl") / F.col("cost") * 100), 2))
+            .withColumn("weight_pct", F.round(F.col("value") / F.col("portfolio_value") * 100, 2))
+            .withColumn("days_held", F.datediff("snapshot_date", "opened"))
+            .select("snapshot_date", "pool", "symbol", "sector", "qty", "avg_cost", "last_price", "value", "pnl",
+                    "pnl_pct", "weight_pct", "opened", "days_held"))

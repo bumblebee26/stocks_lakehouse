@@ -288,3 +288,37 @@ def fundamentals_raw():
         .schema(FUNDAMENTALS_SCHEMA)
         .load(f"{LANDING}/fundamentals/")
     )
+
+
+# ---------------------------------------------------------------------------
+# Paper-trader portfolio: pools and holdings, pushed daily at 15:45 IST with the journal
+# ---------------------------------------------------------------------------
+# record_type 'pool': one row per pool (intraday, swing, long_term) with capital, cash, equity.
+# record_type 'holding': one row per holding with quantity, average cost, last price, value, P&L.
+#
+# SQL equivalent:
+#   CREATE OR REFRESH STREAMING TABLE stocks.bronze.portfolio_raw AS
+#   SELECT *, <lineage columns> FROM STREAM read_files('/Volumes/stocks/bronze/landing/portfolio/',
+#     format => 'json', pathGlobFilter => '*.jsonl', schema => '<PORTFOLIO_SCHEMA below>');
+PORTFOLIO_SCHEMA = (
+    "record_type STRING, snapshot_date STRING, pool STRING, capital DOUBLE, cash DOUBLE, holdings_value DOUBLE, "
+    "equity DOUBLE, symbol STRING, sector STRING, qty DOUBLE, avg_cost DOUBLE, last_price DOUBLE, value DOUBLE, "
+    "pnl DOUBLE, opened STRING"
+)
+
+
+@dp.table(
+    name="stocks.bronze.portfolio_raw",
+    comment="Raw paper-trader portfolio snapshots (dummy money): pools and holdings, one row per record per daily file.",
+    table_properties={"quality": "bronze"},
+)
+def portfolio_raw():
+    return with_lineage(
+        spark.readStream.format("cloudFiles")  # noqa: F821
+        .option("cloudFiles.format", "json")
+        .option("pathGlobFilter", "*.jsonl")
+        .option("rescuedDataColumn", "_rescued_data")
+        .option("cloudFiles.partitionColumns", "")
+        .schema(PORTFOLIO_SCHEMA)
+        .load(f"{LANDING}/portfolio/")
+    )

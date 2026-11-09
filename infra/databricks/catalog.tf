@@ -59,6 +59,7 @@ resource "databricks_file" "landing_readme" {
     massive      = "Massive grouped daily (all US stocks, raw JSON). One folder per US trading date."
     fred         = "FRED global markets (newline-delimited JSON). One folder per fetch date; each file covers a date range."
     trades       = "Paper-trader journal (dummy money, JSON lines), pushed daily at 15:45 IST by stocks-trader-guardian (bumblebee26/paper-trader)."
+    portfolio    = "Paper-trader pools and holdings (dummy money, JSON lines), pushed daily at 15:45 IST with the trade journal."
     fundamentals = "Company financials (annual and quarterly, JSON lines) for about 250 large NSE companies, pushed weekly by paper-trader's Company fundamentals workflow."
   }
 
