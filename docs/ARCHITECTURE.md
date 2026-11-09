@@ -21,7 +21,7 @@ tables before the market opens and sends its trade journal back at 15:45 IST. Ho
 | **Databricks volume** | The copy the pipeline reads. Same folder layout as S3. |
 | **Lakeflow pipeline** | Bronze (Auto Loader streaming tables), silver and gold (materialized views). Written in Python, with the equivalent SQL in comments. |
 | **Refresh job** | Runs the pipeline when new files land (waits 5 minutes after the last file, at most every 15 minutes). |
-| **Dashboard** | AI/BI (Lakeview) dashboard on the gold tables, defined in Terraform. |
+| **Dashboard** | AI/BI (Lakeview) dashboard on the gold tables, defined in Terraform. Pages: Overview (markets), Portfolio, Intraday trading, Company quality. KPI tiles are counters on one-row datasets; every derived number is computed in SQL, not in widgets. |
 | **Pre-market Lambda** | Queries gold through the Databricks SQL Statement API and sends a Telegram message. |
 | **Sync Lambda** | Copies anything in S3 that's missing from the volume. Used after backfills and to repair gaps. |
 | **Paper-trader feed** | [paper-trader](https://github.com/bumblebee26/paper-trader)'s `stocks-trader-guardian` Lambda pushes the day's trade journal to `landing/trades/` at 15:45 IST (same Files API and pusher token). It's both a backup copy of the trader's S3 journal and the input to the `trad*` gold tables and the "Paper trading" dashboard page. |

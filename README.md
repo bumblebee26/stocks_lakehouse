@@ -22,7 +22,9 @@ covers the base view above, the full [architecture](docs/ARCHITECTURE_DIAGRAMS.m
 | 17 bronze/silver/gold tables | Unity Catalog `stocks.*` | Refreshed when new files land |
 | Dashboard "Stocks lakehouse: India x US" | Databricks workspace | Always current |
 | Pre-market brief | Your Telegram | 08:45 IST, Mon–Fri |
-| Paper-trading analysis ([paper-trader](https://github.com/bumblebee26/paper-trader)) | `stocks.gold.trad*` tables + dashboard page "Paper trading" | After the 15:45 IST export |
+| Paper-trading analysis ([paper-trader](https://github.com/bumblebee26/paper-trader)) | `stocks.gold.trad*` tables + dashboard page "Intraday trading" (KPI tiles: net P&L, win rate, profit factor, expectancy, win/loss ratio; equity curve, daily P&L, drawdown, by setup and hour) | After the 15:45 IST export |
+| Dummy portfolio and holdings | `stocks.gold.portfolio_daily`, `stocks.gold.holdings_latest` + dashboard page "Portfolio" (value, return vs NIFTYBEES, fall from peak, allocation by pool and sector, holdings) | After the 15:45 IST export |
+| Company quality | `stocks.gold.company_fundamentals` + dashboard page "Company quality" | Saturdays |
 
 Gold insights include: how India opens after big US moves, which global markets line up with India's open,
 market breadth, unusual volume, Indian ADR premium vs USD/INR, and a global markets snapshot.

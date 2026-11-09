@@ -15,6 +15,7 @@ Same layout in S3 (`s3://stocks-lakehouse-landing-<account-id>/landing/`) and in
 | `massive/date=YYYY-MM-DD/grouped_daily_YYYYMMDD.json` | Massive grouped daily, all US tickers | JSON |
 | `fred/date=YYYY-MM-DD/fred_<start>_<end>.json` | FRED observations for a date range | NDJSON |
 | `trades/date=YYYY-MM-DD/events.jsonl` | Paper-trader journal (dummy money), pushed 15:45 IST by `stocks-trader-guardian` (volume; S3 copy in the trader's own bucket) | NDJSON |
+| `portfolio/date=YYYY-MM-DD/portfolio.jsonl` | Paper-trader pools (capital, cash, equity) and holdings (qty, cost, last price, value, P&L), pushed daily at 15:45 IST with the journal (volume only) | NDJSON |
 | `fundamentals/date=YYYY-MM-DD/fundamentals.jsonl` | Company financials for ~250 large NSE companies, pushed weekly (Sat 07:15 IST) by paper-trader's *Company fundamentals* workflow (volume only) | NDJSON |
 | `<source>/_README.txt` | Folder marker (volume only) | text |
 
@@ -37,6 +38,7 @@ Each new file is read once. Every bronze table has these lineage columns: `_sour
 | `bronze.massive_grouped_raw` | file (one US day) | `results` kept as **JSON text** (fields `T` and `t` clash, see ARCHITECTURE), plus `status`, `resultsCount`, `adjusted`. |
 | `bronze.fred_observations_raw` | series × date × file | `series_id`, `date`, `value`, `name`, `region`, `asset_class`, `unit`. Explicit schema. |
 | `bronze.news_raw` | news item × snapshot | `id`, `feed`, `symbol` (null when the company couldn't be matched), `company`, `category`, `title`, `description`, `link`, `published_ist`, `fetched_at_ist`. Explicit schema. |
+| `bronze.portfolio_raw` | record × file | `record_type` (`pool` or `holding`), `snapshot_date`, `pool`, pool fields (`capital`, `cash`, `holdings_value`, `equity`) or holding fields (`symbol`, `sector`, `qty`, `avg_cost`, `last_price`, `value`, `pnl`, `opened`). Explicit schema. |
 | `bronze.fundamentals_raw` | company × metric × period × file | `symbol`, `metric` (TotalRevenue, NetIncome, EBIT, TotalDebt, StockholdersEquity, OperatingCashFlow, InvestedCapital, DilutedEPS, TotalAssets), `period_type` (`12M` annual, `3M` quarterly), `period_end`, `value` (INR), `source`. Explicit schema. |
 | `bronze.trades_raw` | event × file | Paper-trader events: `event_id`, `proposal_id`, `timestamp_ist`, `event`, `symbol`, `setup`, `side`, prices, `qty`, `risk_rs`, `pnl_rs`, `fees_rs`, `user_reply`; snapshot fields `balance`, `starting_capital`, `realized_today`. Explicit schema. |
 
@@ -51,6 +53,8 @@ Each new file is read once. Every bronze table has these lineage columns: `_sour
 | `silver.fred_daily` | series × date | `series_id`, `obs_date`, `value`, `name`, `region`, `asset_class`, `unit` | series, date and value present |
 | `silver.trade_events` | event | Typed paper-trader events (`event_ts` timestamp IST). Events: `proposed`, `blocked_by_risk_gate`, `rejected`, `expired`, `skipped_after_approval`, `filled`, `exited`, `squared_off`, `passed_outcome`, `day_plan`, `ledger_snapshot`. | event_id, event and time present |
 | `silver.news` | news item | `id`, `feed`, `symbol`, `category` (results, board_meeting, order, management, regulatory, rating, pledge, insider, dividend_split_bonus, mna, meeting, corporate_action, other), `title`, `link`, `published_ts`, `first_seen_ts`, `news_ts`, `news_date`. Earliest snapshot of each item wins. | id and title present |
+| `silver.portfolio_pools` | day × pool | `capital`, `cash`, `holdings_value`, `equity` (newest file per day) | keys and equity present |
+| `silver.portfolio_holdings` | day × pool × symbol | `sector`, `qty`, `avg_cost`, `last_price`, `value`, `pnl`, `opened` | keys present |
 | `silver.fundamentals` | company × metric × period | `symbol`, `metric`, `period_type`, `period_end`, `value`, `currency`, `fetched_at`. Newest weekly fetch wins (restatements replace old figures). | keys and value present |
 | `silver.global_daily` | instrument × date | `instrument`, `name`, `region`, `asset_class`, `unit`, `source` (`FRED`/`Massive`), `obs_date`, `value`. FRED series + 12 country ETFs. | — |
 
@@ -78,6 +82,8 @@ For NSE, `series = 'EQ'` is the main board. Gold uses `EQ` only.
 | `gold.trading_decisions` | day | Did your YES/NO choices help? | `taken`, `taken_net_pnl_rs`, `passed`, `passed_would_have_made_rs`, `saved_by_skipping_rs` |
 | `gold.news_recent` | news item (30 days) | What has each company announced lately? | `symbol`, `news_ts`, `category`, `title`, `link` |
 | `gold.news_by_symbol` | symbol | How newsy is a stock, and what's the latest? | `news_7d`, `news_30d`, `latest_title`, `latest_link`, `latest_ts`, `categories_30d` |
+| `gold.portfolio_daily` | day | How is the whole dummy portfolio doing? | `total_value_rs`, pool values, `pnl_rs`, `return_pct`, `drawdown_pct`, `portfolio_index` and `nifty_index` (both 100 on day one), `day_change_rs` |
+| `gold.holdings_latest` | holding | What do I hold now? | `pool`, `symbol`, `sector`, `qty`, `avg_cost`, `last_price`, `value`, `pnl`, `pnl_pct`, `weight_pct`, `days_held` |
 | `gold.company_fundamentals` | company | Which large companies pass the long-term pool's quality tests? | `roce_pct` (`roa_pct` for banks/lenders), `debt_to_equity`, `ocf_positive_years`, `revenue_cagr_3y_pct`, `profit_cagr_3y_pct`, `eps_ttm`, `pe`, `pe_percentile` (0 = cheapest), `profit_down_2q`, `pass_capital/balance/cash/growth/price`, `tests_passed`, `quality_score`. Not in this source: promoter pledges, bad-loan ratios, P/E history |
 | `gold.events_calendar` | symbol × meeting date | Which companies have a board meeting (often results) coming up? | `event_date`, `purpose`, `link`, `announced_ts` |
 
