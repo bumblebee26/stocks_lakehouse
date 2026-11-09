@@ -79,7 +79,10 @@ SELECT 'quality', concat_ws(' ',
    FROM (SELECT * FROM stocks.gold.company_fundamentals WHERE tests_available >= 3
          ORDER BY quality_score DESC, pe_percentile ASC LIMIT 5)),
   (SELECT count_if(profit_down_2q) || ' companies have seen profit fall two quarters in a row: worth avoiding for now.'
-   FROM stocks.gold.company_fundamentals HAVING count_if(profit_down_2q) > 0)
+   FROM stocks.gold.company_fundamentals HAVING count_if(profit_down_2q) > 0),
+  (SELECT 'This week the long-term pool would pick ' || count(*) || ' companies from ' || count(DISTINCT industry)
+          || ' industries: ' || array_join(transform(sort_array(collect_list(struct(rank AS r, symbol AS s))), x -> x.s), ', ') || '.'
+   FROM stocks.gold.longterm_candidates WHERE is_pick HAVING count(*) > 0)
 );
 
 CREATE OR REPLACE TABLE stocks.gold.dashboard_summary

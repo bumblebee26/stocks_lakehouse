@@ -183,10 +183,17 @@ The pipeline is behind. Check the Massive fetcher log and the `stocks-refresh` j
 
 ## Paper trading tables
 
-### The Paper trading page shows `TABLE_OR_VIEW_NOT_FOUND`
-**Cause:** The pipeline hasn't run since the trading tables were deployed.
-**Fix:** Run the `stocks-refresh` job once (Jobs & Pipelines → stocks-refresh → Run now). The tables stay
-empty until the first 15:45 export from paper-trader.
+### The Intraday trading, Portfolio or Company quality page shows `TABLE_OR_VIEW_NOT_FOUND`
+**Cause:** The pipeline hasn't run since the tables were deployed.
+**Fix:** Run the `stocks-refresh` job once (Jobs & Pipelines → stocks-refresh → Run now). The trading and
+portfolio tables stay empty until the first 15:45 export from paper-trader; the company tables until the first
+Saturday fundamentals run.
+
+### An "In plain words" box is empty or shows plain facts instead of AI text
+**Cause:** The job's `dashboard_summary` task failed or hasn't run yet, or `ai_summarize` failed (the dashboard
+then falls back to the facts). A sentence whose data is missing is left out on purpose.
+**Fix:** Open the last `stocks-refresh` run and check the `dashboard_summary` task. To rebuild now, run the job
+again; `SELECT * FROM stocks.gold.dashboard_summary` shows the facts, the AI text and when it was generated.
 
 ### No trades for a day that had trading
 **Cause:** The 15:45 export didn't run or failed (e.g. expired Databricks pusher token).
@@ -201,7 +208,21 @@ an event is missing from the export, or the ledger was edited or reset during th
 `state/ledger.json` history (the bucket is versioned). Re-export the day if the journal has more events than
 the volume file.
 
+## Company news
+
+### `All NSE news feeds failed` in the `stocks-fetch-news` log
+**Cause:** NSE refused every RSS feed (it blocks some cloud addresses or changes its pages). One failed feed
+alone is only a warning.
+**Fix:** Nothing to do if it's occasional: the next run 30 minutes later tries again, and paper-trader just
+shows "news unavailable". If it lasts, check the feed URLs in `fetchers/news.py`.
+
 ## GitHub / CI
+
+### Plan job: `FAIL  dashboard dataset ...` or `FAIL  dashboard_summary.sql statement ...`
+**Cause:** `scripts/check_sql.py` ran the query with `EXPLAIN` on the SQL warehouse and it has a syntax error,
+an unknown column or an unknown function.
+**Fix:** Fix the SQL in `infra/databricks/dashboard.tf` or `sql/`, push to `dev`. `WARN ... TABLE_OR_VIEW_NOT_FOUND`
+is fine when the same change creates that table (the pipeline builds it after the merge).
 
 ### `git push` rejected (`fetch first` / non-fast-forward)
 

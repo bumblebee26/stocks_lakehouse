@@ -322,3 +322,30 @@ def portfolio_raw():
         .schema(PORTFOLIO_SCHEMA)
         .load(f"{LANDING}/portfolio/")
     )
+
+
+# ---------------------------------------------------------------------------
+# Index members: NSE's Nifty 200 list with each company's industry (weekly, with the fundamentals)
+# ---------------------------------------------------------------------------
+# SQL equivalent:
+#   CREATE OR REFRESH STREAMING TABLE stocks.bronze.index_members_raw AS
+#   SELECT *, <lineage columns> FROM STREAM read_files('/Volumes/stocks/bronze/landing/index_members/',
+#     format => 'json', pathGlobFilter => '*.jsonl', schema => '<INDEX_MEMBERS_SCHEMA below>');
+INDEX_MEMBERS_SCHEMA = "symbol STRING, company STRING, industry STRING, isin STRING, index_name STRING, as_of STRING"
+
+
+@dp.table(
+    name="stocks.bronze.index_members_raw",
+    comment="Raw NSE index constituent lists (Nifty 200), one row per company per weekly file.",
+    table_properties={"quality": "bronze"},
+)
+def index_members_raw():
+    return with_lineage(
+        spark.readStream.format("cloudFiles")  # noqa: F821
+        .option("cloudFiles.format", "json")
+        .option("pathGlobFilter", "*.jsonl")
+        .option("rescuedDataColumn", "_rescued_data")
+        .option("cloudFiles.partitionColumns", "")
+        .schema(INDEX_MEMBERS_SCHEMA)
+        .load(f"{LANDING}/index_members/")
+    )

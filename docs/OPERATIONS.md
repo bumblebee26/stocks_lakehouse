@@ -8,11 +8,12 @@ Day-to-day running of the lakehouse once [SETUP.md](SETUP.md) is done.
 |---|---|---|
 | 04:30 Tue–Sat | `stocks-fetch-massive` | `landing/massive/date=<US date>/grouped_daily_YYYYMMDD.json` |
 | 06:00 Tue–Sat | `stocks-fetch-fred` | `landing/fred/date=<today>/fred_<start>_<end>.json` (last 21 days) |
-| 5 min after files stop arriving | Databricks job `stocks-refresh` | Refreshes all bronze/silver/gold tables |
+| 5 min after files stop arriving | Databricks job `stocks-refresh` | Refreshes all bronze/silver/gold tables, then `sql/dashboard_summary.sql` rebuilds `gold.dashboard_summary_facts` and `gold.dashboard_summary` (the dashboard's "In plain words" text) |
 | every 30 min, 08:00–19:30 Mon–Fri | `stocks-fetch-news` | news volume `date=<today>/snap_HHMM.jsonl` + `latest.jsonl` (S3 copy under `landing/news/`); read by the pipeline at its next refresh |
 | 08:45 Mon–Fri | `stocks-premarket-brief` | Telegram message |
-| 15:45 Mon–Fri | paper-trader's `stocks-trader-guardian` (other repo) | `landing/trades/date=<today>/events.jsonl` (volume only; the S3 copy is in the trader's own bucket) |
+| 15:45 Mon–Fri | paper-trader's `stocks-trader-guardian` (other repo) | `landing/trades/date=<today>/events.jsonl` and `landing/portfolio/date=<today>/portfolio.jsonl` (volume only; the S3 copies are in the trader's own bucket) |
 | 19:30 Mon–Fri | `stocks-fetch-nse` | `landing/nse/date=<today>/bhavcopy_cm_YYYYMMDD.csv.zip` (+ `.csv` in the volume) |
+| 07:15 Sat | paper-trader's *Company fundamentals* workflow (other repo, GitHub Actions) | `landing/fundamentals/date=<today>/fundamentals.jsonl` and `landing/index_members/date=<today>/nifty200.jsonl` (volume only) |
 
 Market holidays are handled: the fetchers record `no_file` / `no_data` instead of failing.
 
@@ -32,6 +33,8 @@ Market holidays are handled: the fetchers record `no_file` / `no_data` instead o
 | Tables and insights | `pipeline/bronze.py`, `silver.py`, `gold.py` |
 | Thresholds (big move %, volume spike, proxies) | variables in `infra/databricks/variables.tf` |
 | Dashboard | `infra/databricks/dashboard.tf` |
+| Dashboard "In plain words" summaries | `sql/dashboard_summary.sql` (checked with `EXPLAIN` in the plan job) |
+| Long-term pool scoring and picks | `company_fundamentals` and `longterm_candidates` in `pipeline/gold.py` |
 | Global instruments | `SERIES` in `fetchers/fred.py`, `COUNTRY_ETFS` in `pipeline/silver.py` |
 
 Before pushing Terraform changes, run `terraform fmt -recursive infra` (CI fails on formatting). Run the tests
@@ -74,10 +77,10 @@ Options: `{"prefix": "landing/nse/"}` for one source, `{"overwrite": true}` to r
 
 | Check | How |
 |---|---|
-| Lambda logs | `aws logs tail /aws/lambda/stocks-fetch-nse --since 1h --region ap-southeast-2` (or `-massive`, `-fred`, `stocks-premarket-brief`, `stocks-sync-volume`) |
+| Lambda logs | `aws logs tail /aws/lambda/stocks-fetch-nse --since 1h --region ap-southeast-2` (or `-massive`, `-fred`, `-news`, `stocks-premarket-brief`, `stocks-sync-volume`) |
 | Schedules on? | `aws scheduler list-schedules --region ap-southeast-2 --query "Schedules[].[Name,State]" --output table` |
 | Files arriving? | `aws s3 ls s3://stocks-lakehouse-landing-<account-id>/landing/nse/` |
-| Pipeline runs | Databricks → **Jobs & Pipelines → stocks-refresh** (failures email you) |
+| Pipeline runs | Databricks → **Jobs & Pipelines → stocks-refresh** (two tasks: `refresh_medallion`, then `dashboard_summary`; failures email you) |
 | Data freshness | `SELECT market, max(trade_date) FROM stocks.silver.trading_days GROUP BY market;` |
 | Global freshness | `SELECT instrument, obs_date FROM stocks.gold.global_snapshot ORDER BY obs_date;` |
 | CI/CD | GitHub → **Actions** tab |

@@ -234,14 +234,13 @@ locals {
     SQL
 
     # --- Company quality (long-term pool) ---
-    quality_top = <<-SQL
-      SELECT symbol, quality_score, CAST(tests_passed AS INT) AS tests_passed, CAST(tests_available AS INT) AS tests_available,
-             coalesce(roce_pct, roa_pct) AS return_on_capital_pct, roe_pct, debt_to_equity,
-             revenue_cagr_3y_pct, profit_cagr_3y_pct, pe, pe_percentile, profit_down_2q
-      FROM stocks.gold.company_fundamentals
-      WHERE tests_available >= 3
-      ORDER BY quality_score DESC, pe_percentile ASC
-      LIMIT 50
+    longterm_picks = <<-SQL
+      SELECT CAST(rank AS INT) AS rank, CASE WHEN is_pick THEN 'Pick' ELSE '' END AS pick, symbol, company, industry,
+             score, quality_score, target_weight_pct, coalesce(roce_pct, roa_pct) AS return_on_capital_pct,
+             debt_to_equity, profit_cagr_3y_pct, pe, reasons
+      FROM stocks.gold.longterm_candidates
+      ORDER BY rank
+      LIMIT 30
     SQL
 
     quality_scatter = <<-SQL
@@ -277,7 +276,7 @@ locals {
       trading_decisions    = ["trades_taken", "taken_net_pnl_rs", "proposals_skipped", "skipped_that_would_have_won", "skipped_would_have_made_rs", "saved_by_skipping_rs"]
       trading_recent       = ["trade_date", "symbol", "side", "setup", "qty", "entry_price", "exit_price", "exit_reason", "net_pnl_rs", "r_multiple", "holding_minutes"]
       holdings             = ["pool", "symbol", "sector", "qty", "avg_cost", "last_price", "value_rs", "pnl_rs", "pnl_pct", "weight_pct", "days_held"]
-      quality_top          = ["symbol", "quality_score", "tests_passed", "tests_available", "return_on_capital_pct", "roe_pct", "debt_to_equity", "revenue_cagr_3y_pct", "profit_cagr_3y_pct", "pe", "pe_percentile", "profit_down_2q"]
+      longterm_picks       = ["rank", "pick", "symbol", "company", "industry", "score", "quality_score", "target_weight_pct", "return_on_capital_pct", "debt_to_equity", "profit_cagr_3y_pct", "pe", "reasons"]
       portfolio_vs_nifty   = ["snapshot_date", "series", "index_value"]
       portfolio_drawdown   = ["snapshot_date", "drawdown_pct"]
       portfolio_pools      = ["snapshot_date", "pool", "value_rs"]
@@ -386,7 +385,7 @@ locals {
   table_widget = {
     for k, t in {
       holdings          = { ds = "holdings", title = "Current holdings (all pools)", desc = "Everything held right now, largest first. Weight = share of the whole portfolio; P&L includes buying costs.", pos = [0, 25, 12, 6] }
-      quality_top       = { ds = "quality_top", title = "Top 50 companies by quality score", desc = "Long-term pool candidates. Score = share of the tests passed (return on capital, debt, cash flow, growth, price). Profit down 2q = profit fell two quarters in a row.", pos = [0, 13, 12, 10] }
+      quality_top       = { ds = "longterm_picks", title = "Long-term pool: this week's 10 picks (max 2 per industry) and the next 20", desc = "Eligible Nifty 200 companies: quality score 0.6 or more, profitable, no two-quarter profit fall. Score = 100 x quality + growth bonus - price penalty. Target weight = share of the Rs 1 lakh pool; 10% stays in cash. Shadow mode: nothing is bought yet.", pos = [0, 13, 12, 10] }
       summary_overview  = { ds = "summary_overview", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 2, 12, 4] }
       summary_portfolio = { ds = "summary_portfolio", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 2, 12, 4] }
       summary_intraday  = { ds = "summary_intraday", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 2, 12, 4] }

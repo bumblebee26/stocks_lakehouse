@@ -9,23 +9,25 @@ Each component and numbered flow in this diagram is explained in
 CI/CD diagrams.
 
 This repo is half of a platform: [paper-trader](https://github.com/bumblebee26/paper-trader) reads the gold
-tables before the market opens and sends its trade journal back at 15:45 IST. How the two fit together:
+tables before the market opens and the news file during the day, sends its trade journal and a portfolio
+snapshot back at 15:45 IST, and sends company financials every Saturday. How the two fit together:
 [diagram 5](ARCHITECTURE_DIAGRAMS.md#5-platform-with-paper-trader).
 
 ## Components
 
 | Component | What it does |
 |---|---|
-| **Fetcher Lambdas** | One per source. Download one day (or a date range) and write the raw file to S3, then push the same file to the Databricks volume. NSE zips are unzipped on the way into the volume. |
+| **Fetcher Lambdas** | One per source (NSE, Massive, FRED, news). Download one day (or a date range) and write the raw file to S3, then push the same file to the Databricks volume. NSE zips are unzipped on the way into the volume. |
 | **S3 landing bucket** | The permanent, untouched raw archive. Private, encrypted, versioned, HTTPS-only. |
 | **Databricks volume** | The copy the pipeline reads. Same folder layout as S3. |
+| **News volume** | `/Volumes/stocks/bronze/news/`: the news Lambda writes a snapshot of NSE's announcement, results, board-meeting and corporate-action feeds every 30 minutes (08:00–19:30 IST) plus `latest.jsonl`, which paper-trader reads directly. Kept out of the landing volume so news doesn't trigger a pipeline refresh every 30 minutes; the pipeline picks it up at its next refresh. |
 | **Lakeflow pipeline** | Bronze (Auto Loader streaming tables), silver and gold (materialized views). Written in Python, with the equivalent SQL in comments. |
-| **Refresh job** | Runs the pipeline when new files land (waits 5 minutes after the last file, at most every 15 minutes). |
-| **Dashboard** | AI/BI (Lakeview) dashboard on the gold tables, defined in Terraform. Pages: Overview (markets), Portfolio, Intraday trading, Company quality. KPI tiles are counters on one-row datasets; every derived number is computed in SQL, not in widgets. |
+| **Refresh job** | Runs the pipeline when new files land (waits 5 minutes after the last file, at most every 15 minutes), then runs `sql/dashboard_summary.sql` on the SQL warehouse: short facts per dashboard page from the latest numbers, rewritten by `ai_summarize` into `gold.dashboard_summary`. |
+| **Dashboard** | AI/BI (Lakeview) dashboard on the gold tables, defined in Terraform. Pages: Overview (markets), Portfolio, Intraday trading, Company quality (with the long-term pool's weekly picks), Details (full tables behind the Overview charts). Each page opens with an "In plain words" summary (the AI text, or the plain facts if AI Functions fail) and every chart has a caption. KPI tiles are counters on one-row datasets; every derived number is computed in SQL, not in widgets. |
 | **Pre-market Lambda** | Queries gold through the Databricks SQL Statement API and sends a Telegram message. |
 | **Sync Lambda** | Copies anything in S3 that's missing from the volume. Used after backfills and to repair gaps. |
-| **Paper-trader feed** | [paper-trader](https://github.com/bumblebee26/paper-trader)'s `stocks-trader-guardian` Lambda pushes the day's trade journal to `landing/trades/` at 15:45 IST (same Files API and pusher token). It's both a backup copy of the trader's S3 journal and the input to the `trad*` gold tables and the "Paper trading" dashboard page. |
-| **CI/CD** | GitHub Actions: checks on every push, plan on PR, apply on merge to `main`. |
+| **Paper-trader feed** | [paper-trader](https://github.com/bumblebee26/paper-trader)'s `stocks-trader-guardian` Lambda pushes the day's trade journal to `landing/trades/` and a portfolio snapshot (every pool and holding) to `landing/portfolio/` at 15:45 IST (same Files API and pusher token). The journal is both a backup copy of the trader's S3 journal and the input to the `trad*` gold tables and the "Intraday trading" page; the snapshot feeds `portfolio_daily`, `holdings_latest` and the "Portfolio" page. On Saturdays at 07:15 IST paper-trader's *Company fundamentals* workflow pushes company financials to `landing/fundamentals/` and NSE's Nifty 200 list to `landing/index_members/`, the inputs to `company_fundamentals` and `longterm_candidates`. |
+| **CI/CD** | GitHub Actions: checks on every push, plan on PR (plus every dashboard and `sql/` query checked against the SQL warehouse with `EXPLAIN` by `scripts/check_sql.py`), apply on merge to `main`. |
 
 ## Why it's built this way
 
@@ -77,6 +79,7 @@ undone and removes the spend limit.
 | `stocks-fetch-nse-role` | `PutObject` to `landing/nse/*`, read Databricks push config | Read/list/delete S3, other prefixes |
 | `stocks-fetch-us-role` | `PutObject` to `landing/massive/*`, read Massive key + push config | Same |
 | `stocks-fetch-global-role` | `PutObject` to `landing/fred/*`, read FRED key + push config | Same |
+| `stocks-fetch-news-role` | `PutObject` to `landing/news/*`, read push config | Same |
 | `stocks-sync-volume-role` | List/read `landing/*`, read push config | Write S3 |
 | `stocks-premarket-role` | Read Databricks + Telegram settings from SSM | Any S3 access |
 | `stocks-scheduler-role` | Invoke the fetcher and pre-market Lambdas | Anything else |

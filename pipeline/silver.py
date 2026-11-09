@@ -9,6 +9,7 @@
   stocks.silver.fundamentals   company financials, one row per symbol x metric x period (newest fetch wins)
   stocks.silver.portfolio_pools     paper-trader pools per day (capital, cash, equity)
   stocks.silver.portfolio_holdings  paper-trader holdings per day
+  stocks.silver.index_members  the latest Nifty 200 list: symbol, company, industry
 
 Materialized views: they recompute incrementally where possible, and make
 de-duplication simple (a re-fetched day replaces the old copy: latest file wins).
@@ -482,3 +483,24 @@ def portfolio_holdings():
     return (_latest_portfolio_file().filter("record_type = 'holding'")
             .select("snapshot_date", "pool", "symbol", "sector", "qty", "avg_cost", "last_price", "value", "pnl",
                     F.to_date("opened").alias("opened")))
+
+
+# ---------------------------------------------------------------------------
+# Index members (latest list only)
+# ---------------------------------------------------------------------------
+# SQL equivalent:
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.silver.index_members AS
+#   SELECT symbol, company, industry, isin, index_name, to_date(as_of) AS as_of
+#   FROM stocks.bronze.index_members_raw
+#   WHERE as_of = (SELECT max(as_of) FROM stocks.bronze.index_members_raw);
+@dp.materialized_view(
+    name="stocks.silver.index_members",
+    comment="The latest NSE index constituent list (Nifty 200): symbol, company name, industry, ISIN.",
+    table_properties={"quality": "silver"},
+)
+@dp.expect_all_or_drop({"has_symbol": "symbol IS NOT NULL AND symbol <> ''"})
+def index_members():
+    raw = spark.read.table("stocks.bronze.index_members_raw").withColumn("as_of", F.to_date("as_of"))  # noqa: F821
+    latest = raw.agg(F.max("as_of").alias("as_of"))
+    return (raw.join(latest, "as_of").dropDuplicates(["symbol"])
+            .select("symbol", "company", "industry", "isin", "index_name", "as_of"))

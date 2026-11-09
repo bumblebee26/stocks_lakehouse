@@ -10,7 +10,7 @@ a dashboard, and sends a **pre-market brief to Telegram** before the Indian mark
 
 **Diagrams with explanations:** [docs/ARCHITECTURE_DIAGRAMS.md](docs/ARCHITECTURE_DIAGRAMS.md)
 covers the base view above, the full [architecture](docs/ARCHITECTURE_DIAGRAMS.md#2-architecture),
-[data lineage](docs/ARCHITECTURE_DIAGRAMS.md#3-data-lineage) (all 24 tables) and the
+[data lineage](docs/ARCHITECTURE_DIAGRAMS.md#3-data-lineage) (all 40 pipeline tables) and the
 [CI/CD flow](docs/ARCHITECTURE_DIAGRAMS.md#4-cicd-flow), and the
 [platform shared with paper-trader](docs/ARCHITECTURE_DIAGRAMS.md#5-platform-with-paper-trader).
 
@@ -19,12 +19,12 @@ covers the base view above, the full [architecture](docs/ARCHITECTURE_DIAGRAMS.m
 | Output | Where | When |
 |---|---|---|
 | Daily raw data (NSE, US, global) | S3 `landing/` + Databricks volume | Every trading day |
-| 17 bronze/silver/gold tables | Unity Catalog `stocks.*` | Refreshed when new files land |
-| Dashboard "Stocks lakehouse: India x US" | Databricks workspace | Always current |
+| 40 bronze/silver/gold tables | Unity Catalog `stocks.*` | Refreshed when new files land |
+| Dashboard "Stocks lakehouse: India x US" (pages Overview, Portfolio, Intraday trading, Company quality, Details; each with an "In plain words" summary written by Databricks AI) | Databricks workspace | Always current; summaries rebuilt after every refresh |
 | Pre-market brief | Your Telegram | 08:45 IST, Mon–Fri |
 | Paper-trading analysis ([paper-trader](https://github.com/bumblebee26/paper-trader)) | `stocks.gold.trad*` tables + dashboard page "Intraday trading" (KPI tiles: net P&L, win rate, profit factor, expectancy, win/loss ratio; equity curve, daily P&L, drawdown, by setup and hour) | After the 15:45 IST export |
 | Dummy portfolio and holdings | `stocks.gold.portfolio_daily`, `stocks.gold.holdings_latest` + dashboard page "Portfolio" (value, return vs NIFTYBEES, fall from peak, allocation by pool and sector, holdings) | After the 15:45 IST export |
-| Company quality | `stocks.gold.company_fundamentals` + dashboard page "Company quality" | Saturdays |
+| Company quality and long-term picks | `stocks.gold.company_fundamentals`, `stocks.gold.longterm_candidates` (this week's 10 picks from the Nifty 200, max 2 per industry, with target weights and reasons) + dashboard page "Company quality" | Saturdays |
 
 Gold insights include: how India opens after big US moves, which global markets line up with India's open,
 market breadth, unusual volume, Indian ADR premium vs USD/INR, and a global markets snapshot.
@@ -35,24 +35,27 @@ market breadth, unusual volume, Indian ADR premium vs USD/INR, and a global mark
 |---|---|
 | 04:30 Tue–Sat | Massive: previous US session (all US stocks) |
 | 06:00 Tue–Sat | FRED: global indices, FX, VIX, oil, rates (rolling 21-day window) |
-| after each file | Databricks job refreshes the pipeline (file-arrival trigger) |
+| after each file | Databricks job refreshes the pipeline (file-arrival trigger), then rebuilds the dashboard summaries |
 | every 30 min, 08:00–19:30 Mon–Fri | NSE company news (announcements, results, board meetings, corporate actions) |
 | 08:45 Mon–Fri | Pre-market brief to Telegram |
-| 15:45 Mon–Fri | paper-trader pushes the day's trade journal to `landing/trades/` |
+| 15:45 Mon–Fri | paper-trader pushes the day's trade journal to `landing/trades/` and a portfolio snapshot to `landing/portfolio/` |
 | 19:30 Mon–Fri | NSE: today's equities bhavcopy |
+| 07:15 Sat | paper-trader pushes company financials to `landing/fundamentals/` and NSE's Nifty 200 list to `landing/index_members/` |
 
 ## Repository layout
 
 ```
-fetchers/          Lambda code: nse, massive, fred, sync, premarket (+ shared helpers). Python stdlib + boto3 only.
+fetchers/          Lambda code: nse, massive, fred, news, sync, premarket (+ shared helpers). Python stdlib + boto3 only.
 pipeline/          Lakeflow pipeline in Python (bronze.py, silver.py, gold.py), SQL equivalents in comments
+sql/               dashboard_summary.sql: "In plain words" page summaries, run by the refresh job after the pipeline
 infra/
   bootstrap/       S3 bucket for Terraform state (run once, locally)
   modules/         secure_bucket: private, encrypted, versioned, HTTPS-only S3
   aws/             Landing bucket, Lambdas, schedules, IAM, SSM parameters, CI users
   databricks/      Catalog, schemas, volume, token, pipeline, job, dashboard
 tests/             Unit tests (no cloud access needed)
-scripts/           check_pipeline.py (pipeline wiring check, used by CI), render_diagrams (re-render docs/diagrams)
+scripts/           check_pipeline.py (pipeline wiring check, used by CI), check_sql.py (dashboard and summary SQL
+                   checked with EXPLAIN in the plan job), render_diagrams (re-render docs/diagrams)
 .github/           CI (tests, fmt, validate) and CD (plan on PR, apply on merge)
 docs/              Full documentation (below); docs/diagrams/ holds the diagram sources and images
 ```
@@ -73,7 +76,7 @@ docs/              Full documentation (below); docs/diagrams/ holds the diagram 
 
 ```
 edit on dev  ──push──▶  CI: tests, pipeline wiring, terraform fmt + validate
-              ──PR to main──▶  terraform plan (aws, databricks) posted as PR comments
+              ──PR to main──▶  terraform plan (aws, databricks) posted as PR comments; dashboard SQL checked
               ──merge──▶  terraform apply (aws, then databricks)
 ```
 
@@ -87,6 +90,7 @@ or emergencies.
 | NSE UDiFF bhavcopy | All NSE cash-market securities | From 8 Jul 2024 (format change) | Free |
 | Massive grouped daily | All US stocks and ETFs | Rolling 2 years on the free Basic plan | Free (API key) |
 | NSE RSS feeds | Company announcements, financial results, board meetings, corporate actions | What the feeds carry at each 30-minute fetch | Free |
+| Yahoo Finance fundamentals (fetched by paper-trader) | Annual and quarterly financials for NSE's Nifty 200 list (plus the trader's watchlist) | 4 fiscal years and recent quarters | Free |
 | FRED | 14 series: S&P 500, Dow, Nasdaq, Nikkei 225, VIX, USD/INR, USD/JPY, EUR/USD, GBP/USD, USD/CNY, dollar index, Brent, WTI, US 10Y | Decades | Free (API key) |
 
 Country ETFs (Japan, Germany, UK, Eurozone, Europe, China, Hong Kong, Korea, Taiwan, Brazil, EM, India)
