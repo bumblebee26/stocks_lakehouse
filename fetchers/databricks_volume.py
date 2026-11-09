@@ -54,8 +54,8 @@ def _auth():
     return {"Authorization": f"Bearer {config()['token']}"}
 
 
-def volume_path(relative):
-    return f"{config()['volume']}/{relative.lstrip('/')}"
+def volume_path(relative, volume=None):
+    return f"{(volume or config()['volume']).rstrip('/')}/{relative.lstrip('/')}"
 
 
 def volume_relative(relative):
@@ -84,10 +84,11 @@ def exists(relative):
         return False
 
 
-def upload(relative, body):
-    """Upload to <volume>/<relative> (unzipping .csv.zip), creating parent dirs, overwriting."""
+def upload(relative, body, volume=None):
+    """Upload to <volume>/<relative> (unzipping .csv.zip), creating parent dirs, overwriting.
+    volume defaults to the landing volume; news goes to its own volume (see news.py)."""
     relative, body = prepare(relative, body)
-    path = volume_path(relative)
+    path = volume_path(relative, volume)
     parent = path.rsplit("/", 1)[0]
 
     # Idempotent: succeeds if the directory already exists.

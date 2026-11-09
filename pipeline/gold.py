@@ -15,6 +15,9 @@ Paper trading (dummy money, from bumblebee26/paper-trader via stocks.silver.trad
   stocks.gold.trading_by_setup             results per setup and side
   stocks.gold.trading_by_hour              results per entry hour (IST)
   stocks.gold.trading_decisions            your YES/NO choices: taken trades vs what skipped ones would have made
+  stocks.gold.news_recent                  company news of the last 30 days, newest first, with symbol and category
+  stocks.gold.news_by_symbol               per stock: news counts (7 and 30 days), latest headline, categories
+  stocks.gold.events_calendar              upcoming board meetings (results dates) per stock
 
 Market proxies (no index data in these sources): NIFTYBEES (Nifty 50 ETF on NSE)
 and SPY (S&P 500 ETF). Change them with pipeline configuration keys
@@ -667,4 +670,78 @@ def trading_decisions():
     return (
         decisions.join(taken_pnl, "trade_date", "left")
         .withColumn("saved_by_skipping_rs", -F.coalesce(F.col("passed_would_have_made_rs"), F.lit(0.0)))
+    )
+
+
+
+# ---------------------------------------------------------------------------
+# Company news (NSE RSS): read by the paper trader's reviewer, swing and long-term pools
+# ---------------------------------------------------------------------------
+# SQL equivalent:
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.news_recent AS
+#   SELECT symbol, news_ts, news_date, category, feed, title, description, link
+#   FROM stocks.silver.news WHERE news_date >= date_sub(current_date(), 30);
+@dp.materialized_view(
+    name="stocks.gold.news_recent",
+    comment="NSE company news of the last 30 days, one row per item, with NSE symbol (null when the "
+            "company couldn't be matched), category, headline and link.",
+    table_properties={"quality": "gold"},
+)
+def news_recent():
+    return (
+        spark.read.table("stocks.silver.news")  # noqa: F821
+        .filter(F.col("news_date") >= F.date_sub(F.current_date(), 30))
+        .select("symbol", "news_ts", "news_date", "category", "feed", "title", "description", "link")
+    )
+
+
+# SQL equivalent:
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.news_by_symbol AS
+#   SELECT symbol, count(*) AS news_30d,
+#          count_if(news_date >= date_sub(current_date(), 7)) AS news_7d,
+#          max_by(title, news_ts) AS latest_title, max_by(link, news_ts) AS latest_link,
+#          max(news_ts) AS latest_ts, array_sort(collect_set(category)) AS categories_30d
+#   FROM stocks.gold.news_recent WHERE symbol IS NOT NULL GROUP BY symbol;
+@dp.materialized_view(
+    name="stocks.gold.news_by_symbol",
+    comment="Per NSE stock: news items in the last 7 and 30 days, the latest headline with its link, "
+            "and the categories seen (results, order, management, regulatory, ...).",
+    table_properties={"quality": "gold"},
+)
+def news_by_symbol():
+    recent = spark.read.table("stocks.gold.news_recent").filter("symbol IS NOT NULL")  # noqa: F821
+    week = F.col("news_date") >= F.date_sub(F.current_date(), 7)
+    return recent.groupBy("symbol").agg(
+        F.count(F.lit(1)).alias("news_30d"),
+        F.sum(F.when(week, 1).otherwise(0)).alias("news_7d"),
+        F.max_by("title", "news_ts").alias("latest_title"),
+        F.max_by("link", "news_ts").alias("latest_link"),
+        F.max("news_ts").alias("latest_ts"),
+        F.array_sort(F.collect_set("category")).alias("categories_30d"),
+    )
+
+
+# SQL equivalent:
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.events_calendar AS
+#   SELECT symbol, to_date(regexp_extract(concat(title, ' ', description), '(\\d{1,2}-[A-Za-z]{3}-\\d{4})', 1),
+#                  'd-MMM-yyyy') AS event_date, description AS purpose, link, news_ts AS announced_ts
+#   FROM stocks.silver.news WHERE feed = 'board_meeting' AND symbol IS NOT NULL
+#   QUALIFY event_date >= current_date();
+@dp.materialized_view(
+    name="stocks.gold.events_calendar",
+    comment="Upcoming board meetings per NSE stock (results and other decisions), with the meeting "
+            "date parsed from the announcement. Used to flag results inside a holding period.",
+    table_properties={"quality": "gold"},
+)
+def events_calendar():
+    text = F.concat_ws(" ", "title", "description")
+    date_text = F.regexp_extract(text, r"(\d{1,2}-[A-Za-z]{3}-\d{4})", 1)
+    return (
+        spark.read.table("stocks.silver.news")  # noqa: F821
+        .filter("feed = 'board_meeting' AND symbol IS NOT NULL")
+        .withColumn("event_date", F.to_date(F.when(date_text != "", date_text), "d-MMM-yyyy"))
+        .filter(F.col("event_date") >= F.current_date())
+        .select("symbol", "event_date", F.col("description").alias("purpose"), "link",
+                F.col("news_ts").alias("announced_ts"))
+        .dropDuplicates(["symbol", "event_date"])
     )

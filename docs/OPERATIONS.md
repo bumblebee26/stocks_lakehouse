@@ -9,6 +9,7 @@ Day-to-day running of the lakehouse once [SETUP.md](SETUP.md) is done.
 | 04:30 Tue–Sat | `stocks-fetch-massive` | `landing/massive/date=<US date>/grouped_daily_YYYYMMDD.json` |
 | 06:00 Tue–Sat | `stocks-fetch-fred` | `landing/fred/date=<today>/fred_<start>_<end>.json` (last 21 days) |
 | 5 min after files stop arriving | Databricks job `stocks-refresh` | Refreshes all bronze/silver/gold tables |
+| every 30 min, 08:00–19:30 Mon–Fri | `stocks-fetch-news` | news volume `date=<today>/snap_HHMM.jsonl` + `latest.jsonl` (S3 copy under `landing/news/`); read by the pipeline at its next refresh |
 | 08:45 Mon–Fri | `stocks-premarket-brief` | Telegram message |
 | 15:45 Mon–Fri | paper-trader's `stocks-trader-guardian` (other repo) | `landing/trades/date=<today>/events.jsonl` (volume only; the S3 copy is in the trader's own bucket) |
 | 19:30 Mon–Fri | `stocks-fetch-nse` | `landing/nse/date=<today>/bhavcopy_cm_YYYYMMDD.csv.zip` (+ `.csv` in the volume) |

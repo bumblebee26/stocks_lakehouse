@@ -5,6 +5,7 @@
   stocks.silver.daily_bars     both markets in ONE schema  <- what gold reads
   stocks.silver.trading_days   each market's trading calendar, derived from the data
   stocks.silver.trade_events   paper-trader journal events (dummy money), one row per event_id
+  stocks.silver.news           NSE company news, one row per item (id), typed
 
 Materialized views: they recompute incrementally where possible, and make
 de-duplication simple (a re-fetched day replaces the old copy: latest file wins).
@@ -366,3 +367,42 @@ def trade_events():
         "_source_file", "_file_modified_at",
     )
     return latest_file_wins(typed, ["event_id"])
+
+
+# ---------------------------------------------------------------------------
+# Company news (NSE RSS)
+# ---------------------------------------------------------------------------
+# SQL equivalent:
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.silver.news (
+#     CONSTRAINT has_id    EXPECT (id IS NOT NULL)    ON VIOLATION DROP ROW,
+#     CONSTRAINT has_title EXPECT (title IS NOT NULL) ON VIOLATION DROP ROW
+#   ) AS
+#   SELECT id, feed, symbol, company, category, title, description, link,
+#          to_timestamp(published_ist, 'yyyy-MM-dd HH:mm:ss') AS published_ts,
+#          to_timestamp(fetched_at_ist, 'yyyy-MM-dd HH:mm:ss') AS first_seen_ts, ...
+#   FROM stocks.bronze.news_raw   -- earliest snapshot of each id wins
+@dp.materialized_view(
+    name="stocks.silver.news",
+    comment="NSE company news, one row per item: symbol (where it could be matched), category, "
+            "title, link, published and first-seen times (IST).",
+    table_properties={"quality": "silver"},
+)
+@dp.expect_all_or_drop({
+    "has_id": "id IS NOT NULL",
+    "has_title": "title IS NOT NULL AND title <> ''",
+})
+def news():
+    raw = spark.read.table("stocks.bronze.news_raw")  # noqa: F821
+    typed = raw.select(
+        "id", "feed", "symbol", "company", "category", "title", "description", "link",
+        F.to_timestamp("published_ist", "yyyy-MM-dd HH:mm:ss").alias("published_ts"),
+        F.to_timestamp("fetched_at_ist", "yyyy-MM-dd HH:mm:ss").alias("first_seen_ts"),
+        "published_raw",
+    )
+    first = Window.partitionBy("id").orderBy(F.col("first_seen_ts").asc())
+    return (
+        typed.withColumn("rn", F.row_number().over(first))
+        .filter("rn = 1").drop("rn")
+        .withColumn("news_ts", F.coalesce("published_ts", "first_seen_ts"))
+        .withColumn("news_date", F.to_date("news_ts"))
+    )

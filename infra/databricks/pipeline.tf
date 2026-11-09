@@ -30,6 +30,7 @@ resource "databricks_pipeline" "medallion" {
 
   configuration = {
     "stocks.landing_path"       = local.landing_path
+    "stocks.news_path"          = "/Volumes/${databricks_volume.news.catalog_name}/${databricks_volume.news.schema_name}/${databricks_volume.news.name}"
     "stocks.india_proxy"        = var.india_proxy_symbol
     "stocks.us_proxy"           = var.us_proxy_symbol
     "stocks.big_move_pct"       = tostring(var.big_move_pct)
@@ -47,7 +48,7 @@ resource "databricks_pipeline" "medallion" {
     }
   }
 
-  depends_on = [databricks_schema.layer, databricks_volume.landing]
+  depends_on = [databricks_schema.layer, databricks_volume.landing, databricks_volume.news]
 }
 
 # ---------------------------------------------------------------------------

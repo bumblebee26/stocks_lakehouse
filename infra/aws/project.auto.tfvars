@@ -5,3 +5,4 @@
 schedules_enabled = true # NSE + Massive daily fetches
 premarket_enabled = true # Telegram brief at 08:45 IST Mon-Fri
 fred_enabled      = true # FRED global markets, 06:00 IST Tue-Sat
+news_enabled      = true # NSE company news every 30 min, 08:00-19:30 IST Mon-Fri

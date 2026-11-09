@@ -40,6 +40,16 @@ resource "databricks_volume" "landing" {
   comment      = "Raw files pushed by the AWS Lambda fetchers. Managed by Terraform."
 }
 
+# Company news (NSE RSS every 30 minutes). Its own volume, outside the job's file-arrival
+# trigger: news lands too often to refresh the pipeline each time on Free Edition.
+resource "databricks_volume" "news" {
+  catalog_name = databricks_catalog.stocks.name
+  schema_name  = databricks_schema.layer["bronze"].name
+  name         = "news"
+  volume_type  = "MANAGED"
+  comment      = "NSE company news JSON lines, pushed every 30 minutes by the stocks-fetch-news Lambda. Managed by Terraform."
+}
+
 # Make sure each source folder exists in the landing volume, so Auto Loader has
 # a path to watch even before a source's first file arrives (e.g. FRED until its
 # API key is set). The pipeline only reads *.csv / *.json, so these are ignored.

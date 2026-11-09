@@ -17,6 +17,14 @@ Same layout in S3 (`s3://stocks-lakehouse-landing-<account-id>/landing/`) and in
 | `trades/date=YYYY-MM-DD/events.jsonl` | Paper-trader journal (dummy money), pushed 15:45 IST by `stocks-trader-guardian` (volume; S3 copy in the trader's own bucket) | NDJSON |
 | `<source>/_README.txt` | Folder marker (volume only) | text |
 
+Company news has **its own volume**, `/Volumes/stocks/bronze/news/` (S3 copy under `landing/news/`), so news
+arriving every 30 minutes doesn't trigger a pipeline refresh each time:
+
+| Path | Content | Format |
+|---|---|---|
+| `date=YYYY-MM-DD/snap_HHMM.jsonl` | Every item in NSE's announcements, results, board-meeting and corporate-action RSS feeds at that time | NDJSON |
+| `date=YYYY-MM-DD/latest.jsonl` | Copy of the newest snapshot, read directly by paper-trader (not by the pipeline) | NDJSON |
+
 ## Bronze (streaming tables, Auto Loader)
 
 Each new file is read once. Every bronze table has these lineage columns: `_source_file`,
@@ -27,6 +35,7 @@ Each new file is read once. Every bronze table has these lineage columns: `_sour
 | `bronze.nse_bhavcopy_raw` | instrument × day × file | All UDiFF columns as strings (`TckrSymb`, `SctySrs`, `ISIN`, `OpnPric`, `ClsPric`, `TtlTradgVol`...). Unknown columns go to `_rescued_data`. |
 | `bronze.massive_grouped_raw` | file (one US day) | `results` kept as **JSON text** (fields `T` and `t` clash, see ARCHITECTURE), plus `status`, `resultsCount`, `adjusted`. |
 | `bronze.fred_observations_raw` | series × date × file | `series_id`, `date`, `value`, `name`, `region`, `asset_class`, `unit`. Explicit schema. |
+| `bronze.news_raw` | news item × snapshot | `id`, `feed`, `symbol` (null when the company couldn't be matched), `company`, `category`, `title`, `description`, `link`, `published_ist`, `fetched_at_ist`. Explicit schema. |
 | `bronze.trades_raw` | event × file | Paper-trader events: `event_id`, `proposal_id`, `timestamp_ist`, `event`, `symbol`, `setup`, `side`, prices, `qty`, `risk_rs`, `pnl_rs`, `fees_rs`, `user_reply`; snapshot fields `balance`, `starting_capital`, `realized_today`. Explicit schema. |
 
 ## Silver (materialized views)
@@ -39,6 +48,7 @@ Each new file is read once. Every bronze table has these lineage columns: `_sour
 | `silver.trading_days` | market × day | `trade_date`, `prev_trade_date`, `symbols`. A day counts if the market published data. | — |
 | `silver.fred_daily` | series × date | `series_id`, `obs_date`, `value`, `name`, `region`, `asset_class`, `unit` | series, date and value present |
 | `silver.trade_events` | event | Typed paper-trader events (`event_ts` timestamp IST). Events: `proposed`, `blocked_by_risk_gate`, `rejected`, `expired`, `skipped_after_approval`, `filled`, `exited`, `squared_off`, `passed_outcome`, `day_plan`, `ledger_snapshot`. | event_id, event and time present |
+| `silver.news` | news item | `id`, `feed`, `symbol`, `category` (results, board_meeting, order, management, regulatory, rating, pledge, insider, dividend_split_bonus, mna, meeting, corporate_action, other), `title`, `link`, `published_ts`, `first_seen_ts`, `news_ts`, `news_date`. Earliest snapshot of each item wins. | id and title present |
 | `silver.global_daily` | instrument × date | `instrument`, `name`, `region`, `asset_class`, `unit`, `source` (`FRED`/`Massive`), `obs_date`, `value`. FRED series + 12 country ETFs. | — |
 
 De-duplication: when a day or observation is fetched more than once, the row from the most recently modified
@@ -63,6 +73,9 @@ For NSE, `series = 'EQ'` is the main board. Gold uses `EQ` only.
 | `gold.trading_by_setup` | setup × side | Which setups make money? | `trades`, `win_rate_pct`, `net_pnl_rs`, `avg_pnl_per_trade_rs`, `avg_r_multiple` |
 | `gold.trading_by_hour` | entry hour (IST) | When in the day do trades work? | same as by setup |
 | `gold.trading_decisions` | day | Did your YES/NO choices help? | `taken`, `taken_net_pnl_rs`, `passed`, `passed_would_have_made_rs`, `saved_by_skipping_rs` |
+| `gold.news_recent` | news item (30 days) | What has each company announced lately? | `symbol`, `news_ts`, `category`, `title`, `link` |
+| `gold.news_by_symbol` | symbol | How newsy is a stock, and what's the latest? | `news_7d`, `news_30d`, `latest_title`, `latest_link`, `latest_ts`, `categories_30d` |
+| `gold.events_calendar` | symbol × meeting date | Which companies have a board meeting (often results) coming up? | `event_date`, `purpose`, `link`, `announced_ts` |
 
 ### Definitions
 
