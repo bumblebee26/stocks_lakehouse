@@ -67,6 +67,22 @@ resource "databricks_job" "refresh" {
     }
   }
 
+  # Plain-words page summaries for the dashboard (facts + ai_summarize), after every refresh.
+  task {
+    task_key = "dashboard_summary"
+    depends_on {
+      task_key = "refresh_medallion"
+    }
+
+    sql_task {
+      warehouse_id = data.databricks_sql_warehouse.main.id
+      file {
+        path   = databricks_workspace_file.dashboard_summary.workspace_path
+        source = "WORKSPACE"
+      }
+    }
+  }
+
   # New NSE file ~19:30 IST and new US file ~04:30 IST -> two refreshes a day.
   # The wait lets a burst of files (e.g. a backfill) settle into one run.
   dynamic "trigger" {
@@ -98,4 +114,9 @@ resource "databricks_job" "refresh" {
   email_notifications {
     on_failure = [data.databricks_current_user.me.user_name]
   }
+}
+
+resource "databricks_workspace_file" "dashboard_summary" {
+  source = "${path.module}/../../sql/dashboard_summary.sql"
+  path   = "${data.databricks_current_user.me.home}/stocks_lakehouse/dashboard_summary.sql"
 }
