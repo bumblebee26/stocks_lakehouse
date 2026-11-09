@@ -347,7 +347,7 @@ locals {
           version    = 3
           widgetType = c.type
           encodings = {
-            for k, v in (c.type == "pie" ? tomap({
+            for k, v in(c.type == "pie" ? tomap({
               angle = { fieldName = c.y, scale = { type = "quantitative" }, displayName = replace(c.y, "_", " ") }
               color = { fieldName = c.color, scale = { type = "categorical" }, displayName = replace(coalesce(c.color, "-"), "_", " ") }
               }) : tomap({
@@ -569,86 +569,86 @@ locals {
         local.counter_widgets.intraday_kpis,
         [local.chart.intra_curve, local.chart.intra_daily, local.chart.intra_drawdown, local.chart.intra_setup, local.chart.intra_hour],
         [
-        {
-          widget = {
-            name = "trading_decisions_table"
-            queries = [{
-              name  = "main_query"
-              query = { datasetName = "trading_decisions", disaggregated = true, fields = local.raw_fields.trading_decisions }
-            }]
-            spec = {
-              version    = 2
-              widgetType = "table"
-              encodings  = { columns = local.table_columns.trading_decisions }
-              frame      = { showTitle = true, title = "Did your YES/NO choices help? (all days)" }
+          {
+            widget = {
+              name = "trading_decisions_table"
+              queries = [{
+                name  = "main_query"
+                query = { datasetName = "trading_decisions", disaggregated = true, fields = local.raw_fields.trading_decisions }
+              }]
+              spec = {
+                version    = 2
+                widgetType = "table"
+                encodings  = { columns = local.table_columns.trading_decisions }
+                frame      = { showTitle = true, title = "Did your YES/NO choices help? (all days)" }
+              }
             }
-          }
-          position = { x = 0, y = 16, width = 12, height = 3 }
-        },
-        {
-          widget = {
-            name = "trading_by_setup_table"
-            queries = [{
-              name  = "main_query"
-              query = { datasetName = "trading_by_setup", disaggregated = true, fields = local.raw_fields.trading_by_setup }
-            }]
-            spec = {
-              version    = 2
-              widgetType = "table"
-              encodings  = { columns = local.table_columns.trading_by_setup }
-              frame      = { showTitle = true, title = "Results by setup" }
+            position = { x = 0, y = 16, width = 12, height = 3 }
+          },
+          {
+            widget = {
+              name = "trading_by_setup_table"
+              queries = [{
+                name  = "main_query"
+                query = { datasetName = "trading_by_setup", disaggregated = true, fields = local.raw_fields.trading_by_setup }
+              }]
+              spec = {
+                version    = 2
+                widgetType = "table"
+                encodings  = { columns = local.table_columns.trading_by_setup }
+                frame      = { showTitle = true, title = "Results by setup" }
+              }
             }
-          }
-          position = { x = 0, y = 19, width = 12, height = 5 }
-        },
-        {
-          widget = {
-            name = "trading_by_hour_table"
-            queries = [{
-              name  = "main_query"
-              query = { datasetName = "trading_by_hour", disaggregated = true, fields = local.raw_fields.trading_by_hour }
-            }]
-            spec = {
-              version    = 2
-              widgetType = "table"
-              encodings  = { columns = local.table_columns.trading_by_hour }
-              frame      = { showTitle = true, title = "Results by entry hour (IST)" }
+            position = { x = 0, y = 19, width = 12, height = 5 }
+          },
+          {
+            widget = {
+              name = "trading_by_hour_table"
+              queries = [{
+                name  = "main_query"
+                query = { datasetName = "trading_by_hour", disaggregated = true, fields = local.raw_fields.trading_by_hour }
+              }]
+              spec = {
+                version    = 2
+                widgetType = "table"
+                encodings  = { columns = local.table_columns.trading_by_hour }
+                frame      = { showTitle = true, title = "Results by entry hour (IST)" }
+              }
             }
-          }
-          position = { x = 0, y = 24, width = 12, height = 5 }
-        },
-        {
-          widget = {
-            name = "trading_daily_table"
-            queries = [{
-              name  = "main_query"
-              query = { datasetName = "trading_daily", disaggregated = true, fields = local.raw_fields.trading_daily }
-            }]
-            spec = {
-              version    = 2
-              widgetType = "table"
-              encodings  = { columns = local.table_columns.trading_daily }
-              frame      = { showTitle = true, title = "Day by day (reconciliation: ok = events match the ledger)" }
+            position = { x = 0, y = 24, width = 12, height = 5 }
+          },
+          {
+            widget = {
+              name = "trading_daily_table"
+              queries = [{
+                name  = "main_query"
+                query = { datasetName = "trading_daily", disaggregated = true, fields = local.raw_fields.trading_daily }
+              }]
+              spec = {
+                version    = 2
+                widgetType = "table"
+                encodings  = { columns = local.table_columns.trading_daily }
+                frame      = { showTitle = true, title = "Day by day (reconciliation: ok = events match the ledger)" }
+              }
             }
-          }
-          position = { x = 0, y = 29, width = 12, height = 7 }
-        },
-        {
-          widget = {
-            name = "trading_recent_table"
-            queries = [{
-              name  = "main_query"
-              query = { datasetName = "trading_recent", disaggregated = true, fields = local.raw_fields.trading_recent }
-            }]
-            spec = {
-              version    = 2
-              widgetType = "table"
-              encodings  = { columns = local.table_columns.trading_recent }
-              frame      = { showTitle = true, title = "Latest trades" }
+            position = { x = 0, y = 29, width = 12, height = 7 }
+          },
+          {
+            widget = {
+              name = "trading_recent_table"
+              queries = [{
+                name  = "main_query"
+                query = { datasetName = "trading_recent", disaggregated = true, fields = local.raw_fields.trading_recent }
+              }]
+              spec = {
+                version    = 2
+                widgetType = "table"
+                encodings  = { columns = local.table_columns.trading_recent }
+                frame      = { showTitle = true, title = "Latest trades" }
+              }
             }
-          }
-          position = { x = 0, y = 36, width = 12, height = 8 }
-        },
+            position = { x = 0, y = 36, width = 12, height = 8 }
+          },
         ],
       )
       }, {
