@@ -189,6 +189,7 @@ manage them), and the `/stocks/telegram-*` and `/stocks/databricks-*` parameters
 left out of this picture; see [ARCHITECTURE.md](ARCHITECTURE.md#security-model) and [diagram 4](#4-cicd-flow).
 
 The same `.mmd` file is in paper-trader as `docs/diagrams/01_platform.mmd`; change both together.
+The written overview of the whole platform is [PLATFORM.md](PLATFORM.md).
 
 ---
 

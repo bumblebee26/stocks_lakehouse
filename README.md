@@ -58,6 +58,7 @@ docs/              Full documentation (below); docs/diagrams/ holds the diagram 
 
 | Doc | Read it when |
 |---|---|
+| [docs/PLATFORM.md](docs/PLATFORM.md) | You want the whole platform with paper-trader: diagram, daily timeline, contracts, security, costs |
 | [docs/ARCHITECTURE_DIAGRAMS.md](docs/ARCHITECTURE_DIAGRAMS.md) | You want the picture: base, architecture, lineage, CI/CD and platform diagrams, each explained |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | You want to understand how it fits together and why it's built this way |
 | [docs/SETUP.md](docs/SETUP.md) | You're building it from scratch: every step, in order, with Windows commands |
