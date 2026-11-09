@@ -254,3 +254,37 @@ def news_raw():
         .schema(NEWS_SCHEMA)
         .load(f"{NEWS}/")
     )
+
+
+# ---------------------------------------------------------------------------
+# Company fundamentals: weekly, from paper-trader's "Company fundamentals" workflow
+# ---------------------------------------------------------------------------
+# One JSON line per company x metric x period: annual (12M) revenue, net income, EBIT, debt,
+# equity, operating cash flow, invested capital, EPS, total assets; quarterly (3M) revenue,
+# net income and EPS. Source: Yahoo Finance fundamentals (INR).
+#
+# SQL equivalent:
+#   CREATE OR REFRESH STREAMING TABLE stocks.bronze.fundamentals_raw AS
+#   SELECT *, <lineage columns> FROM STREAM read_files('/Volumes/stocks/bronze/landing/fundamentals/',
+#     format => 'json', pathGlobFilter => '*.jsonl', schema => '<FUNDAMENTALS_SCHEMA below>');
+FUNDAMENTALS_SCHEMA = (
+    "symbol STRING, source_symbol STRING, metric STRING, period_type STRING, period_end STRING, "
+    "value DOUBLE, currency STRING, source STRING, fetched_at_ist STRING"
+)
+
+
+@dp.table(
+    name="stocks.bronze.fundamentals_raw",
+    comment="Raw company financials (annual and quarterly), one row per company x metric x period per weekly file.",
+    table_properties={"quality": "bronze"},
+)
+def fundamentals_raw():
+    return with_lineage(
+        spark.readStream.format("cloudFiles")  # noqa: F821
+        .option("cloudFiles.format", "json")
+        .option("pathGlobFilter", "*.jsonl")
+        .option("rescuedDataColumn", "_rescued_data")
+        .option("cloudFiles.partitionColumns", "")
+        .schema(FUNDAMENTALS_SCHEMA)
+        .load(f"{LANDING}/fundamentals/")
+    )

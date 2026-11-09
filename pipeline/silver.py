@@ -6,6 +6,7 @@
   stocks.silver.trading_days   each market's trading calendar, derived from the data
   stocks.silver.trade_events   paper-trader journal events (dummy money), one row per event_id
   stocks.silver.news           NSE company news, one row per item (id), typed
+  stocks.silver.fundamentals   company financials, one row per symbol x metric x period (newest fetch wins)
 
 Materialized views: they recompute incrementally where possible, and make
 de-duplication simple (a re-fetched day replaces the old copy: latest file wins).
@@ -405,4 +406,34 @@ def news():
         .filter("rn = 1").drop("rn")
         .withColumn("news_ts", F.coalesce("published_ts", "first_seen_ts"))
         .withColumn("news_date", F.to_date("news_ts"))
+    )
+
+
+# ---------------------------------------------------------------------------
+# Company fundamentals
+# ---------------------------------------------------------------------------
+# SQL equivalent:
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.silver.fundamentals (
+#     CONSTRAINT has_keys  EXPECT (symbol IS NOT NULL AND metric IS NOT NULL AND period_end IS NOT NULL) ON VIOLATION DROP ROW,
+#     CONSTRAINT has_value EXPECT (value IS NOT NULL) ON VIOLATION DROP ROW
+#   ) AS SELECT symbol, metric, period_type, to_date(period_end) AS period_end, value, currency, source, fetched_at
+#   FROM stocks.bronze.fundamentals_raw   -- newest file per symbol x metric x period wins
+@dp.materialized_view(
+    name="stocks.silver.fundamentals",
+    comment="Company financials, one row per NSE symbol x metric x period (12M annual, 3M quarterly), INR. "
+            "A restated figure from a newer weekly fetch replaces the older one.",
+    table_properties={"quality": "silver"},
+)
+@dp.expect_all_or_drop({
+    "has_keys": "symbol IS NOT NULL AND metric IS NOT NULL AND period_end IS NOT NULL",
+    "has_value": "value IS NOT NULL",
+})
+def fundamentals():
+    raw = spark.read.table("stocks.bronze.fundamentals_raw")  # noqa: F821
+    newest = Window.partitionBy("symbol", "metric", "period_type", "period_end").orderBy(
+        F.col("_file_modified_at").desc())
+    return (
+        raw.withColumn("rn", F.row_number().over(newest)).filter("rn = 1")
+        .select("symbol", "metric", "period_type", F.to_date("period_end").alias("period_end"), "value",
+                "currency", "source", F.to_timestamp("fetched_at_ist", "yyyy-MM-dd HH:mm:ss").alias("fetched_at"))
     )
