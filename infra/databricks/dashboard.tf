@@ -40,7 +40,7 @@ locals {
             FROM stocks.silver.trading_days GROUP BY market) d
         ON u.market = d.market AND u.trade_date = d.last_day
       ORDER BY u.volume_ratio DESC
-      LIMIT 50
+      LIMIT 15
     SQL
 
     adr_latest = <<-SQL
@@ -89,11 +89,6 @@ locals {
       ORDER BY trade_date DESC
     SQL
 
-    trading_equity = <<-SQL
-      SELECT trade_date, end_balance_rs
-      FROM stocks.gold.trading_daily
-      WHERE end_balance_rs IS NOT NULL
-    SQL
 
     trading_by_setup = <<-SQL
       SELECT setup, side, CAST(trades AS INT) AS trades,
@@ -120,6 +115,31 @@ locals {
              round(sum(passed_would_have_made_rs), 0)    AS skipped_would_have_made_rs,
              round(sum(saved_by_skipping_rs), 0)         AS saved_by_skipping_rs
       FROM stocks.gold.trading_decisions
+    SQL
+
+    # --- "In plain words" summaries (sql/dashboard_summary.sql, rebuilt after each refresh) ---
+    summary_overview = <<-SQL
+      SELECT explode(split(coalesce(nullif(ai_text, ''), facts), '(?<=[.!?])\\s+')) AS in_plain_words
+      FROM stocks.gold.dashboard_summary
+      WHERE page = 'overview'
+    SQL
+
+    summary_portfolio = <<-SQL
+      SELECT explode(split(coalesce(nullif(ai_text, ''), facts), '(?<=[.!?])\\s+')) AS in_plain_words
+      FROM stocks.gold.dashboard_summary
+      WHERE page = 'portfolio'
+    SQL
+
+    summary_intraday = <<-SQL
+      SELECT explode(split(coalesce(nullif(ai_text, ''), facts), '(?<=[.!?])\\s+')) AS in_plain_words
+      FROM stocks.gold.dashboard_summary
+      WHERE page = 'intraday'
+    SQL
+
+    summary_quality = <<-SQL
+      SELECT explode(split(coalesce(nullif(ai_text, ''), facts), '(?<=[.!?])\\s+')) AS in_plain_words
+      FROM stocks.gold.dashboard_summary
+      WHERE page = 'quality'
     SQL
 
     # --- Portfolio (all dummy pools) ---
@@ -230,11 +250,6 @@ locals {
       WHERE NOT is_financial AND roce_pct BETWEEN -20 AND 80 AND pe BETWEEN 0 AND 120
     SQL
 
-    quality_spread = <<-SQL
-      SELECT CAST(tests_passed AS STRING) || ' tests passed' AS tests, CAST(count(*) AS INT) AS companies
-      FROM stocks.gold.company_fundamentals
-      GROUP BY tests_passed
-    SQL
 
     trading_recent = <<-SQL
       SELECT trade_date, symbol, side, setup, CAST(qty AS INT) AS qty,
@@ -257,7 +272,6 @@ locals {
       global_latest        = ["region", "name", "instrument", "asset_class", "as_of", "value", "change_pct", "change_5d_pct", "change_20d_pct", "source"]
       india_vs_global      = ["name", "instrument", "region", "asset_class", "sessions", "corr_with_india_gap", "corr_with_india_return", "pct_same_direction_gap"]
       trading_daily        = ["trade_date", "proposals", "trades", "said_no", "no_reply", "win_rate_pct", "net_pnl_rs", "skipped_would_have_made_rs", "end_balance_rs", "reconciliation"]
-      trading_equity       = ["trade_date", "end_balance_rs"]
       trading_by_setup     = ["setup", "side", "trades", "win_rate_pct", "net_pnl_rs", "avg_pnl_per_trade_rs", "avg_r_multiple"]
       trading_by_hour      = ["entry_hour", "trades", "win_rate_pct", "net_pnl_rs", "avg_r_multiple"]
       trading_decisions    = ["trades_taken", "taken_net_pnl_rs", "proposals_skipped", "skipped_that_would_have_won", "skipped_would_have_made_rs", "saved_by_skipping_rs"]
@@ -274,7 +288,10 @@ locals {
       intraday_setup_chart = ["setup", "net_pnl_rs", "win_rate_pct"]
       intraday_hour_chart  = ["entry_hour", "net_pnl_rs"]
       quality_scatter      = ["symbol", "roce_pct", "pe", "tests"]
-      quality_spread       = ["tests", "companies"]
+      summary_overview     = ["in_plain_words"]
+      summary_portfolio    = ["in_plain_words"]
+      summary_intraday     = ["in_plain_words"]
+      summary_quality      = ["in_plain_words"]
     } : ds => [for c in cols : { name = c, expression = "`${c}`" }]
   }
 
@@ -316,7 +333,7 @@ locals {
             frame      = { showTitle = true, title = c.title }
           }
         }
-        position = { x = i * 2, y = 2, width = 2, height = 3 }
+        position = { x = i * 2, y = 6, width = 2, height = 3 }
       }
     ]
   }
@@ -324,18 +341,21 @@ locals {
   # Chart widget: dataset, type, x/y (and optional color) fields, title, position.
   chart = {
     for k, c in {
-      port_vs_nifty     = { ds = "portfolio_vs_nifty", type = "line", x = "snapshot_date", xt = "temporal", y = "index_value", color = "series", title = "Your portfolio vs simply holding the index (both start at 100)", pos = [0, 5, 8, 6] }
-      port_alloc_pool   = { ds = "allocation_pool", type = "pie", x = "pool", xt = "categorical", y = "value_rs", color = "pool", title = "Where the money is: by pool", pos = [8, 5, 4, 6] }
-      port_drawdown     = { ds = "portfolio_drawdown", type = "area", x = "snapshot_date", xt = "temporal", y = "drawdown_pct", color = null, title = "How far below its best value the portfolio is (%)", pos = [0, 11, 8, 5] }
-      port_alloc_sector = { ds = "allocation_sector", type = "pie", x = "sector", xt = "categorical", y = "value_rs", color = "sector", title = "By sector (index funds and cash shown separately)", pos = [8, 11, 4, 5] }
-      port_pools        = { ds = "portfolio_pools", type = "area", x = "snapshot_date", xt = "temporal", y = "value_rs", color = "pool", title = "Value of each pool over time (Rs)", pos = [0, 16, 12, 5] }
-      intra_curve       = { ds = "intraday_curve", type = "line", x = "trade_date", xt = "temporal", y = "total_pnl_rs", color = null, title = "Equity curve: total intraday P&L since the start (Rs)", pos = [0, 5, 8, 6] }
-      intra_daily       = { ds = "intraday_daily_pnl", type = "bar", x = "trade_date", xt = "temporal", y = "day_pnl_rs", color = "result", title = "P&L each day (Rs)", pos = [8, 5, 4, 6] }
-      intra_drawdown    = { ds = "intraday_curve", type = "area", x = "trade_date", xt = "temporal", y = "below_peak_rs", color = null, title = "Below the best P&L so far (Rs)", pos = [0, 11, 4, 5] }
-      intra_setup       = { ds = "intraday_setup_chart", type = "bar", x = "setup", xt = "categorical", y = "net_pnl_rs", color = null, title = "P&L by setup (Rs)", pos = [4, 11, 4, 5] }
-      intra_hour        = { ds = "intraday_hour_chart", type = "bar", x = "entry_hour", xt = "categorical", y = "net_pnl_rs", color = null, title = "P&L by entry hour, IST (Rs)", pos = [8, 11, 4, 5] }
-      quality_scatter   = { ds = "quality_scatter", type = "scatter", x = "roce_pct", xt = "quantitative", y = "pe", color = "tests", title = "Quality vs price: return on capital (%) against P/E, coloured by tests passed (excl. banks)", pos = [0, 2, 8, 7] }
-      quality_spread    = { ds = "quality_spread", type = "bar", x = "tests", xt = "categorical", y = "companies", color = null, title = "How many companies pass how many tests", pos = [8, 2, 4, 7] }
+      ov_unusual        = { ds = "unusual_latest", type = "bar", x = "symbol", xt = "categorical", y = "volume_ratio", color = "market", title = "Unusual volume in the latest session (times the 20-day average)", desc = "Stocks that traded far more than usual (3x or more). Heavy volume often means news or big buyers and sellers.", pos = [0, 12, 6, 6] }
+      ov_global         = { ds = "global_latest", type = "bar", x = "name", xt = "categorical", y = "change_pct", color = "asset_class", title = "World markets: latest daily change (%)", desc = "Indices, currencies, oil and rates. Big moves overnight often show up in India's open.", pos = [6, 12, 6, 6] }
+      ov_corr           = { ds = "india_vs_global", type = "bar", x = "name", xt = "categorical", y = "corr_with_india_gap", color = "region", title = "Which world markets India's open follows (correlation)", desc = "Near +1 = India's next open usually moves the same way; near 0 = no link; below 0 = the opposite way.", pos = [0, 22, 6, 6] }
+      ov_adr            = { ds = "adr_latest", type = "bar", x = "adr", xt = "categorical", y = "relative_premium_pct", color = null, title = "Indian ADRs: US price premium vs NSE (%)", desc = "Indian companies also listed in the US. Above 0 = the US share costs more than the NSE share after currency conversion.", pos = [6, 22, 6, 6] }
+      port_vs_nifty     = { ds = "portfolio_vs_nifty", type = "line", x = "snapshot_date", xt = "temporal", y = "index_value", color = "series", title = "Your portfolio vs simply holding the index (both start at 100)", desc = "Both lines start at 100. When yours is above the NIFTYBEES line, the portfolio is beating simply holding the index.", pos = [0, 9, 8, 6] }
+      port_alloc_pool   = { ds = "allocation_pool", type = "pie", x = "pool", xt = "categorical", y = "value_rs", color = "pool", title = "Where the money is: by pool", desc = "How the Rs 2 lakh is split across the three pools today.", pos = [8, 9, 4, 6] }
+      port_drawdown     = { ds = "portfolio_drawdown", type = "area", x = "snapshot_date", xt = "temporal", y = "drawdown_pct", color = null, title = "How far below its best value the portfolio is (%)", desc = "0 means at its best value so far; -5 means 5% below the best. Shallow, short dips are what you want.", pos = [0, 15, 8, 5] }
+      port_alloc_sector = { ds = "allocation_sector", type = "pie", x = "sector", xt = "categorical", y = "value_rs", color = "sector", title = "By sector (index funds and cash shown separately)", desc = "What the money is invested in. Index fund = NIFTYBEES, which holds the whole Nifty 50.", pos = [8, 15, 4, 5] }
+      port_pools        = { ds = "portfolio_pools", type = "area", x = "snapshot_date", xt = "temporal", y = "value_rs", color = "pool", title = "Value of each pool over time (Rs)", desc = "Value of each pool day by day.", pos = [0, 20, 12, 5] }
+      intra_curve       = { ds = "intraday_curve", type = "line", x = "trade_date", xt = "temporal", y = "total_pnl_rs", color = null, title = "Equity curve: total intraday P&L since the start (Rs)", desc = "Total intraday profit or loss since the start. A line that keeps rising means the strategy makes money.", pos = [0, 9, 8, 6] }
+      intra_daily       = { ds = "intraday_daily_pnl", type = "bar", x = "trade_date", xt = "temporal", y = "day_pnl_rs", color = "result", title = "P&L each day (Rs)", desc = "One bar per trading day, coloured by gain or loss.", pos = [8, 9, 4, 6] }
+      intra_drawdown    = { ds = "intraday_curve", type = "area", x = "trade_date", xt = "temporal", y = "below_peak_rs", color = null, title = "Below the best P&L so far (Rs)", desc = "How far the P&L is below its best total (Rs). Deep or long dips mean risky trading.", pos = [0, 15, 4, 5] }
+      intra_setup       = { ds = "intraday_setup_chart", type = "bar", x = "setup", xt = "categorical", y = "net_pnl_rs", color = null, title = "P&L by setup (Rs)", desc = "Which kinds of trade made or lost money.", pos = [4, 15, 4, 5] }
+      intra_hour        = { ds = "intraday_hour_chart", type = "bar", x = "entry_hour", xt = "categorical", y = "net_pnl_rs", color = null, title = "P&L by entry hour, IST (Rs)", desc = "Which entry times made or lost money (IST).", pos = [8, 15, 4, 5] }
+      quality_scatter   = { ds = "quality_scatter", type = "scatter", x = "roce_pct", xt = "quantitative", y = "pe", color = "tests", title = "Quality vs price: return on capital (%) against P/E, coloured by tests passed (excl. banks)", desc = "Each dot is a company (banks left out). Further right = more profitable; lower = cheaper. Bottom right is the sweet spot.", pos = [0, 6, 12, 7] }
       } : k => {
       widget = {
         name = k
@@ -356,7 +376,7 @@ locals {
               color = { fieldName = c.color, scale = { type = "categorical" }, displayName = replace(coalesce(c.color, "-"), "_", " ") }
             })) : k => v if v.fieldName != null
           }
-          frame = { showTitle = true, title = c.title }
+          frame = { showTitle = true, title = c.title, showDescription = true, description = c.desc }
         }
       }
       position = { x = c.pos[0], y = c.pos[1], width = c.pos[2], height = c.pos[3] }
@@ -365,8 +385,16 @@ locals {
 
   table_widget = {
     for k, t in {
-      holdings    = { ds = "holdings", title = "Current holdings (all pools)", pos = [0, 21, 12, 6] }
-      quality_top = { ds = "quality_top", title = "Top 50 companies by quality score (long-term pool candidates; tests: capital, balance sheet, cash, growth, price)", pos = [0, 9, 12, 10] }
+      holdings          = { ds = "holdings", title = "Current holdings (all pools)", desc = "Everything held right now, largest first. Weight = share of the whole portfolio; P&L includes buying costs.", pos = [0, 25, 12, 6] }
+      quality_top       = { ds = "quality_top", title = "Top 50 companies by quality score", desc = "Long-term pool candidates. Score = share of the tests passed (return on capital, debt, cash flow, growth, price). Profit down 2q = profit fell two quarters in a row.", pos = [0, 13, 12, 10] }
+      summary_overview  = { ds = "summary_overview", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 2, 12, 4] }
+      summary_portfolio = { ds = "summary_portfolio", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 2, 12, 4] }
+      summary_intraday  = { ds = "summary_intraday", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 2, 12, 4] }
+      summary_quality   = { ds = "summary_quality", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 2, 12, 4] }
+      details_unusual   = { ds = "unusual_latest", title = "Unusual volume, latest session (top 15)", desc = "Full numbers behind the Overview chart.", pos = [0, 2, 12, 6] }
+      details_global    = { ds = "global_latest", title = "Global markets: latest reading", desc = "FRED series and US-listed country ETFs.", pos = [0, 8, 12, 8] }
+      details_ivg       = { ds = "india_vs_global", title = "India's next open vs global moves", desc = "Correlation over all sessions; same direction = how often the gap matched the global move.", pos = [0, 16, 12, 7] }
+      details_adr       = { ds = "adr_latest", title = "Indian ADRs vs NSE shares", desc = "Premium vs the pair's median, and vs USD/INR.", pos = [0, 23, 12, 5] }
       } : k => {
       widget = {
         name = "${k}_table"
@@ -378,7 +406,7 @@ locals {
           version    = 2
           widgetType = "table"
           encodings  = { columns = local.table_columns[t.ds] }
-          frame      = { showTitle = true, title = t.title }
+          frame      = { showTitle = true, title = t.title, showDescription = true, description = t.desc }
         }
       }
       position = { x = t.pos[0], y = t.pos[1], width = t.pos[2], height = t.pos[3] }
@@ -399,7 +427,7 @@ locals {
       displayName   = "Overview"
       pageType      = "PAGE_TYPE_CANVAS"
       layoutVersion = "GRID_V1"
-      layout = [
+      layout = concat([
         {
           widget = {
             name                 = "title"
@@ -430,10 +458,10 @@ locals {
                 y     = { fieldName = "avg(pct_above_ma20)", scale = { type = "quantitative" }, displayName = "% of stocks above 20-day average" }
                 color = { fieldName = "market", scale = { type = "categorical" }, displayName = "Market" }
               }
-              frame = { showTitle = true, title = "Market breadth: % of stocks above their 20-day average" }
+              frame = { showTitle = true, title = "Market breadth: % of stocks above their 20-day average", showDescription = true, description = "Above 60% = most stocks are rising (broad strength); below 40% = most are falling." }
             }
           }
-          position = { x = 0, y = 2, width = 6, height = 6 }
+          position = { x = 0, y = 6, width = 6, height = 6 }
         },
         {
           widget = {
@@ -450,10 +478,10 @@ locals {
                 y     = { fieldName = "india_gap_pct", scale = { type = "quantitative" }, displayName = "Next India open gap % (NIFTYBEES)" }
                 color = { fieldName = "us_move", scale = { type = "categorical" }, displayName = "US move" }
               }
-              frame = { showTitle = true, title = "Does India's open follow the US close?" }
+              frame = { showTitle = true, title = "Does India's open follow the US close?", showDescription = true, description = "Each dot is one day: the US move (across) and India's opening gap next morning (up). Dots along a rising line mean India tends to follow the US." }
             }
           }
-          position = { x = 6, y = 2, width = 6, height = 6 }
+          position = { x = 6, y = 6, width = 6, height = 6 }
         },
         {
           widget = {
@@ -466,76 +494,12 @@ locals {
               version    = 2
               widgetType = "table"
               encodings  = { columns = local.table_columns.us_vs_india_summary }
-              frame      = { showTitle = true, title = "How India trades after US down / flat / up days" }
+              frame      = { showTitle = true, title = "How India trades after US down / flat / up days", showDescription = true, description = "The averages behind the dots above, grouped by the size of the US move." }
             }
           }
-          position = { x = 0, y = 8, width = 12, height = 4 }
+          position = { x = 0, y = 18, width = 12, height = 4 }
         },
-        {
-          widget = {
-            name = "unusual_volume_table"
-            queries = [{
-              name  = "main_query"
-              query = { datasetName = "unusual_latest", disaggregated = true, fields = local.raw_fields.unusual_latest }
-            }]
-            spec = {
-              version    = 2
-              widgetType = "table"
-              encodings  = { columns = local.table_columns.unusual_latest }
-              frame      = { showTitle = true, title = "Unusual volume on the latest session (>= 3x 20-day average)" }
-            }
-          }
-          position = { x = 0, y = 12, width = 12, height = 7 }
-        },
-        {
-          widget = {
-            name = "adr_table"
-            queries = [{
-              name  = "main_query"
-              query = { datasetName = "adr_latest", disaggregated = true, fields = local.raw_fields.adr_latest }
-            }]
-            spec = {
-              version    = 2
-              widgetType = "table"
-              encodings  = { columns = local.table_columns.adr_latest }
-              frame      = { showTitle = true, title = "Indian ADRs vs NSE shares (premium vs median pair, and vs USD/INR)" }
-            }
-          }
-          position = { x = 0, y = 19, width = 12, height = 5 }
-        },
-        {
-          widget = {
-            name = "global_table"
-            queries = [{
-              name  = "main_query"
-              query = { datasetName = "global_latest", disaggregated = true, fields = local.raw_fields.global_latest }
-            }]
-            spec = {
-              version    = 2
-              widgetType = "table"
-              encodings  = { columns = local.table_columns.global_latest }
-              frame      = { showTitle = true, title = "Global markets: latest reading (FRED + US-listed country ETFs)" }
-            }
-          }
-          position = { x = 0, y = 24, width = 12, height = 8 }
-        },
-        {
-          widget = {
-            name = "india_vs_global_table"
-            queries = [{
-              name  = "main_query"
-              query = { datasetName = "india_vs_global", disaggregated = true, fields = local.raw_fields.india_vs_global }
-            }]
-            spec = {
-              version    = 2
-              widgetType = "table"
-              encodings  = { columns = local.table_columns.india_vs_global }
-              frame      = { showTitle = true, title = "Which global moves line up with India's next open? (correlation with NIFTYBEES gap)" }
-            }
-          }
-          position = { x = 0, y = 32, width = 12, height = 7 }
-        },
-      ]
+      ], [local.table_widget.summary_overview, local.chart.ov_unusual, local.chart.ov_global, local.chart.ov_corr, local.chart.ov_adr])
       }, {
       name          = "portfolio"
       displayName   = "Portfolio"
@@ -549,6 +513,7 @@ locals {
           }
           position = { x = 0, y = 0, width = 12, height = 2 }
         }],
+        [local.table_widget.summary_portfolio],
         local.counter_widgets.portfolio_kpis,
         [local.chart.port_vs_nifty, local.chart.port_alloc_pool, local.chart.port_drawdown, local.chart.port_alloc_sector,
         local.chart.port_pools, local.table_widget.holdings],
@@ -566,6 +531,7 @@ locals {
           }
           position = { x = 0, y = 0, width = 12, height = 2 }
         }],
+        [local.table_widget.summary_intraday],
         local.counter_widgets.intraday_kpis,
         [local.chart.intra_curve, local.chart.intra_daily, local.chart.intra_drawdown, local.chart.intra_setup, local.chart.intra_hour],
         [
@@ -583,7 +549,7 @@ locals {
                 frame      = { showTitle = true, title = "Did your YES/NO choices help? (all days)" }
               }
             }
-            position = { x = 0, y = 16, width = 12, height = 3 }
+            position = { x = 0, y = 20, width = 12, height = 3 }
           },
           {
             widget = {
@@ -599,7 +565,7 @@ locals {
                 frame      = { showTitle = true, title = "Results by setup" }
               }
             }
-            position = { x = 0, y = 19, width = 12, height = 5 }
+            position = { x = 0, y = 23, width = 12, height = 5 }
           },
           {
             widget = {
@@ -615,7 +581,7 @@ locals {
                 frame      = { showTitle = true, title = "Results by entry hour (IST)" }
               }
             }
-            position = { x = 0, y = 24, width = 12, height = 5 }
+            position = { x = 0, y = 28, width = 12, height = 5 }
           },
           {
             widget = {
@@ -631,7 +597,7 @@ locals {
                 frame      = { showTitle = true, title = "Day by day (reconciliation: ok = events match the ledger)" }
               }
             }
-            position = { x = 0, y = 29, width = 12, height = 7 }
+            position = { x = 0, y = 33, width = 12, height = 7 }
           },
           {
             widget = {
@@ -647,7 +613,7 @@ locals {
                 frame      = { showTitle = true, title = "Latest trades" }
               }
             }
-            position = { x = 0, y = 36, width = 12, height = 8 }
+            position = { x = 0, y = 40, width = 12, height = 8 }
           },
         ],
       )
@@ -665,8 +631,26 @@ locals {
           position = { x = 0, y = 0, width = 12, height = 2 }
         },
         local.chart.quality_scatter,
-        local.chart.quality_spread,
+        local.table_widget.summary_quality,
         local.table_widget.quality_top,
+      ]
+      }, {
+      name          = "details"
+      displayName   = "Details (full tables)"
+      pageType      = "PAGE_TYPE_CANVAS"
+      layoutVersion = "GRID_V1"
+      layout = [
+        {
+          widget = {
+            name                 = "details_title"
+            multilineTextboxSpec = { lines = ["## Details", "The full numbers behind the Overview charts, for when you want to dig in."] }
+          }
+          position = { x = 0, y = 0, width = 12, height = 2 }
+        },
+        local.table_widget.details_unusual,
+        local.table_widget.details_global,
+        local.table_widget.details_ivg,
+        local.table_widget.details_adr,
       ]
     }]
   }

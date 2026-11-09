@@ -81,6 +81,12 @@ jobs:
           echo "exitcode=${code}" >> "$GITHUB_OUTPUT"
           cat plan.txt
 
+      - name: Check dashboard and summary SQL against the warehouse (EXPLAIN only)
+        if: matrix.stack == 'databricks'
+        env:
+          DATABRICKS_HOST: ${{ vars.DATABRICKS_WORKSPACE_URL }}
+        run: python3 scripts/check_sql.py
+
       - name: Comment plan on the pull request
         uses: actions/github-script@v7
         env:
