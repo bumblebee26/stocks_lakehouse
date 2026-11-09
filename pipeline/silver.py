@@ -7,6 +7,8 @@
   stocks.silver.trade_events   paper-trader journal events (dummy money), one row per event_id
   stocks.silver.news           NSE company news, one row per item (id), typed
   stocks.silver.fundamentals   company financials, one row per symbol x metric x period (newest fetch wins)
+  stocks.silver.portfolio_pools     paper-trader pools per day (capital, cash, equity)
+  stocks.silver.portfolio_holdings  paper-trader holdings per day
 
 Materialized views: they recompute incrementally where possible, and make
 de-duplication simple (a re-fetched day replaces the old copy: latest file wins).
@@ -437,3 +439,46 @@ def fundamentals():
         .select("symbol", "metric", "period_type", F.to_date("period_end").alias("period_end"), "value",
                 "currency", "source", F.to_timestamp("fetched_at_ist", "yyyy-MM-dd HH:mm:ss").alias("fetched_at"))
     )
+
+
+# ---------------------------------------------------------------------------
+# Paper-trader portfolio (dummy money)
+# ---------------------------------------------------------------------------
+# SQL equivalent:
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.silver.portfolio_pools AS
+#   SELECT to_date(snapshot_date) AS snapshot_date, pool, capital, cash, holdings_value, equity
+#   FROM stocks.bronze.portfolio_raw WHERE record_type = 'pool'   -- newest file per day wins
+def _latest_portfolio_file():
+    raw = spark.read.table("stocks.bronze.portfolio_raw").withColumn(  # noqa: F821
+        "snapshot_date", F.to_date("snapshot_date"))
+    newest = Window.partitionBy("snapshot_date").orderBy(F.col("_file_modified_at").desc())
+    files = (raw.select("snapshot_date", "_source_file", "_file_modified_at").distinct()
+             .withColumn("rn", F.row_number().over(newest)).filter("rn = 1").select("snapshot_date", "_source_file"))
+    return raw.join(files, ["snapshot_date", "_source_file"])
+
+
+@dp.materialized_view(
+    name="stocks.silver.portfolio_pools",
+    comment="Paper-trader pools (intraday, swing, long_term) per day: capital, cash, holdings value, equity (dummy Rs).",
+    table_properties={"quality": "silver"},
+)
+@dp.expect_all_or_drop({"has_keys": "snapshot_date IS NOT NULL AND pool IS NOT NULL", "has_equity": "equity IS NOT NULL"})
+def portfolio_pools():
+    return (_latest_portfolio_file().filter("record_type = 'pool'")
+            .select("snapshot_date", "pool", "capital", "cash", "holdings_value", "equity"))
+
+
+# SQL equivalent:
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.silver.portfolio_holdings AS
+#   SELECT to_date(snapshot_date) AS snapshot_date, pool, symbol, sector, qty, avg_cost, last_price, value, pnl,
+#          to_date(opened) AS opened FROM stocks.bronze.portfolio_raw WHERE record_type = 'holding';
+@dp.materialized_view(
+    name="stocks.silver.portfolio_holdings",
+    comment="Paper-trader holdings per day: pool, symbol, sector, quantity, average cost, last price, value, P&L (dummy Rs).",
+    table_properties={"quality": "silver"},
+)
+@dp.expect_all_or_drop({"has_keys": "snapshot_date IS NOT NULL AND pool IS NOT NULL AND symbol IS NOT NULL"})
+def portfolio_holdings():
+    return (_latest_portfolio_file().filter("record_type = 'holding'")
+            .select("snapshot_date", "pool", "symbol", "sector", "qty", "avg_cost", "last_price", "value", "pnl",
+                    F.to_date("opened").alias("opened")))
