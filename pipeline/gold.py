@@ -18,6 +18,7 @@ Paper trading (dummy money, from bumblebee26/paper-trader via stocks.silver.trad
   stocks.gold.news_recent                  company news of the last 30 days, newest first, with symbol and category
   stocks.gold.news_by_symbol               per stock: news counts (7 and 30 days), latest headline, categories
   stocks.gold.events_calendar              upcoming board meetings (results dates) per stock
+  stocks.gold.company_fundamentals         per company: profitability, debt, cash, growth, P/E and the long-term pool's quality tests
 
 Market proxies (no index data in these sources): NIFTYBEES (Nifty 50 ETF on NSE)
 and SPY (S&P 500 ETF). Change them with pipeline configuration keys
@@ -745,3 +746,111 @@ def events_calendar():
                 F.col("news_ts").alias("announced_ts"))
         .dropDuplicates(["symbol", "event_date"])
     )
+
+
+
+# ---------------------------------------------------------------------------
+# Company fundamentals: the long-term pool's quality tests (system plan, phase 4)
+# ---------------------------------------------------------------------------
+# One row per company from the latest annual figures (fiscal years end 31 March), the annual
+# figures 3 years earlier, the last 4 annual cash flows, the last quarters and the latest NSE
+# close. Banks and lenders (no EBIT reported) are judged on return on assets instead of return
+# on capital; their debt and cash-flow tests are left null (deposits make them meaningless).
+# Not available from this source: promoter pledges and holding, bad-loan ratios, P/E history.
+# P/E is compared with the other companies here instead (pe_percentile, 0 = cheapest).
+#
+# SQL equivalent (abridged):
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.company_fundamentals AS
+#   WITH annual AS (SELECT symbol, period_end, <pivot of metric values> FROM stocks.silver.fundamentals
+#                   WHERE period_type = '12M' GROUP BY symbol, period_end), ...
+#   SELECT symbol, fiscal_year_end, revenue_cr, net_income_cr, roce_pct, roe_pct, roa_pct, debt_to_equity,
+#          ocf_positive_years, revenue_cagr_3y_pct, profit_cagr_3y_pct, eps_ttm, close, pe, pe_percentile,
+#          profit_down_2q, pass_capital, pass_balance, pass_cash, pass_growth, pass_price, tests_passed,
+#          tests_available, quality_score FROM ...;
+ANNUAL_METRICS = ["TotalRevenue", "NetIncome", "EBIT", "TotalDebt", "StockholdersEquity", "OperatingCashFlow",
+                  "InvestedCapital", "DilutedEPS", "TotalAssets"]
+QUARTERLY_METRICS = ["TotalRevenue", "NetIncome", "DilutedEPS"]
+
+
+def _cagr(now, then, years):
+    return F.when((now > 0) & (then > 0) & (years > 0),
+                  (F.pow(now / then, 1 / years) - 1) * 100)
+
+
+@dp.materialized_view(
+    name="stocks.gold.company_fundamentals",
+    comment="Per NSE company: latest fiscal-year profitability (ROCE, ROE, ROA), debt to equity, years of "
+            "positive operating cash flow, 3-year revenue and profit growth, trailing EPS, P/E and its "
+            "percentile, two-quarter profit decline, and the long-term pool's pass/fail quality tests.",
+    table_properties={"quality": "gold"},
+)
+def company_fundamentals():
+    f = spark.read.table("stocks.silver.fundamentals")  # noqa: F821
+    by_end = Window.partitionBy("symbol").orderBy(F.col("period_end").desc())
+
+    annual = (f.filter("period_type = '12M'").groupBy("symbol", "period_end")
+              .pivot("metric", ANNUAL_METRICS).agg(F.first("value"))
+              .withColumn("rn", F.row_number().over(by_end)))
+    latest = annual.filter("rn = 1").drop("rn").withColumnRenamed("period_end", "fiscal_year_end")
+    base = annual.filter("rn = 4").select(
+        "symbol", F.col("period_end").alias("base_end"),
+        F.col("TotalRevenue").alias("revenue_base"), F.col("NetIncome").alias("net_income_base"))
+    ocf = annual.filter("rn <= 4").groupBy("symbol").agg(
+        F.sum(F.when(F.col("OperatingCashFlow") > 0, 1).otherwise(0)).alias("ocf_positive_years"),
+        F.count(F.col("OperatingCashFlow")).alias("ocf_years"))
+
+    quarterly = (f.filter("period_type = '3M'").groupBy("symbol", "period_end")
+                 .pivot("metric", QUARTERLY_METRICS).agg(F.first("value"))
+                 .withColumn("rn", F.row_number().over(by_end)))
+    q = quarterly.filter("rn <= 4").groupBy("symbol").agg(
+        F.sum("DilutedEPS").alias("eps_4q"), F.count("DilutedEPS").alias("eps_quarters"),
+        F.min("period_end").alias("q_first"), F.max("period_end").alias("q_last"),
+        F.max(F.when(F.col("rn") == 1, F.col("NetIncome"))).alias("ni_q1"),
+        F.max(F.when(F.col("rn") == 2, F.col("NetIncome"))).alias("ni_q2"),
+        F.max(F.when(F.col("rn") == 3, F.col("NetIncome"))).alias("ni_q3"),
+        F.max(F.when(F.col("rn") == 3, F.col("period_end"))).alias("q3_end"))
+
+    price = (spark.read.table("stocks.silver.nse_eq_daily").filter("series = 'EQ'")  # noqa: F821
+             .withColumn("rn", F.row_number().over(
+                 Window.partitionBy("symbol").orderBy(F.col("trade_date").desc())))
+             .filter("rn = 1").select("symbol", "close", F.col("trade_date").alias("price_date")))
+
+    years = F.months_between("fiscal_year_end", "base_end") / 12
+    eps_ttm = F.when((F.col("eps_quarters") == 4) & (F.months_between("q_last", "q_first") <= 10),
+                     F.col("eps_4q")).otherwise(F.col("DilutedEPS"))
+    df = (latest.join(base, "symbol", "left").join(ocf, "symbol", "left").join(q, "symbol", "left")
+          .join(price, "symbol", "left")
+          .withColumn("is_financial", F.col("EBIT").isNull())
+          .withColumn("revenue_cr", F.round(F.col("TotalRevenue") / 1e7, 1))
+          .withColumn("net_income_cr", F.round(F.col("NetIncome") / 1e7, 1))
+          .withColumn("roce_pct", F.round(F.col("EBIT") / F.col("InvestedCapital") * 100, 1))
+          .withColumn("roe_pct", F.round(F.col("NetIncome") / F.col("StockholdersEquity") * 100, 1))
+          .withColumn("roa_pct", F.round(F.col("NetIncome") / F.col("TotalAssets") * 100, 2))
+          .withColumn("debt_to_equity", F.round(F.col("TotalDebt") / F.col("StockholdersEquity"), 2))
+          .withColumn("revenue_cagr_3y_pct", F.round(_cagr(F.col("TotalRevenue"), F.col("revenue_base"), years), 1))
+          .withColumn("profit_cagr_3y_pct", F.round(_cagr(F.col("NetIncome"), F.col("net_income_base"), years), 1))
+          .withColumn("eps_ttm", F.round(eps_ttm, 2))
+          .withColumn("pe", F.round(F.when(F.col("eps_ttm") > 0, F.col("close") / F.col("eps_ttm")), 1))
+          .withColumn("profit_down_2q", (F.col("ni_q1") < F.col("ni_q2")) & (F.col("ni_q2") < F.col("ni_q3"))
+                      & (F.months_between("q_last", "q3_end") <= 7)))
+    ranked = df.filter("pe IS NOT NULL").withColumn(
+        "pe_percentile", F.round(F.percent_rank().over(Window.orderBy("pe")) * 100, 0)).select("symbol", "pe_percentile")
+    df = df.join(ranked, "symbol", "left")
+
+    fin = F.col("is_financial")
+    df = (df
+          .withColumn("pass_capital", F.when(fin, F.col("roa_pct") >= 1.2).otherwise(F.col("roce_pct") >= 15))
+          .withColumn("pass_balance", F.when(~fin, F.col("debt_to_equity") < 0.5))
+          .withColumn("pass_cash", F.when(~fin & (F.col("ocf_years") >= 3),
+                                          F.col("ocf_positive_years") >= F.col("ocf_years") - 1))
+          .withColumn("pass_growth", (F.col("revenue_cagr_3y_pct") > 10) & (F.col("profit_cagr_3y_pct") > 10))
+          .withColumn("pass_price", F.col("pe_percentile") <= 50))
+    tests = ["pass_capital", "pass_balance", "pass_cash", "pass_growth", "pass_price"]
+    passed = sum(F.when(F.col(t), 1).otherwise(0) for t in tests)
+    available = sum(F.when(F.col(t).isNotNull(), 1).otherwise(0) for t in tests)
+    return (df.withColumn("tests_passed", passed).withColumn("tests_available", available)
+            .withColumn("quality_score", F.round(F.col("tests_passed") / F.col("tests_available"), 2))
+            .select("symbol", "fiscal_year_end", "is_financial", "revenue_cr", "net_income_cr", "roce_pct",
+                    "roe_pct", "roa_pct", "debt_to_equity", "ocf_positive_years", "ocf_years",
+                    "revenue_cagr_3y_pct", "profit_cagr_3y_pct", "eps_ttm", "close", "price_date", "pe",
+                    "pe_percentile", "profit_down_2q", *tests, "tests_passed", "tests_available", "quality_score"))
