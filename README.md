@@ -33,7 +33,7 @@ market breadth, unusual volume, Indian ADR premium vs USD/INR, and a global mark
 
 | Time | What happens |
 |---|---|
-| 04:30 Tue–Sat | Massive: previous US session (all US stocks) |
+| 04:30 Tue–Sat (07:30 retry) | Massive: previous US session (all US stocks), catching up missed days |
 | 06:00 Tue–Sat | FRED: global indices, FX, VIX, oil, rates (rolling 21-day window) |
 | after each file | Databricks job refreshes the pipeline (file-arrival trigger), then rebuilds the dashboard summaries |
 | every 30 min, 08:00–19:30 Mon–Fri | NSE company news (announcements, results, board meetings, corporate actions) |

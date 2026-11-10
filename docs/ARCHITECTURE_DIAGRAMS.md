@@ -56,7 +56,7 @@ bucket, but outbound calls from Lambda are allowed.
 | Function | Trigger | Does |
 |---|---|---|
 | `stocks-fetch-nse` | 19:30 IST Mon–Fri | Today's NSE bhavcopy. Keeps the `.zip` in S3, pushes an unzipped `.csv` to the volume (Spark can't read zip). |
-| `stocks-fetch-massive` | 04:30 IST Tue–Sat | The previous US session for all US tickers. |
+| `stocks-fetch-massive` | 04:30 and 07:30 IST Tue–Sat | The previous US session for all US tickers; each run also fetches any of the last 3 weekdays still missing. |
 | `stocks-fetch-fred` | 06:00 IST Tue–Sat | The last 21 days for 14 series (late and revised values get corrected). |
 | `stocks-fetch-news` | Every 30 min, 08:00–19:30 IST Mon–Fri | A snapshot of NSE's announcement, results, board-meeting and corporate-action feeds to the **news volume** (`snap_HHMM.jsonl` + `latest.jsonl`), S3 copy under `landing/news/`. Kept out of the landing volume so it doesn't trigger a refresh every 30 minutes. |
 | `stocks-sync-volume` | Manual | Copies S3 files that are missing from the volume, after a backfill or a failed push. |
