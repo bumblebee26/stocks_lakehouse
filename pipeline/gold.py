@@ -254,10 +254,7 @@ def nifty_after_us_moves_summary():
 #
 # SQL equivalent:
 #   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.adr_premium AS
-#   WITH pairs AS (
-#     SELECT * FROM VALUES ('INFY','INFY',1.0), ('WIT','WIPRO',1.0), ('HDB','HDFCBANK',3.0),
-#                          ('IBN','ICICIBANK',2.0), ('RDY','DRREDDY',1.0)
-#            AS p(adr, nse_symbol, shares_per_adr)
+#   WITH pairs AS (SELECT * FROM stocks.silver.adr_pairs   -- ('INFY','INFY',1.0), ('HDB','HDFCBANK',3.0), ...
 #   ), joined AS (
 #     SELECT p.adr, p.nse_symbol, p.shares_per_adr, u.trade_date,
 #            u.close AS adr_close_usd, n.close AS nse_close_inr,
@@ -281,12 +278,23 @@ def nifty_after_us_moves_summary():
 #          (fx.fx_inr_per_usd / implied_inr_per_usd - 1) * 100 AS fx_premium_pct
 #   FROM joined j LEFT JOIN fx ON fx.adr = j.adr AND fx.trade_date = j.trade_date AND fx.rn = 1;
 @dp.materialized_view(
+    name="stocks.silver.adr_pairs",
+    comment="Reference: Indian ADRs and their NSE shares (adr, nse_symbol, shares_per_adr), from ADR_PAIRS.",
+    table_properties={"quality": "silver"},
+)
+def adr_pairs():
+    # A pipeline table rather than an inline DataFrame, so adr_premium reads only Delta sources and can
+    # refresh incrementally. Ratios are hand-maintained in ADR_PAIRS above.
+    return spark.createDataFrame(ADR_PAIRS, "adr STRING, nse_symbol STRING, shares_per_adr DOUBLE")  # noqa: F821
+
+
+@dp.materialized_view(
     name="stocks.gold.adr_premium",
     comment="Indian ADRs vs NSE shares: implied INR/USD per pair and premium vs the day's median pair.",
     table_properties={"quality": "gold"},
 )
 def adr_premium():
-    pairs = spark.createDataFrame(ADR_PAIRS, "adr STRING, nse_symbol STRING, shares_per_adr DOUBLE")  # noqa: F821
+    pairs = spark.read.table("stocks.silver.adr_pairs")  # noqa: F821
     b = bars()
     us = b.filter(F.col("market") == "US").select(
         F.col("symbol").alias("adr"), "trade_date", F.col("close").alias("adr_close_usd")

@@ -59,7 +59,12 @@ Each new file is read once. Every bronze table has these lineage columns: `_sour
 | `silver.portfolio_pools` | day × pool | `capital`, `cash`, `holdings_value`, `equity` (newest file per day) | keys and equity present |
 | `silver.portfolio_holdings` | day × pool × symbol | `sector`, `qty`, `avg_cost`, `last_price`, `value`, `pnl`, `opened` | keys present |
 | `silver.fundamentals` | company × metric × period | `symbol`, `metric`, `period_type`, `period_end`, `value`, `currency`, `fetched_at`. Newest weekly fetch wins (restatements replace old figures). | keys and value present |
+| `silver.country_etfs` | ticker | Reference list of the 12 country ETFs: `symbol`, `name`, `region` (from `COUNTRY_ETFS` in `silver.py`) | — |
+| `silver.adr_pairs` | ADR | Reference list of Indian ADRs: `adr`, `nse_symbol`, `shares_per_adr` (from `ADR_PAIRS` in `gold.py`) | — |
 | `silver.global_daily` | instrument × date | `instrument`, `name`, `region`, `asset_class`, `unit`, `source` (`FRED`/`Massive`), `obs_date`, `value`. FRED series + 12 country ETFs. | — |
+
+Reference lists (`country_etfs`, `adr_pairs`) are pipeline tables rather than inline lists so the views that
+join them read only Delta sources and can refresh incrementally.
 
 De-duplication: when a day or observation is fetched more than once, the row from the most recently modified
 file wins (for trades: per `event_id`, so a re-exported day replaces its old copy).
