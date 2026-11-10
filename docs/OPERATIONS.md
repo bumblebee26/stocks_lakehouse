@@ -120,7 +120,7 @@ secrets. Findings are in the repository's **Security → Code scanning** tab and
 | zizmor | Attacks on GitHub Actions: script injection, over-broad tokens, risky triggers, unpinned actions | High severity |
 | Checkov | Risky Terraform settings: public buckets, wide IAM, missing encryption | Report only; reviewed exceptions with reasons in `.checkov.yaml` |
 | pip-audit (paper-trader) | Known vulnerabilities in `requirements.txt` | Any |
-| Dependabot | Weekly grouped update PRs for actions (and pip) | — |
+| Dependabot | Saturday grouped update PRs for actions, minor and patch versions only (majors by hand); the Terraform plan is skipped on its PRs (no secrets) | — |
 
 Every action is pinned to a commit hash with its version in a comment, so a hijacked tag can't swap in
 other code; Dependabot keeps the hashes current. Turn on in **Settings → Code security**: secret scanning
