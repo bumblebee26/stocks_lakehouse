@@ -18,7 +18,7 @@ backend.hcl
 
 # Keep .terraform.lock.hcl committed so provider versions stay pinned
 
-# Python (fetchers come later)
+# Python
 __pycache__/
 *.pyc
 .venv/
@@ -31,7 +31,7 @@ __pycache__/
 # Lambda build output
 infra/aws/build/
 
-# Output of the fetchers
+# Local output of manual Lambda invokes
 infra/aws/massive_*
 infra/aws/nse_*
 infra/databricks/nse_test.json
