@@ -1,0 +1,11 @@
+# Weekly update PRs for GitHub Actions, grouped to keep the noise low.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: saturday
+    groups:
+      actions:
+        patterns: ["*"]
