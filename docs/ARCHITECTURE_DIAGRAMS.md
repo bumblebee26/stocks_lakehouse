@@ -125,12 +125,15 @@ columns are kept as delivered, plus lineage columns (`_source_file`, `_ingested_
   currency). Most gold tables read only this.
 - `trading_days` is each market's calendar, derived from the data.
 - `fred_daily` de-duplicates FRED; **`global_daily`** combines it with 12 US-listed country ETFs from
-  `us_daily` into one long table of world instruments.
+  `us_daily` (listed in `country_etfs`) into one long table of world instruments.
+- `country_etfs` and `adr_pairs` are small reference lists kept as tables, so the views that join them can
+  refresh incrementally.
 - `trade_events` types the paper-trader events and keeps the newest copy of each `event_id`.
 - `portfolio_pools` and `portfolio_holdings` split the newest portfolio file of each day into pools and holdings.
 - `fundamentals` keeps the newest fetch of each company × metric × period; `index_members` is the latest
   Nifty 200 list.
-- `news` keeps the earliest snapshot of each item and sorts it into categories (results, board meeting, rating...).
+- `news` keeps the earliest snapshot of each item and sorts it into categories (results, board meeting, rating...):
+  the history of company news (the trader reads today's news straight from the news volume).
 
 **Gold**: the insights.
 
@@ -139,7 +142,7 @@ columns are kept as delivered, plus lineage columns (`_source_file`, `_ingested_
 | `market_breadth` | daily_bars | How broad was each market's move? |
 | `unusual_volume` | daily_bars | Which stocks traded ≥ 3× their 20-day average volume? |
 | `nifty_after_us_moves` → `_summary` | daily_bars | What does India do after big US up / down / flat days? |
-| `adr_premium` | daily_bars + fred_daily (USD/INR) | Are Indian ADRs rich or cheap versus their NSE shares? |
+| `adr_premium` | daily_bars + adr_pairs + fred_daily (USD/INR) | Are Indian ADRs rich or cheap versus their NSE shares? |
 | `global_markets_daily` → `global_snapshot` | global_daily | How did each world market move (1/5/20 days), and what's the latest? |
 | `india_vs_global` | global_markets_daily + nifty_after_us_moves | Which world markets' moves line up with India's next open? |
 | **`trades`** | trade_events | Each paper trade from entry to exit: net P&L, R multiple |
@@ -150,8 +153,6 @@ columns are kept as delivered, plus lineage columns (`_source_file`, `_ingested_
 | `holdings_latest` | portfolio_holdings + portfolio_pools | What's held now, and what weight does each holding have? |
 | `company_fundamentals` | fundamentals + nse_eq_daily | Which large companies pass the long-term quality tests? |
 | **`longterm_candidates`** | company_fundamentals + index_members | What would the long-term pool buy this week, and why? |
-| `news_recent` → `news_by_symbol` | news | What has each company announced lately? |
-| `events_calendar` | news | Which board meetings (often results) are coming up? |
 
 Two more gold tables are not in the pipeline: `dashboard_summary_facts` and `dashboard_summary`, rebuilt by
 `sql/dashboard_summary.sql` after each refresh for the dashboard's "In plain words" boxes.
@@ -169,7 +170,7 @@ Every change, whether code, pipeline, dashboard or settings, follows the same pa
 | Step | What happens | Identity |
 |---|---|---|
 | **1. Commit to `dev`** | All work happens on `dev`. | You |
-| **2. CI** | On every push and PR: Python unit tests, pipeline wiring check (all 40 tables defined, every dependency resolves), `terraform fmt`, `terraform validate` on all stacks. No cloud access needed. | GitHub Actions |
+| **2. CI** | On every push and PR: Python unit tests, pipeline wiring check (every table defined, every dependency resolves), `terraform fmt`, `terraform validate` on all stacks. No cloud access needed. | GitHub Actions |
 | **3. Pull request** | Open a PR from `dev` into `main`. `main` is protected and only changes this way. | You |
 | **4. Plan** | `terraform plan` runs for the `aws` and `databricks` stacks against the real state, and each plan is posted as a PR comment. The databricks job also checks every dashboard query and `sql/` statement against the SQL warehouse with `EXPLAIN` (`scripts/check_sql.py`; nothing is executed). | `stocks-gha-plan` (read-only) |
 | **5. Review** | Check that the plan shows only the changes you expect. If not, fix on `dev` and push; the PR re-plans automatically. | You |

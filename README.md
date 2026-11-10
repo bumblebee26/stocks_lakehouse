@@ -10,7 +10,7 @@ a dashboard, and sends a **pre-market brief to Telegram** before the Indian mark
 
 **Diagrams with explanations:** [docs/ARCHITECTURE_DIAGRAMS.md](docs/ARCHITECTURE_DIAGRAMS.md)
 covers the base view above, the full [architecture](docs/ARCHITECTURE_DIAGRAMS.md#2-architecture),
-[data lineage](docs/ARCHITECTURE_DIAGRAMS.md#3-data-lineage) (all 40 pipeline tables) and the
+[data lineage](docs/ARCHITECTURE_DIAGRAMS.md#3-data-lineage) (every pipeline table) and the
 [CI/CD flow](docs/ARCHITECTURE_DIAGRAMS.md#4-cicd-flow), and the
 [platform shared with paper-trader](docs/ARCHITECTURE_DIAGRAMS.md#5-platform-with-paper-trader).
 
@@ -19,7 +19,7 @@ covers the base view above, the full [architecture](docs/ARCHITECTURE_DIAGRAMS.m
 | Output | Where | When |
 |---|---|---|
 | Daily raw data (NSE, US, global) | S3 `landing/` + Databricks volume | Every trading day |
-| 40 bronze/silver/gold tables | Unity Catalog `stocks.*` | Refreshed when new files land |
+| Bronze, silver and gold tables | Unity Catalog `stocks.*` | Refreshed when new files land |
 | Dashboard "Stocks lakehouse: India x US" (pages Overview, Portfolio, Intraday trading, Company quality, Details; each with an "In plain words" summary written by Databricks AI) | Databricks workspace | Always current; summaries rebuilt after every refresh |
 | Pre-market brief | Your Telegram | 08:45 IST, Mon–Fri |
 | Paper-trading analysis ([paper-trader](https://github.com/bumblebee26/paper-trader)) | `stocks.gold.trad*` tables + dashboard page "Intraday trading" (KPI tiles: net P&L, win rate, profit factor, expectancy, win/loss ratio; equity curve, daily P&L, drawdown, by setup and hour) | After the 15:45 IST export |
@@ -55,8 +55,8 @@ infra/
   databricks/      Catalog, schemas, volume, token, pipeline, job, dashboard
 tests/             Unit tests (no cloud access needed)
 scripts/           check_pipeline.py (pipeline wiring check, used by CI), check_sql.py (dashboard and summary SQL
-                   checked with EXPLAIN in the plan job), render_diagrams (re-render docs/diagrams)
-.github/           CI (tests, fmt, validate) and CD (plan on PR, apply on merge)
+                   checked with EXPLAIN in the plan job), render_diagrams .sh/.cmd (re-render docs/diagrams)
+.github/           CI (tests, fmt, validate), security checks, CD (plan on PR, apply on merge)
 docs/              Full documentation (below); docs/diagrams/ holds the diagram sources and images
 ```
 
@@ -77,7 +77,8 @@ docs/              Full documentation (below); docs/diagrams/ holds the diagram 
 
 ```
 edit on dev  ──push──▶  CI: tests, pipeline wiring, terraform fmt + validate
-              ──PR to main──▶  terraform plan (aws, databricks) posted as PR comments; dashboard SQL checked
+              ──PR to main──▶  terraform plan (aws, databricks) posted as PR comments; dashboard SQL checked;
+                               security checks (CodeQL, zizmor, Checkov)
               ──merge──▶  terraform apply (aws, then databricks)
 ```
 

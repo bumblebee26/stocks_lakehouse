@@ -43,7 +43,9 @@ flowchart LR
         S9["portfolio_holdings"]
         S10["fundamentals"]
         S11["index_members<br/><i>latest Nifty 200</i>"]
-        S12["news"]
+        S12["news<br/><i>history</i>"]
+        S13["country_etfs<br/><i>reference list</i>"]
+        S14["adr_pairs<br/><i>reference list</i>"]
     end
 
     subgraph G["🥇 Gold · materialized views"]
@@ -65,20 +67,19 @@ flowchart LR
         G15["holdings_latest"]
         G16["company_fundamentals"]
         G17["<b>longterm_candidates</b>"]
-        G18["news_recent"]
-        G19["news_by_symbol"]
-        G20["events_calendar"]
     end
 
     LN --> B1 --> S1 --> S3
     LM --> B2 --> S2 --> S3
     LF --> B3 --> S5 --> S6
     S2 --> S6
+    S13 --> S6
     S3 --> S4
     S3 --> G1
     S3 --> G2
     S3 --> G3 --> G4
     S3 --> G5
+    S14 --> G5
     S5 -- "USD/INR" --> G5
     S6 --> G6 --> G7
     G6 --> G8
@@ -101,8 +102,7 @@ flowchart LR
     S1 -- "price, P/E" --> G16
     LI --> B7 --> S11 --> G17
     G16 --> G17
-    LW --> B8 --> S12 --> G18 --> G19
-    S12 --> G20
+    LW --> B8 --> S12
 
     classDef land fill:#fff7ed,stroke:#f59e0b,color:#451a03
     classDef bronze fill:#f5e6d3,stroke:#b45309,color:#451a03
@@ -110,5 +110,5 @@ flowchart LR
     classDef gold fill:#fef9c3,stroke:#ca8a04,color:#422006
     class LN,LM,LF,LT,LP,LU,LI,LW land
     class B1,B2,B3,B4,B5,B6,B7,B8 bronze
-    class S1,S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12 silver
-    class G1,G2,G3,G4,G5,G6,G7,G8,G9,G10,G11,G12,G13,G14,G15,G16,G17,G18,G19,G20 gold
+    class S1,S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12,S13,S14 silver
+    class G1,G2,G3,G4,G5,G6,G7,G8,G9,G10,G11,G12,G13,G14,G15,G16,G17 gold

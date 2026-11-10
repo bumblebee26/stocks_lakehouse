@@ -88,13 +88,10 @@ For NSE, `series = 'EQ'` is the main board. Gold uses `EQ` only.
 | `gold.trading_by_setup` | setup × side | Which setups make money? | `trades`, `win_rate_pct`, `net_pnl_rs`, `avg_pnl_per_trade_rs`, `avg_r_multiple` |
 | `gold.trading_by_hour` | entry hour (IST) | When in the day do trades work? | same as by setup |
 | `gold.trading_decisions` | day | Did your YES/NO choices help? | `taken`, `taken_net_pnl_rs`, `passed`, `passed_would_have_made_rs`, `saved_by_skipping_rs` |
-| `gold.news_recent` | news item (30 days) | What has each company announced lately? | `symbol`, `news_ts`, `category`, `title`, `link` |
-| `gold.news_by_symbol` | symbol | How newsy is a stock, and what's the latest? | `news_7d`, `news_30d`, `latest_title`, `latest_link`, `latest_ts`, `categories_30d` |
 | `gold.portfolio_daily` | day | How is the whole dummy portfolio doing? | `total_value_rs`, pool values, `pnl_rs`, `return_pct`, `drawdown_pct`, `portfolio_index` and `nifty_index` (both 100 on day one), `day_change_rs` |
 | `gold.holdings_latest` | holding | What do I hold now? | `pool`, `symbol`, `sector`, `qty`, `avg_cost`, `last_price`, `value`, `pnl`, `pnl_pct`, `weight_pct`, `days_held` |
 | `gold.longterm_candidates` | company | What would the long-term pool buy this week? | `rank`, `is_pick` (top 10, max 2 per industry), `score` (100 × quality + growth bonus − price penalty), `target_weight_pct` (90% invested in equal parts, max 15%), `reasons` (plain words) |
 | `gold.company_fundamentals` | company | Which large companies pass the long-term pool's quality tests? | `roce_pct` (`roa_pct` for banks/lenders), `debt_to_equity`, `ocf_positive_years`, `revenue_cagr_3y_pct`, `profit_cagr_3y_pct`, `eps_ttm`, `pe`, `pe_percentile` (0 = cheapest), `profit_down_2q`, `pass_capital/balance/cash/growth/price`, `tests_passed`, `quality_score`. Not in this source: promoter pledges, bad-loan ratios, P/E history |
-| `gold.events_calendar` | symbol × meeting date | Which companies have a board meeting (often results) coming up? | `event_date`, `purpose`, `link`, `announced_ts` |
 | `gold.dashboard_summary_facts` | dashboard page | Short facts per page from the latest numbers (not a pipeline table: rebuilt by `sql/dashboard_summary.sql` after every refresh) | `page`, `facts` |
 | `gold.dashboard_summary` | dashboard page | The "In plain words" text on each dashboard page | `page`, `facts`, `ai_text` (`ai_summarize` of the facts; the dashboard shows the facts when it is empty), `generated_at` |
 

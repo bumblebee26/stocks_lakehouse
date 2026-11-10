@@ -8,7 +8,6 @@ import builtins
 import pathlib
 import sys
 import types
-from unittest import mock
 
 root = pathlib.Path(sys.argv[1])
 defined, reads, expectations = {}, [], {}
