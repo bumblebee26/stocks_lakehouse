@@ -17,8 +17,9 @@ locals {
       role_key    = "us"
       timeout     = 900 # backfills sleep between calls for the free-plan rate limit
       description = "Massive grouped daily (all US stocks) -> landing/massive/"
-      # 04:30 IST, Tuesday-Saturday = after the US close the previous evening
-      schedule = "cron(30 4 ? * TUE-SAT *)"
+      # 04:30 IST, Tuesday-Saturday = after the US close the previous evening; 07:30 IST retry
+      # (each run also fetches any of the last 3 weekdays still missing; see massive.py)
+      schedule = "cron(30 4,7 ? * TUE-SAT *)"
       enabled  = true
     }
     news = {

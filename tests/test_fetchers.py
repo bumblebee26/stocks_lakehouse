@@ -125,6 +125,22 @@ class MassiveFetch(unittest.TestCase):
         self.assertEqual(self.s3.puts[0]["Key"],
                          "landing/massive/date=2026-11-06/grouped_daily_20261106.json")
 
+    def test_scheduled_run_catches_up_missing_days(self):
+        landed = {"massive/date=2026-11-05/grouped_daily_20261105.json"}
+        with mock.patch.object(databricks_volume, "enabled", return_value=True), \
+                mock.patch.object(databricks_volume, "exists", side_effect=lambda rel: rel in landed):
+            self.assertEqual(massive.scheduled_dates(D(2026, 11, 9)), [D(2026, 11, 6), D(2026, 11, 9)])
+            landed |= {"massive/date=2026-11-06/grouped_daily_20261106.json",
+                       "massive/date=2026-11-09/grouped_daily_20261109.json"}
+            self.assertEqual(massive.scheduled_dates(D(2026, 11, 9)), [])  # 07:30 retry after a good 04:30
+
+    def test_scheduled_run_without_volume_or_check_fetches_latest(self):
+        with mock.patch.object(databricks_volume, "enabled", return_value=False):
+            self.assertEqual(massive.scheduled_dates(D(2026, 11, 9)), [D(2026, 11, 9)])
+        with mock.patch.object(databricks_volume, "enabled", return_value=True), \
+                mock.patch.object(databricks_volume, "exists", side_effect=RuntimeError("401")):
+            self.assertEqual(massive.scheduled_dates(D(2026, 11, 9)), [D(2026, 11, 9)])
+
     def test_zero_results_not_written(self):
         body = json.dumps({"status": "OK", "resultsCount": 0}).encode()
         with mock.patch.object(massive, "http_get", return_value=body):

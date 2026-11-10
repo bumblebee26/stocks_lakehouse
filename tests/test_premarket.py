@@ -113,7 +113,12 @@ class BuildMessage(unittest.TestCase):
 
     def test_stale_data_warning(self):
         msg = premarket.build_message(SAMPLE, dt.date(2026, 11, 16))
-        self.assertIn("⚠️ Latest US data is from Fri 06 Nov", msg)
+        self.assertIn("⚠️ US data for Fri 13 Nov hasn't arrived", msg)
+        self.assertIn("are from Fri 06 Nov", msg)
+        tue = premarket.build_message(SAMPLE, dt.date(2026, 11, 10))  # Monday's US data missing
+        self.assertIn("US data for Mon 09 Nov hasn't arrived", tue)
+        mon = premarket.build_message(SAMPLE, dt.date(2026, 11, 9))  # Friday's data is the latest: fine
+        self.assertNotIn("hasn't arrived", mon)
 
     def test_empty_tables_do_not_crash(self):
         empty = {k: [] for k in SAMPLE}

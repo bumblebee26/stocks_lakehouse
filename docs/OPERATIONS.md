@@ -6,7 +6,7 @@ Day-to-day running of the lakehouse once [SETUP.md](SETUP.md) is done.
 
 | Time (IST) | Job | Writes |
 |---|---|---|
-| 04:30 Tue–Sat | `stocks-fetch-massive` | `landing/massive/date=<US date>/grouped_daily_YYYYMMDD.json` |
+| 04:30 and 07:30 Tue–Sat | `stocks-fetch-massive` (07:30 = retry; each run fetches any of the last 3 weekdays not yet in the volume) | `landing/massive/date=<US date>/grouped_daily_YYYYMMDD.json` |
 | 06:00 Tue–Sat | `stocks-fetch-fred` | `landing/fred/date=<today>/fred_<start>_<end>.json` (last 21 days) |
 | 5 min after files stop arriving | Databricks job `stocks-refresh` | Refreshes all bronze/silver/gold tables, then `sql/dashboard_summary.sql` rebuilds `gold.dashboard_summary_facts` and `gold.dashboard_summary` (the dashboard's "In plain words" text) |
 | every 30 min, 08:00–19:30 Mon–Fri | `stocks-fetch-news` | news volume `date=<today>/snap_HHMM.jsonl` + `latest.jsonl` (S3 copy under `landing/news/`); read by the pipeline at its next refresh |

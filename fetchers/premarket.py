@@ -29,7 +29,6 @@ US_PROXY = os.environ.get("US_PROXY", "SPY")
 INDIA_PROXY = os.environ.get("INDIA_PROXY", "NIFTYBEES")
 BIG_MOVE_PCT = float(os.environ.get("BIG_MOVE_PCT", "1.0"))
 UNUSUAL_TOP_N = int(os.environ.get("UNUSUAL_TOP_N", "10"))
-STALE_AFTER_DAYS = 4
 
 US_INDEX_ETFS = [(US_PROXY, "S&P 500"), ("QQQ", "Nasdaq 100"), ("DIA", "Dow"), ("IWM", "Russell 2000")]
 ADRS = [("INFY", "INFY"), ("WIT", "WIPRO"), ("HDB", "HDFCBANK"), ("IBN", "ICICIBANK"), ("RDY", "DRREDDY")]
@@ -256,8 +255,12 @@ def build_message(data, today, failed=()):
     if failed:
         missing = sorted({SECTION_NAMES.get(n, n) for n in failed})
         lines += [f"⚠️ Unavailable today: {esc(', '.join(missing))} (check the Databricks pipeline).", ""]
-    if us_date and (today - dt.date.fromisoformat(us_date)).days > STALE_AFTER_DAYS:
-        lines += [f"⚠️ Latest US data is from {nice_date(us_date)}; the pipeline may be behind.", ""]
+    expected = today - dt.timedelta(days=1)
+    while expected.weekday() >= 5:
+        expected -= dt.timedelta(days=1)
+    if us_date and dt.date.fromisoformat(us_date) < expected:
+        lines += [f"⚠️ US data for {expected:%a %d %b} hasn't arrived (or US markets were closed); "
+                  f"the US figures below are from {nice_date(us_date)}.", ""]
 
     # Key takeaways
     bullets = takeaways(data, bars, glob, stats, bucket) if bucket else []
