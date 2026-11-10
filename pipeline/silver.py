@@ -305,8 +305,18 @@ GLOBAL_COLUMNS = ["instrument", "name", "region", "asset_class", "unit", "source
 #   UNION ALL
 #   SELECT u.symbol, e.name, e.region, 'equity_etf', 'USD', 'Massive', u.trade_date, u.close
 #   FROM stocks.silver.us_daily u
-#   JOIN (VALUES ('EWJ', 'Japan (iShares MSCI Japan)', 'Japan'), ... ) AS e(ticker, name, region)
-#     ON u.symbol = e.ticker;
+#   JOIN stocks.silver.country_etfs e ON u.symbol = e.symbol;
+# Reference lists are pipeline tables (not inline DataFrames) so that the views reading them keep
+# only Delta sources and can refresh incrementally instead of recomputing in full every update.
+@dp.materialized_view(
+    name="stocks.silver.country_etfs",
+    comment="Reference: the US-listed country ETFs used as world-market gauges (ticker, name, region).",
+    table_properties={"quality": "silver"},
+)
+def country_etfs():
+    return spark.createDataFrame(COUNTRY_ETFS, "symbol STRING, name STRING, region STRING")  # noqa: F821
+
+
 @dp.materialized_view(
     name="stocks.silver.global_daily",
     comment="Global instruments (FRED series + US-listed country ETFs), one row per instrument per date.",
@@ -317,7 +327,7 @@ def global_daily():
         F.col("series_id").alias("instrument"), "name", "region", "asset_class", "unit",
         F.lit("FRED").alias("source"), "obs_date", "value",
     )
-    etf_list = spark.createDataFrame(COUNTRY_ETFS, "symbol STRING, name STRING, region STRING")  # noqa: F821
+    etf_list = spark.read.table("stocks.silver.country_etfs")  # noqa: F821
     etfs = (
         spark.read.table("stocks.silver.us_daily")  # noqa: F821
         .join(etf_list, "symbol")
