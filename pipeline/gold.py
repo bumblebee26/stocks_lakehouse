@@ -764,7 +764,8 @@ def events_calendar():
 #
 # SQL equivalent (abridged):
 #   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.company_fundamentals AS
-#   WITH annual AS (SELECT symbol, period_end, <pivot of metric values> FROM stocks.silver.fundamentals
+#   WITH annual AS (SELECT symbol, period_end, FIRST(CASE WHEN metric = 'EBIT' THEN value END, true) AS EBIT, ...
+#                   FROM stocks.silver.fundamentals
 #                   WHERE period_type = '12M' GROUP BY symbol, period_end), ...
 #   SELECT symbol, fiscal_year_end, revenue_cr, net_income_cr, roce_pct, roe_pct, roa_pct, debt_to_equity,
 #          ocf_positive_years, revenue_cagr_3y_pct, profit_cagr_3y_pct, eps_ttm, close, pe, pe_percentile,
@@ -780,6 +781,12 @@ def _cagr(now, then, years):
                   (F.pow(now / then, 1 / years) - 1) * 100)
 
 
+def _metric_columns(metrics):
+    """One column per metric from long rows (metric, value): conditional aggregation instead of
+    GroupedData.pivot, which Lakeflow Declarative Pipelines doesn't support."""
+    return [F.first(F.when(F.col("metric") == m, F.col("value")), ignorenulls=True).alias(m) for m in metrics]
+
+
 @dp.materialized_view(
     name="stocks.gold.company_fundamentals",
     comment="Per NSE company: latest fiscal-year profitability (ROCE, ROE, ROA), debt to equity, years of "
@@ -792,7 +799,7 @@ def company_fundamentals():
     by_end = Window.partitionBy("symbol").orderBy(F.col("period_end").desc())
 
     annual = (f.filter("period_type = '12M'").groupBy("symbol", "period_end")
-              .pivot("metric", ANNUAL_METRICS).agg(F.first("value"))
+              .agg(*_metric_columns(ANNUAL_METRICS))
               .withColumn("rn", F.row_number().over(by_end)))
     latest = annual.filter("rn = 1").drop("rn").withColumnRenamed("period_end", "fiscal_year_end")
     base = annual.filter("rn = 4").select(
@@ -803,7 +810,7 @@ def company_fundamentals():
         F.count(F.col("OperatingCashFlow")).alias("ocf_years"))
 
     quarterly = (f.filter("period_type = '3M'").groupBy("symbol", "period_end")
-                 .pivot("metric", QUARTERLY_METRICS).agg(F.first("value"))
+                 .agg(*_metric_columns(QUARTERLY_METRICS))
                  .withColumn("rn", F.row_number().over(by_end)))
     q = quarterly.filter("rn <= 4").groupBy("symbol").agg(
         F.sum("DilutedEPS").alias("eps_4q"), F.count("DilutedEPS").alias("eps_quarters"),
