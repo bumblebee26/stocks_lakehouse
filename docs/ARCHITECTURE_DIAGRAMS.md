@@ -149,6 +149,7 @@ columns are kept as delivered, plus lineage columns (`_source_file`, `_ingested_
 | `trading_daily` | trades + trade_events | Each day's activity and P&L, reconciled against the trader's ledger |
 | `trading_by_setup`, `trading_by_hour` | trades | Which setups and hours make money? |
 | `trading_decisions` | trades + trade_events | Did the YES/NO choices help? |
+| `proposal_outcomes` → `track_record` | trade_events + trades | How did every proposal turn out (taken or skipped), by setup, hour, mood, suggestion band, reviewer, mode and your 👍/👎? paper-trader reads `track_record` every session: the feedback loop. |
 | `portfolio_daily` | portfolio_pools + nse_eq_daily (NIFTYBEES) | How are all dummy pools doing, against just holding NIFTYBEES? |
 | `holdings_latest` | portfolio_holdings + portfolio_pools | What's held now, and what weight does each holding have? |
 | `company_fundamentals` | fundamentals + nse_eq_daily | Which large companies pass the long-term quality tests? |

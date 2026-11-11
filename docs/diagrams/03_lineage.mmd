@@ -67,6 +67,8 @@ flowchart LR
         G15["holdings_latest"]
         G16["company_fundamentals"]
         G17["<b>longterm_candidates</b>"]
+        G18["proposal_outcomes"]
+        G19["<b>track_record</b><br/><i>read by paper-trader</i>"]
     end
 
     LN --> B1 --> S1 --> S3
@@ -91,6 +93,8 @@ flowchart LR
     G9 --> G12
     G9 --> G13
     S7 --> G13
+    S7 --> G18
+    G9 --> G18 --> G19
     LP --> B5
     B5 --> S8
     B5 --> S9
@@ -111,4 +115,4 @@ flowchart LR
     class LN,LM,LF,LT,LP,LU,LI,LW land
     class B1,B2,B3,B4,B5,B6,B7,B8 bronze
     class S1,S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12,S13,S14 silver
-    class G1,G2,G3,G4,G5,G6,G7,G8,G9,G10,G11,G12,G13,G14,G15,G16,G17 gold
+    class G1,G2,G3,G4,G5,G6,G7,G8,G9,G10,G11,G12,G13,G14,G15,G16,G17,G18,G19 gold
