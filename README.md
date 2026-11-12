@@ -40,6 +40,7 @@ market breadth, unusual volume, Indian ADR premium vs USD/INR, and a global mark
 | 08:45 Mon–Fri | Pre-market brief to Telegram |
 | 15:45 Mon–Fri | paper-trader pushes the day's trade journal to `landing/trades/` and a portfolio snapshot to `landing/portfolio/` |
 | 19:30 Mon–Fri | NSE: today's equities bhavcopy |
+| 23:30 Mon–Fri | paper-trader re-sends the last 4 days' journals, so evening 👍/👎 ratings reach `gold.track_record` |
 | 07:15 Sat | paper-trader pushes company financials to `landing/fundamentals/` and NSE's Nifty 200 list to `landing/index_members/` |
 
 ## Repository layout
