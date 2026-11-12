@@ -757,7 +757,9 @@ def proposal_outcomes():
     fb_window = Window.partitionBy("proposal_id").orderBy(F.col("event_ts").desc())
     feedback = (ev.filter("event = 'user_feedback'")
                 .withColumn("rn", F.row_number().over(fb_window)).filter("rn = 1")
-                .select("proposal_id", F.col("user_reply").alias("feedback")))
+                .select("proposal_id",
+                        # 'none' = the user took their 👍/👎 reaction away: not rated
+                        F.when(F.col("user_reply") == "none", None).otherwise(F.col("user_reply")).alias("feedback")))
     decision = (F.when(F.col("filled") == 1, "taken").when(F.col("auto_no") == 1, "skipped_auto")
                 .when(F.col("rejected") == 1, "skipped_by_you").when(F.col("expired") == 1, "expired")
                 .when(F.col("not_filled") == 1, "not_filled").otherwise("undecided"))
