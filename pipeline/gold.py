@@ -711,7 +711,71 @@ def trading_decisions():
 TRACK_DAYS = 90
 TRACK_DIMENSIONS = [("all", None), ("setup", "setup"), ("hour", "hour"), ("mood", "mood"), ("yes_band", "yes_band"),
                     ("reviewer", "reviewer_verdict"), ("mode", "mode"), ("decision", "decision"),
-                    ("feedback", "feedback"), ("source", "source")]
+                    ("feedback", "feedback"), ("source", "source"), ("sector", "sector"), ("side", "side")]
+
+# Sector of each watchlist stock, as paper-trader names them (trader/sectors.py), for proposals made before the
+# trader wrote "sector ..." into its note (16 Nov). Newer proposals carry their own sector; others are "Other".
+WATCHLIST_SECTOR = {
+    "ADANIPORTS": "Infra",
+    "ASIANPAINT": "Consumer",
+    "AUBANK": "Banks",
+    "AXISBANK": "Banks",
+    "BAJAJ-AUTO": "Auto",
+    "BAJAJFINSV": "Financials",
+    "BAJFINANCE": "Financials",
+    "BANDHANBNK": "Banks",
+    "BANKBARODA": "Banks",
+    "BHARTIARTL": "Telecom",
+    "BPCL": "Energy",
+    "BRITANNIA": "FMCG",
+    "CANBK": "Banks",
+    "CHOLAFIN": "Financials",
+    "CIPLA": "Pharma",
+    "COALINDIA": "Energy",
+    "COFORGE": "IT",
+    "DIVISLAB": "Pharma",
+    "DRREDDY": "Pharma",
+    "EICHERMOT": "Auto",
+    "FEDERALBNK": "Banks",
+    "HCLTECH": "IT",
+    "HDFCBANK": "Banks",
+    "HDFCLIFE": "Financials",
+    "HEROMOTOCO": "Auto",
+    "HINDALCO": "Metals",
+    "HINDUNILVR": "FMCG",
+    "ICICIBANK": "Banks",
+    "IDFCFIRSTB": "Banks",
+    "INDUSINDBK": "Banks",
+    "INFY": "IT",
+    "ITC": "FMCG",
+    "JSWSTEEL": "Metals",
+    "KOTAKBANK": "Banks",
+    "LT": "Infra",
+    "LTIM": "IT",
+    "LUPIN": "Pharma",
+    "M&M": "Auto",
+    "MARUTI": "Auto",
+    "MPHASIS": "IT",
+    "NESTLEIND": "FMCG",
+    "NTPC": "Energy",
+    "ONGC": "Energy",
+    "PERSISTENT": "IT",
+    "PNB": "Banks",
+    "POWERGRID": "Energy",
+    "RELIANCE": "Energy",
+    "SBILIFE": "Financials",
+    "SBIN": "Banks",
+    "SHRIRAMFIN": "Financials",
+    "SUNPHARMA": "Pharma",
+    "TATASTEEL": "Metals",
+    "TCS": "IT",
+    "TECHM": "IT",
+    "TITAN": "Consumer",
+    "TRENT": "Consumer",
+    "ULTRACEMCO": "Infra",
+    "VEDL": "Metals",
+    "WIPRO": "IT",
+}
 
 
 def _note_value(pattern, cast=None):
@@ -742,6 +806,10 @@ def proposal_outcomes():
         .withColumn("mood", _note_value(r"mood ([a-z ]+?) \|"))
         .withColumn("mode", F.coalesce(_note_value(r"mode (\w+)"), F.lit("human")))
         .withColumn("source", F.coalesce(_note_value(r"source (\w+)"), F.lit("watchlist")))
+        .withColumn("sector", F.coalesce(_note_value(r"sector ([A-Za-z&/ -]+?) \|"),
+                                         F.element_at(F.create_map(*[F.lit(x) for kv in WATCHLIST_SECTOR.items()
+                                                                     for x in kv]), F.col("symbol")),
+                                         F.lit("Other")))
         .withColumn("yes_band", F.concat((F.floor(F.col("suggested_yes_pct") / 10) * 10).cast("int").cast("string"),
                                          F.lit("-"),
                                          (F.floor(F.col("suggested_yes_pct") / 10) * 10 + 9).cast("int").cast("string"),
@@ -783,7 +851,7 @@ def proposal_outcomes():
 @dp.materialized_view(
     name="stocks.gold.track_record",
     comment=f"How proposals turned out over the last {TRACK_DAYS} days, by dimension (setup, hour, mood, yes_band, "
-            "reviewer, mode, decision, feedback, all): proposals with an outcome, wins, win rate, average and total "
+            "reviewer, mode, decision, feedback, source, sector, side (BUY/SELL), all): proposals with an outcome, wins, win rate, average and total "
             "outcome in rupees. paper-trader shows it in proposals and gives it to Claude each session.",
     table_properties={"quality": "gold"},
 )
