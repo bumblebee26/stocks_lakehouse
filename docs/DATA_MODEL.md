@@ -115,7 +115,8 @@ For NSE, `series = 'EQ'` is the main board. Gold uses `EQ` only.
   - ADR ratios: INFY 1, WIT 1, HDB 3, IBN 2, RDY 1. Check them after splits.
 - **Rates:** for `DGS10` (percent), read `change_abs` (`+0.05` = +5 basis points), not `change_pct`.
 - **Paper trade net P&L:** `exit pnl_rs − entry fees_rs`. The exit's `pnl_rs` is already net of the exit
-  brokerage; slippage is inside the fill prices. `r_multiple = net P&L / risk_rs` (−1 ≈ a normal stop-out).
+  order's charges (brokerage, and from 16 Nov STT, exchange and SEBI fees, GST, stamp duty); slippage is inside
+  the fill prices. `r_multiple = net P&L / risk_rs` (−1 ≈ a normal stop-out).
 - **Reconciliation:** each day, P&L rebuilt from events (exits − entry fees) is compared with the trader's own
   `realized_today` in the `ledger_snapshot` line. `ok` if they differ by less than Rs 1; `MISMATCH` means the
   two records disagree and the S3 ledger should be checked.
