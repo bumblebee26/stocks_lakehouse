@@ -25,7 +25,7 @@ The whole system is four stages, read left to right:
 
 | Stage | What happens | Runs on |
 |---|---|---|
-| **① Sources** | Three public data sources. **NSE** publishes one file per trading day with every Indian equity, and RSS feeds of company news (fetched every 30 minutes). **Massive** returns one file per US trading day with every US stock and ETF (including the country ETFs used for world markets). **FRED** provides 14 global series: equity indices, exchange rates, VIX, oil and US rates. | Third parties |
+| **① Sources** | Three public data sources. **NSE** publishes one file per trading day with every Indian equity, and RSS feeds of company news (fetched every minute in market hours, every 30 minutes otherwise). **Massive** returns one file per US trading day with every US stock and ETF (including the country ETFs used for world markets). **FRED** provides 14 global series: equity indices, exchange rates, VIX, oil and US rates. | Third parties |
 | **② Ingest** | **EventBridge** triggers a **Lambda fetcher** per source on a schedule (daily; news every minute in market hours, every 30 minutes otherwise). Each fetcher downloads the day's data, saves the untouched file in **S3** as a permanent raw archive, and **pushes** the same file into Databricks. | AWS |
 | **③ Lakehouse** | Files land in a Unity Catalog **volume**. The medallion pipeline turns them into tables: **bronze** (raw, as delivered), **silver** (cleaned, typed, de-duplicated, India and US unified into one schema), **gold** (insights). | Databricks |
 | **④ Consume** | A **dashboard** shows the gold tables. A **Telegram brief** at 08:45 IST, before the Indian market opens, summarises the US session, world markets, rates/FX/oil and India's setup. | Databricks, AWS, Telegram |

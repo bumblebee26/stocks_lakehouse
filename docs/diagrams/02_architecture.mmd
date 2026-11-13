@@ -16,7 +16,7 @@ flowchart TB
 
     subgraph AWS["AWS account · free plan · ap-southeast-2 (Sydney)"]
         direction TB
-        SCH["<b>EventBridge Scheduler</b> (Asia/Kolkata)<br/>NSE 19:30 Mon–Fri · Massive 04:30 Tue–Sat<br/>FRED 06:00 Tue–Sat · Brief 08:45 Mon–Fri<br/>News every 30 min 08:00–19:30 Mon–Fri"]
+        SCH["<b>EventBridge Scheduler</b> (Asia/Kolkata)<br/>NSE 19:30 Mon–Fri · Massive 04:30 Tue–Sat<br/>FRED 06:00 Tue–Sat · Brief 08:45 Mon–Fri<br/>News every minute 09:00–15:59, every 30 min 08:00–19:30 Mon–Fri"]
         subgraph LAMBDAS["Lambda functions (Python 3.13, arm64)"]
             direction LR
             FNSE["stocks-fetch-nse"]
