@@ -46,6 +46,7 @@ flowchart LR
         S12["news<br/><i>history</i>"]
         S13["country_etfs<br/><i>reference list</i>"]
         S14["adr_pairs<br/><i>reference list</i>"]
+        S15["shadow_pools<br/><i>paper-only pools</i>"]
     end
 
     subgraph G["🥇 Gold · materialized views"]
@@ -69,6 +70,10 @@ flowchart LR
         G17["<b>longterm_candidates</b>"]
         G18["proposal_outcomes"]
         G19["<b>track_record</b><br/><i>read by paper-trader</i>"]
+        G20["custom_trades<br/><i>your own trades</i>"]
+        G21["<b>intraday_universe</b><br/><i>read by paper-trader</i>"]
+        G22["swing_signals<br/><i>read by paper-trader</i>"]
+        G23["shadow_pools_daily"]
     end
 
     LN --> B1 --> S1 --> S3
@@ -107,6 +112,16 @@ flowchart LR
     LI --> B7 --> S11 --> G17
     G16 --> G17
     LW --> B8 --> S12
+    G9 --> G20
+    S7 --> G20
+    B5 --> S15 --> G23
+    S1 -- "NIFTYBEES" --> G23
+    S3 --> G21
+    S11 --> G21
+    S12 --> G21
+    S3 --> G22
+    S11 --> G22
+    S12 --> G22
 
     classDef land fill:#fff7ed,stroke:#f59e0b,color:#451a03
     classDef bronze fill:#f5e6d3,stroke:#b45309,color:#451a03
@@ -114,5 +129,5 @@ flowchart LR
     classDef gold fill:#fef9c3,stroke:#ca8a04,color:#422006
     class LN,LM,LF,LT,LP,LU,LI,LW land
     class B1,B2,B3,B4,B5,B6,B7,B8 bronze
-    class S1,S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12,S13,S14 silver
-    class G1,G2,G3,G4,G5,G6,G7,G8,G9,G10,G11,G12,G13,G14,G15,G16,G17,G18,G19 gold
+    class S1,S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12,S13,S14,S15 silver
+    class G1,G2,G3,G4,G5,G6,G7,G8,G9,G10,G11,G12,G13,G14,G15,G16,G17,G18,G19,G20,G21,G22,G23 gold

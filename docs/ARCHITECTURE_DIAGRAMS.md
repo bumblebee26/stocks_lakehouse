@@ -78,7 +78,7 @@ with the remaining dates, so one command can load years.
 | **7** | Scheduler → brief | At 08:45 IST the brief Lambda starts. |
 | **8** | Brief → SQL warehouse | It runs about 8 queries on gold tables through the SQL Statement API. If one fails, that section is skipped and the message says so. |
 | **9** | Brief → Telegram | The formatted message (takeaways, tables) is sent through the Telegram Bot API. |
-| **10** | Guardian → Volume | At 15:45 IST paper-trader's guardian Lambda pushes the day's trade journal to `landing/trades/date=YYYY-MM-DD/events.jsonl` and a portfolio snapshot to `landing/portfolio/date=YYYY-MM-DD/portfolio.jsonl` with the same Files API and pusher token. Steps 5–6 then build the trading and portfolio tables. |
+| **10** | Guardian → Volume | At 15:45 IST paper-trader's guardian Lambda pushes the day's trade journal to `landing/trades/date=YYYY-MM-DD/events.jsonl` and a portfolio snapshot to `landing/portfolio/date=YYYY-MM-DD/portfolio.jsonl` with the same Files API and pusher token. Steps 5–6 then build the trading and portfolio tables. At 23:30 it re-sends the last 4 days' journals, so 👍/👎 ratings given in the evening reach `track_record` overnight. |
 | **11** | Session → SQL warehouse | Around 09:10 IST the trading session reads the same gold tables as the brief (US move, VIX, India's usual gap, unusual volume, ADRs) to set the day's risk and focus list. |
 | **12** | News volume → session | For each proposal and `/news`, the trading session reads `latest.jsonl` (today and the last day) directly through the Files API; no SQL, no pipeline run. |
 | **13** | Fundamentals job → Volume | Saturdays 07:15 IST paper-trader's *Company fundamentals* workflow pushes company financials to `landing/fundamentals/` and NSE's Nifty 200 list to `landing/index_members/`. |
@@ -129,7 +129,8 @@ columns are kept as delivered, plus lineage columns (`_source_file`, `_ingested_
 - `country_etfs` and `adr_pairs` are small reference lists kept as tables, so the views that join them can
   refresh incrementally.
 - `trade_events` types the paper-trader events and keeps the newest copy of each `event_id`.
-- `portfolio_pools` and `portfolio_holdings` split the newest portfolio file of each day into pools and holdings.
+- `portfolio_pools` and `portfolio_holdings` split the newest portfolio file of each day into pools and holdings;
+  `shadow_pools` keeps the paper-only pools (swing and long-term shadow), never part of the portfolio totals.
 - `fundamentals` keeps the newest fetch of each company × metric × period; `index_members` is the latest
   Nifty 200 list.
 - `news` keeps the earliest snapshot of each item and sorts it into categories (results, board meeting, rating...):
@@ -149,11 +150,15 @@ columns are kept as delivered, plus lineage columns (`_source_file`, `_ingested_
 | `trading_daily` | trades + trade_events | Each day's activity and P&L, reconciled against the trader's ledger |
 | `trading_by_setup`, `trading_by_hour` | trades | Which setups and hours make money? |
 | `trading_decisions` | trades + trade_events | Did the YES/NO choices help? |
-| `proposal_outcomes` → `track_record` | trade_events + trades | How did every proposal turn out (taken or skipped), by setup, hour, mood, suggestion band, reviewer, mode and your 👍/👎? paper-trader reads `track_record` every session: the feedback loop. |
+| `proposal_outcomes` → `track_record` | trade_events + trades | How did every proposal turn out (taken or skipped), by setup, hour, mood, sector, direction (BUY/SELL), suggestion band, reviewer, mode, news or watchlist and your 👍/👎? paper-trader reads `track_record` every session: the feedback loop. Your own (custom) trades count only under `source`. |
+| `custom_trades` | trades + trade_events | What did my own Telegram trades (`/buy`, `/short`, `/swing`, `/longterm`) do? |
 | `portfolio_daily` | portfolio_pools + nse_eq_daily (NIFTYBEES) | How are all dummy pools doing, against just holding NIFTYBEES? |
 | `holdings_latest` | portfolio_holdings + portfolio_pools | What's held now, and what weight does each holding have? |
 | `company_fundamentals` | fundamentals + nse_eq_daily | Which large companies pass the long-term quality tests? |
 | **`longterm_candidates`** | company_fundamentals + index_members | What would the long-term pool buy this week, and why? |
+| **`intraday_universe`** | daily_bars + index_members + news | Which Nifty 200 stocks may paper-trader trade intraday, and which have fresh news or big moves today? Read every morning (news radar, Groww buttons). |
+| `swing_signals` | daily_bars + index_members + news | Which news breakouts does the swing shadow pool buy? Read by paper-trader at 15:50. |
+| `shadow_pools_daily` | shadow_pools + nse_eq_daily (NIFTYBEES) | Are the rules tested on paper beating NIFTYBEES? |
 
 Two more gold tables are not in the pipeline: `dashboard_summary_facts` and `dashboard_summary`, rebuilt by
 `sql/dashboard_summary.sql` after each refresh for the dashboard's "In plain words" boxes.
@@ -202,8 +207,10 @@ plan, Sydney), one Databricks workspace, one Telegram bot and the same CI/CD pat
 | When (IST) | Direction | What |
 |---|---|---|
 | ~09:10 | lakehouse → trader | The trading session reads gold tables over SQL to set the day's risk (from VIX), bias (India's usual gap after similar US days) and focus list (unusual volume, ADR moves). |
-| During sessions | lakehouse → trader | The session reads the news volume's `latest.jsonl` for each proposal and `/news`. |
+| During sessions | lakehouse → trader | The session reads the news volume's `latest.jsonl` for each proposal and `/news`; `/analyze` reads `company_fundamentals` and `longterm_candidates` over SQL (also from the responder Lambda outside sessions). |
+| 15:50 | lakehouse → trader | The guardian reads `swing_signals` for the swing shadow test. |
 | 15:45 | trader → lakehouse | The guardian Lambda pushes the day's journal to `landing/trades/` and a portfolio snapshot to `landing/portfolio/`; the pipeline builds the `trad*` and portfolio gold tables and the dashboard's Intraday trading and Portfolio pages. |
+| 23:30 | trader → lakehouse | The guardian re-sends the last 4 days' journals, so evening 👍/👎 ratings reach `track_record`. |
 | Sat 07:15 | trader → lakehouse | The *Company fundamentals* workflow pushes financials to `landing/fundamentals/` and the Nifty 200 list to `landing/index_members/`; the pipeline builds `company_fundamentals` and `longterm_candidates` (Company quality page). |
 
 Shared resources: the Terraform state bucket (trader key `paper-trader/aws/…`), the CI users
