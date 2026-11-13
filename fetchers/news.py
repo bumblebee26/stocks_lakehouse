@@ -1,4 +1,5 @@
-"""Company news from NSE's official RSS feeds, every 30 minutes on weekdays 08:00-19:30 IST.
+"""Company news from NSE's official RSS feeds: every minute during market hours (09:00-15:59 IST) and every
+30 minutes otherwise (08:00-19:30), on weekdays.
 
 Feeds (https://www.nseindia.com/rss-feed): announcements, financial results, board meetings,
 corporate actions. Each item is tagged with its NSE symbol (from the attachment link, else the
@@ -8,9 +9,13 @@ Lands in the NEWS volume, not the landing volume: the pipeline job refreshes whe
 lands in the landing volume, and a refresh every 30 minutes would use up Databricks Free
 Edition's daily compute. The pipeline still reads the news volume at every normal refresh.
 
-  landing/news/date=YYYY-MM-DD/snap_HHMM.jsonl   S3 copy of each run (bronze reads the volume copy)
+  landing/news/date=YYYY-MM-DD/snap_HHMM.jsonl   S3 copy of a snapshot (bronze reads the volume copy)
   <news volume>/date=YYYY-MM-DD/snap_HHMM.jsonl  same file; bronze.news_raw ingests these
   <news volume>/date=YYYY-MM-DD/latest.jsonl     the newest run, read directly by the paper trader
+
+Every run rewrites latest.jsonl in the volume (so the trader sees a filing within about a minute and knows the
+feed is fresh). Snapshots are written at :00 and :30 and whenever new items appeared since the last snapshot,
+at most every SNAP_MIN_GAP_MIN minutes, so minute runs don't flood S3 or the bronze table with copies.
 
 A feed that fails is skipped and reported; the run fails only if every feed fails.
 """
@@ -62,6 +67,8 @@ LINK_SYMBOL = re.compile(r"/([A-Z0-9&\-]{2,20})_\d{6,}")
 NAME_DROP = re.compile(r"\b(LIMITED|LTD|THE|CO|COMPANY|INDIA|OF)\b")
 
 _equity = {"date": None, "names": {}, "symbols": set()}
+SNAP_MIN_GAP_MIN = 5
+_last_snap = {"at": None, "ids": frozenset()}   # per warm Lambda; a cold start just writes one snapshot
 
 
 def norm_name(name):
@@ -174,8 +181,32 @@ def handler(event, context):
         raise RuntimeError(f"All NSE news feeds failed: {failed}")
     body = "".join(json.dumps(i, ensure_ascii=False) + "\n" for i in items).encode()
     day = f"date={now:%Y-%m-%d}"
-    put_news(f"{day}/snap_{now:%H%M}.jsonl", body)
-    put_news(f"{day}/latest.jsonl", body)
+    ids = frozenset(i["id"] for i in items)
+    if snapshot_due(now, ids):
+        put_news(f"{day}/snap_{now:%H%M}.jsonl", body)
+        _last_snap.update(at=now, ids=ids)
+        snapped = True
+    else:
+        snapped = False
+    put_latest(f"{day}/latest.jsonl", body)
     mapped = sum(1 for i in items if i["symbol"])
-    log.info("News: %d items (%d with a symbol), failed feeds: %s", len(items), mapped, list(failed))
-    return {"items": len(items), "with_symbol": mapped, "failed_feeds": failed}
+    log.info("News: %d items (%d with a symbol), snapshot %s, failed feeds: %s", len(items), mapped, snapped,
+             list(failed))
+    return {"items": len(items), "with_symbol": mapped, "snapshot": snapped, "failed_feeds": failed}
+
+
+def snapshot_due(now, ids):
+    """At :00 and :30, on a cold start, or when new items appeared (at most every SNAP_MIN_GAP_MIN minutes)."""
+    last = _last_snap["at"]
+    if last is None or now.minute in (0, 30) or now.date() != last.date():
+        return True
+    return bool(ids - _last_snap["ids"]) and (now - last).total_seconds() >= SNAP_MIN_GAP_MIN * 60
+
+
+def put_latest(relative, body):
+    """latest.jsonl goes to the news volume only (the trader reads it there); no S3 copy every minute."""
+    import databricks_volume
+    if databricks_volume.enabled():
+        databricks_volume.upload(relative, body, volume=os.environ.get("NEWS_VOLUME_PATH"))
+    else:
+        put_news(relative, body)

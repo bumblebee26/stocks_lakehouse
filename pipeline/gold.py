@@ -21,6 +21,9 @@ Paper trading (dummy money, from bumblebee26/paper-trader via stocks.silver.trad
   stocks.gold.portfolio_daily              whole dummy portfolio per day: value, P&L, return, fall from peak, NIFTYBEES alongside
   stocks.gold.holdings_latest              current holdings with P&L, weight and days held
   stocks.gold.longterm_candidates          long-term pool: Nifty 200 companies ranked, this week's 10 picks with target weights and reasons
+  stocks.gold.intraday_universe            Nifty 200 stocks the trader may trade intraday (liquidity guardrails), flagged on news/moves
+  stocks.gold.swing_signals                results/news breakouts the swing pool tests in shadow mode
+  stocks.gold.shadow_pools_daily           shadow pools (swing, long-term) per day vs NIFTYBEES since each one started
 
 Market proxies (no index data in these sources): NIFTYBEES (Nifty 50 ETF on NSE)
 and SPY (S&P 500 ETF). Change them with pipeline configuration keys
@@ -707,7 +710,7 @@ def trading_decisions():
 TRACK_DAYS = 90
 TRACK_DIMENSIONS = [("all", None), ("setup", "setup"), ("hour", "hour"), ("mood", "mood"), ("yes_band", "yes_band"),
                     ("reviewer", "reviewer_verdict"), ("mode", "mode"), ("decision", "decision"),
-                    ("feedback", "feedback")]
+                    ("feedback", "feedback"), ("source", "source")]
 
 
 def _note_value(pattern, cast=None):
@@ -737,6 +740,7 @@ def proposal_outcomes():
         .withColumn("reviewer_pct", _note_value(r"reviewer \w+ (\d+)%", "int"))
         .withColumn("mood", _note_value(r"mood ([a-z ]+?) \|"))
         .withColumn("mode", F.coalesce(_note_value(r"mode (\w+)"), F.lit("human")))
+        .withColumn("source", F.coalesce(_note_value(r"source (\w+)"), F.lit("watchlist")))
         .withColumn("yes_band", F.concat((F.floor(F.col("suggested_yes_pct") / 10) * 10).cast("int").cast("string"),
                                          F.lit("-"),
                                          (F.floor(F.col("suggested_yes_pct") / 10) * 10 + 9).cast("int").cast("string"),
@@ -1054,3 +1058,141 @@ def longterm_candidates():
         "rank", "is_pick", "symbol", "company", "industry", "score", "quality_score", "tests_passed", "tests_available",
         "roce_pct", "roa_pct", "debt_to_equity", "revenue_cagr_3y_pct", "profit_cagr_3y_pct", "pe", "pe_percentile",
         "close", "price_date", "target_weight_pct", "reasons", "is_financial", "fiscal_year_end")
+
+
+# ---------------------------------------------------------------------------
+# News radar: which Nifty 200 stocks the paper trader may trade intraday beyond its 36-stock watchlist,
+# and the results/news breakouts its swing pool tests in shadow mode.
+# ---------------------------------------------------------------------------
+# Guardrails (so dummy results stay realistic): Nifty 200 member, main-board EQ series (not the trade-to-trade
+# BE/BZ series, where same-day trading isn't allowed), close >= Rs 50, and an average of Rs 50 crore or more
+# traded a day over 20 days (close x volume, so no unit assumptions about the bhavcopy's turnover column).
+#
+# SQL equivalent (abridged):
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.intraday_universe AS
+#   WITH b AS (SELECT ..., avg(close * volume) OVER (PARTITION BY symbol ORDER BY trade_date ROWS 19 PRECEDING) / 1e7
+#                      AS avg_turnover_cr, volume / avg(volume) OVER (... ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING)
+#                      AS volume_ratio
+#              FROM stocks.silver.daily_bars JOIN stocks.silver.index_members USING (symbol) WHERE series = 'EQ')
+#   SELECT ..., close >= 50 AND avg_turnover_cr >= 50 AS eligible,
+#          eligible AND (news_count > 0 OR abs(return_pct) >= 3 OR volume_ratio >= 2) AS flagged
+#   FROM b LEFT JOIN (recent non-routine NSE filings per symbol) n USING (symbol)
+#   WHERE trade_date = (SELECT max(trade_date) FROM b);
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.swing_signals AS
+#   SELECT ... FROM b JOIN stocks.silver.news n ON n.symbol = b.symbol
+#                  AND n.news_date BETWEEN date_sub(b.trade_date, 2) AND b.trade_date
+#   WHERE eligible AND close > prior 20-day high AND volume_ratio >= 2 AND return_pct >= 2 AND close > 50-day average;
+UNIVERSE_MIN_PRICE = float(spark.conf.get("stocks.universe_min_price", "50"))  # noqa: F821
+UNIVERSE_MIN_TURNOVER_CR = float(spark.conf.get("stocks.universe_min_turnover_cr", "50"))  # noqa: F821
+NEWS_CATEGORIES = ["results", "order", "mna", "management", "rating", "regulatory", "pledge", "insider",
+                   "dividend_split_bonus", "board_meeting"]
+SWING_LOOKBACK_DAYS = 45
+
+
+def _universe_bars():
+    members = spark.read.table("stocks.silver.index_members").select("symbol", "company", "industry")  # noqa: F821
+    by_sym = Window.partitionBy("symbol").orderBy("trade_date")
+    return (
+        bars().filter(F.col("market") == "IN").join(members, "symbol")
+        .withColumn("avg_turnover_cr", F.avg(F.col("close") * F.col("volume")).over(by_sym.rowsBetween(-19, 0)) / 1e7)
+        .withColumn("avg_volume_20d", F.avg("volume").over(by_sym.rowsBetween(-20, -1)))
+        .withColumn("volume_ratio", F.col("volume") / F.col("avg_volume_20d"))
+        .withColumn("high_20d_prior", F.max("high").over(by_sym.rowsBetween(-20, -1)))
+        .withColumn("low_5d", F.min("low").over(by_sym.rowsBetween(-4, 0)))
+        .withColumn("ma50", F.avg("close").over(by_sym.rowsBetween(-49, 0)))
+        .withColumn("eligible", (F.col("close") >= UNIVERSE_MIN_PRICE)
+                    & (F.col("avg_turnover_cr") >= UNIVERSE_MIN_TURNOVER_CR))
+    )
+
+
+def _company_news():
+    return (spark.read.table("stocks.silver.news")  # noqa: F821
+            .filter(F.col("symbol").isNotNull() & F.col("category").isin(NEWS_CATEGORIES))
+            .select("symbol", "category", "title", "news_ts", "news_date"))
+
+
+@dp.materialized_view(
+    name="stocks.gold.intraday_universe",
+    comment="Nifty 200 stocks on the latest NSE day with the paper trader's guardrails (EQ series, close >= Rs 50, "
+            "Rs 50 crore+ traded a day): eligible to trade intraday, and flagged when they have a fresh NSE filing, "
+            "moved 3%+ or traded 2x their usual volume. The trader adds flagged names to its focus list.",
+    table_properties={"quality": "gold"},
+)
+def intraday_universe():
+    b = _universe_bars()
+    latest = b.agg(F.max("trade_date").alias("trade_date"))
+    today = b.join(latest, "trade_date")
+    news = _company_news().join(latest.withColumnRenamed("trade_date", "latest_date"),
+                                F.col("news_date") >= F.date_sub("latest_date", 2))
+    newest = Window.partitionBy("symbol").orderBy(F.col("news_ts").desc())
+    per_symbol = (news.withColumn("n", F.count("*").over(Window.partitionBy("symbol")))
+                  .withColumn("rn", F.row_number().over(newest)).filter("rn = 1")
+                  .select("symbol", F.col("n").alias("news_count"), F.col("category").alias("latest_news_category"),
+                          F.col("title").alias("latest_news_title"), F.col("news_ts").alias("latest_news_ts")))
+    df = today.join(per_symbol, "symbol", "left").withColumn("news_count", F.coalesce("news_count", F.lit(0)))
+    has_news = F.col("news_count") > 0
+    big_move = F.abs(F.col("return_pct")) >= 3
+    busy = F.col("volume_ratio") >= 2
+    reasons = F.concat_ws(", ",
+                          F.when(has_news, F.concat(F.lit("NSE filing: "), F.col("latest_news_category"))),
+                          F.when(big_move, F.concat(F.lit("moved "), F.format_number("return_pct", 1), F.lit("%"))),
+                          F.when(busy, F.concat(F.format_number("volume_ratio", 1), F.lit("x usual volume"))))
+    return df.select(
+        "trade_date", "symbol", "company", "industry", "close", F.round("return_pct", 2).alias("return_pct"),
+        F.round("volume_ratio", 2).alias("volume_ratio"), F.round("avg_turnover_cr", 1).alias("avg_turnover_cr"),
+        "eligible", (F.col("eligible") & (has_news | big_move | busy)).alias("flagged"),
+        reasons.alias("reasons"), "news_count", "latest_news_category", "latest_news_title", "latest_news_ts",
+    )
+
+
+@dp.materialized_view(
+    name="stocks.gold.swing_signals",
+    comment="Swing ideas tested in shadow mode by the paper trader: eligible Nifty 200 stocks that, within 2 days of "
+            "an NSE filing (results, orders, ...), closed above their 20-day high on 2x volume, up 2%+ and above "
+            f"their 50-day average. Last {SWING_LOOKBACK_DAYS} days. Suggested stop: the 5-day low, at most 8% below.",
+    table_properties={"quality": "gold"},
+)
+def swing_signals():
+    b = _universe_bars().filter(F.col("trade_date") >= F.date_sub(F.current_date(), SWING_LOOKBACK_DAYS))
+    hits = b.filter(F.col("eligible") & (F.col("close") > F.col("high_20d_prior")) & (F.col("volume_ratio") >= 2)
+                    & (F.col("return_pct") >= 2) & (F.col("close") > F.col("ma50")))
+    news = _company_news().withColumnRenamed("symbol", "news_symbol")
+    joined = hits.join(news, (news.news_symbol == hits.symbol)
+                       & (news.news_date >= F.date_sub(hits.trade_date, 2)) & (news.news_date <= hits.trade_date))
+    newest = Window.partitionBy("symbol", "trade_date").orderBy(F.col("news_ts").desc())
+    return (joined.withColumn("rn", F.row_number().over(newest)).filter("rn = 1")
+            .select("trade_date", "symbol", "company", "industry", "close",
+                    F.round("return_pct", 2).alias("return_pct"), F.round("volume_ratio", 2).alias("volume_ratio"),
+                    F.round(F.greatest("low_5d", F.col("close") * 0.92), 2).alias("stop"),
+                    F.round("avg_turnover_cr", 1).alias("avg_turnover_cr"),
+                    F.col("category").alias("news_category"), F.col("title").alias("news_title")))
+
+
+# SQL equivalent (abridged):
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.shadow_pools_daily AS
+#   SELECT snapshot_date, pool, equity, (equity / capital - 1) * 100 AS return_pct,
+#          (niftybees_close / first(niftybees_close) OVER (PARTITION BY pool ORDER BY snapshot_date) - 1) * 100
+#            AS nifty_return_pct, return_pct - nifty_return_pct AS vs_nifty_pct
+#   FROM stocks.silver.shadow_pools LEFT JOIN (NIFTYBEES close on or before each day);
+@dp.materialized_view(
+    name="stocks.gold.shadow_pools_daily",
+    comment="Shadow pools per day (swing_shadow: news breakouts; long_term_shadow: weekly quality picks): equity, "
+            "return since the start, NIFTYBEES over the same days, and the difference. A shadow pool earns real "
+            "money only if it beats NIFTYBEES at its review.",
+    table_properties={"quality": "gold"},
+)
+def shadow_pools_daily():
+    sp = spark.read.table("stocks.silver.shadow_pools")  # noqa: F821
+    nifty = (spark.read.table("stocks.silver.nse_eq_daily")  # noqa: F821
+             .filter("symbol = 'NIFTYBEES' AND series = 'EQ'").select("trade_date", "close"))
+    days = sp.select("snapshot_date").distinct()
+    last_nifty = (days.join(nifty, nifty.trade_date <= days.snapshot_date, "left")
+                  .groupBy("snapshot_date").agg(F.max_by("close", "trade_date").alias("niftybees_close")))
+    first = Window.partitionBy("pool").orderBy("snapshot_date").rowsBetween(Window.unboundedPreceding, 0)
+    return (sp.join(last_nifty, "snapshot_date", "left")
+            .withColumn("return_pct", F.round((F.col("equity") / F.col("capital") - 1) * 100, 2))
+            .withColumn("nifty_return_pct", F.round(
+                (F.col("niftybees_close") / F.first("niftybees_close", ignorenulls=True).over(first) - 1) * 100, 2))
+            .withColumn("vs_nifty_pct", F.round(F.col("return_pct") - F.col("nifty_return_pct"), 2))
+            .select("snapshot_date", "pool", "capital", "cash", "holdings_value", "equity", "return_pct",
+                    "niftybees_close", "nifty_return_pct", "vs_nifty_pct"))

@@ -213,7 +213,7 @@ the volume file.
 ### `All NSE news feeds failed` in the `stocks-fetch-news` log
 **Cause:** NSE refused every RSS feed (it blocks some cloud addresses or changes its pages). One failed feed
 alone is only a warning.
-**Fix:** Nothing to do if it's occasional: the next run 30 minutes later tries again, and paper-trader just
+**Fix:** Nothing to do if it's occasional: the next run (a minute later in market hours, 30 minutes otherwise) tries again, and paper-trader just
 shows "news unavailable". If it lasts, check the feed URLs in `fetchers/news.py`.
 
 ## GitHub / CI

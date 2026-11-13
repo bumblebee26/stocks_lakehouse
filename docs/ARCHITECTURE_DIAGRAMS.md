@@ -26,7 +26,7 @@ The whole system is four stages, read left to right:
 | Stage | What happens | Runs on |
 |---|---|---|
 | **① Sources** | Three public data sources. **NSE** publishes one file per trading day with every Indian equity, and RSS feeds of company news (fetched every 30 minutes). **Massive** returns one file per US trading day with every US stock and ETF (including the country ETFs used for world markets). **FRED** provides 14 global series: equity indices, exchange rates, VIX, oil and US rates. | Third parties |
-| **② Ingest** | **EventBridge** triggers a **Lambda fetcher** per source on a schedule (daily; news every 30 minutes). Each fetcher downloads the day's data, saves the untouched file in **S3** as a permanent raw archive, and **pushes** the same file into Databricks. | AWS |
+| **② Ingest** | **EventBridge** triggers a **Lambda fetcher** per source on a schedule (daily; news every minute in market hours, every 30 minutes otherwise). Each fetcher downloads the day's data, saves the untouched file in **S3** as a permanent raw archive, and **pushes** the same file into Databricks. | AWS |
 | **③ Lakehouse** | Files land in a Unity Catalog **volume**. The medallion pipeline turns them into tables: **bronze** (raw, as delivered), **silver** (cleaned, typed, de-duplicated, India and US unified into one schema), **gold** (insights). | Databricks |
 | **④ Consume** | A **dashboard** shows the gold tables. A **Telegram brief** at 08:45 IST, before the Indian market opens, summarises the US session, world markets, rates/FX/oil and India's setup. | Databricks, AWS, Telegram |
 
@@ -58,7 +58,7 @@ bucket, but outbound calls from Lambda are allowed.
 | `stocks-fetch-nse` | 19:30 IST Mon–Fri | Today's NSE bhavcopy. Keeps the `.zip` in S3, pushes an unzipped `.csv` to the volume (Spark can't read zip). |
 | `stocks-fetch-massive` | 04:30 and 07:30 IST Tue–Sat | The previous US session for all US tickers; each run also fetches any of the last 3 weekdays still missing. |
 | `stocks-fetch-fred` | 06:00 IST Tue–Sat | The last 21 days for 14 series (late and revised values get corrected). |
-| `stocks-fetch-news` | Every 30 min, 08:00–19:30 IST Mon–Fri | A snapshot of NSE's announcement, results, board-meeting and corporate-action feeds to the **news volume** (`snap_HHMM.jsonl` + `latest.jsonl`), S3 copy under `landing/news/`. Kept out of the landing volume so it doesn't trigger a refresh every 30 minutes. |
+| `stocks-fetch-news` | Every minute 09:00–15:59, every 30 min otherwise (08:00–19:30) IST Mon–Fri | NSE's announcement, results, board-meeting and corporate-action feeds to the **news volume**: `latest.jsonl` every run, `snap_HHMM.jsonl` (+ S3 copy under `landing/news/`) at :00/:30 and when new items appear. Kept out of the landing volume so it doesn't trigger a pipeline refresh. |
 | `stocks-sync-volume` | Manual | Copies S3 files that are missing from the volume, after a backfill or a failed push. |
 | `stocks-premarket-brief` | 08:45 IST Mon–Fri | Queries gold tables and sends the Telegram message. |
 

@@ -49,6 +49,7 @@ class FakeS3:
 class NewsTest(unittest.TestCase):
     def setUp(self):
         news._equity.update(date=None, names={}, symbols=set())
+        news._last_snap.update(at=None, ids=frozenset())
         os.environ["LANDING_BUCKET"] = "test-bucket"
         os.environ["NEWS_VOLUME_PATH"] = "/Volumes/stocks/bronze/news"
         self.s3 = FakeS3()
@@ -90,16 +91,28 @@ class NewsTest(unittest.TestCase):
         self.assertEqual(out["with_symbol"], 3)
         self.assertEqual(sorted(out["failed_feeds"]), ["corporate_action", "results"])
         keys = sorted(self.s3.objects)
-        self.assertEqual(len(keys), 2)
+        self.assertEqual(len(keys), 1)                       # latest.jsonl goes to the volume only
         self.assertTrue(keys[0].startswith("landing/news/date="))
-        self.assertTrue(any(k.endswith("/latest.jsonl") for k in keys))
-        self.assertTrue(any("/snap_" in k for k in keys))
+        self.assertIn("/snap_", keys[0])
+        self.assertEqual(out["snapshot"], True)
         lines = [json.loads(x) for x in self.s3.objects[keys[0]].decode().splitlines()]
         self.assertEqual({i["feed"] for i in lines}, {"announcement", "board_meeting"})
         board = [i for i in lines if i["feed"] == "board_meeting"][0]
         self.assertEqual((board["symbol"], board["category"]), ("HDFCBANK", "board_meeting"))
         self.assertEqual(up.call_count, 2)
         self.assertEqual(up.call_args.kwargs["volume"], "/Volumes/stocks/bronze/news")
+
+    def test_minute_runs_snapshot_only_when_needed(self):
+        IST = news.IST
+        t0 = dt.datetime(2026, 11, 16, 10, 7, tzinfo=IST)
+        news._last_snap.update(at=None, ids=frozenset())
+        self.assertTrue(news.snapshot_due(t0, frozenset({"a"})))                  # cold start
+        news._last_snap.update(at=t0, ids=frozenset({"a"}))
+        t1 = t0 + dt.timedelta(minutes=1)
+        self.assertFalse(news.snapshot_due(t1, frozenset({"a"})))                 # nothing new
+        self.assertFalse(news.snapshot_due(t1, frozenset({"a", "b"})))            # new, but within 5 minutes
+        self.assertTrue(news.snapshot_due(t0 + dt.timedelta(minutes=5), frozenset({"a", "b"})))
+        self.assertTrue(news.snapshot_due(t0.replace(minute=30), frozenset({"a"})))   # :00 and :30 always
 
     def test_all_feeds_failing_is_an_error(self):
         with mock.patch.object(news, "http_get", side_effect=RuntimeError("HTTP 403")):

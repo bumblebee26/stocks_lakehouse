@@ -24,6 +24,7 @@ covers the base view above, the full [architecture](docs/ARCHITECTURE_DIAGRAMS.m
 | Pre-market brief | Your Telegram | 08:45 IST, Mon–Fri |
 | Paper-trading analysis ([paper-trader](https://github.com/bumblebee26/paper-trader)) | `stocks.gold.trad*` tables + dashboard page "Intraday trading" (KPI tiles: net P&L, win rate, profit factor, expectancy, win/loss ratio; equity curve, daily P&L, drawdown, by setup and hour) | After the 15:45 IST export |
 | Dummy portfolio and holdings | `stocks.gold.portfolio_daily`, `stocks.gold.holdings_latest` + dashboard page "Portfolio" (value, return vs NIFTYBEES, fall from peak, allocation by pool and sector, holdings) | After the 15:45 IST export |
+| News radar and swing shadow ([paper-trader](https://github.com/bumblebee26/paper-trader)) | `stocks.gold.intraday_universe` (Nifty 200 names the trader may trade, flagged on news/moves), `stocks.gold.swing_signals` (news breakouts), `stocks.gold.shadow_pools_daily` (shadow pools vs NIFTYBEES) | After each NSE day / daily |
 | Company quality and long-term picks | `stocks.gold.company_fundamentals`, `stocks.gold.longterm_candidates` (this week's 10 picks from the Nifty 200, max 2 per industry, with target weights and reasons) + dashboard page "Company quality" | Saturdays |
 
 Gold insights include: how India opens after big US moves, which global markets line up with India's open,
@@ -36,7 +37,7 @@ market breadth, unusual volume, Indian ADR premium vs USD/INR, and a global mark
 | 04:30 Tue–Sat (07:30 retry) | Massive: previous US session (all US stocks), catching up missed days |
 | 06:00 Tue–Sat | FRED: global indices, FX, VIX, oil, rates (rolling 21-day window) |
 | after each file | Databricks job refreshes the pipeline (file-arrival trigger), then rebuilds the dashboard summaries |
-| every 30 min, 08:00–19:30 Mon–Fri | NSE company news (announcements, results, board meetings, corporate actions) |
+| every minute 09:00–15:59, every 30 min otherwise (08:00–19:30) Mon–Fri | NSE company news (announcements, results, board meetings, corporate actions) |
 | 08:45 Mon–Fri | Pre-market brief to Telegram |
 | 15:45 Mon–Fri | paper-trader pushes the day's trade journal to `landing/trades/` and a portfolio snapshot to `landing/portfolio/` |
 | 19:30 Mon–Fri | NSE: today's equities bhavcopy |

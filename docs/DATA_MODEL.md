@@ -21,7 +21,7 @@ Same layout in S3 (`s3://stocks-lakehouse-landing-<account-id>/landing/`) and in
 | `<source>/_README.txt` | Folder marker (volume only) | text |
 
 Company news has **its own volume**, `/Volumes/stocks/bronze/news/` (S3 copy under `landing/news/`), so news
-arriving every 30 minutes doesn't trigger a pipeline refresh each time:
+arriving every minute in market hours doesn't trigger a pipeline refresh each time:
 
 | Path | Content | Format |
 |---|---|---|
@@ -92,6 +92,9 @@ For NSE, `series = 'EQ'` is the main board. Gold uses `EQ` only.
 | `gold.track_record` | dimension × value | How proposals turned out, last 90 days; read by paper-trader every session (the feedback loop) | `dimension` (all, setup, hour, mood, yes_band, reviewer, mode, decision, feedback), `value`, `trades`, `wins`, `win_rate_pct`, `avg_outcome_rs`, `total_outcome_rs`, `avg_outcome_r` |
 | `gold.portfolio_daily` | day | How is the whole dummy portfolio doing? | `total_value_rs`, pool values, `pnl_rs`, `return_pct`, `drawdown_pct`, `portfolio_index` and `nifty_index` (both 100 on day one), `day_change_rs` |
 | `gold.holdings_latest` | holding | What do I hold now? | `pool`, `symbol`, `sector`, `qty`, `avg_cost`, `last_price`, `value`, `pnl`, `pnl_pct`, `weight_pct`, `days_held` |
+| `gold.intraday_universe` | Nifty 200 stock, latest NSE day | Which stocks may paper-trader trade intraday beyond its watchlist, and which have news today? | `eligible` (EQ series, close ≥ Rs 50, Rs 50 crore+ traded a day over 20 days), `flagged` (eligible and a fresh NSE filing, a 3%+ move or 2x volume), `reasons`, `latest_news_title` |
+| `gold.swing_signals` | stock × day (last 45 days) | Which news breakouts does the swing shadow pool trade? | eligible stock within 2 days of an NSE filing, close above its 20-day high on 2x volume, up 2%+, above its 50-day average; `stop` (5-day low, at most 8% below) |
+| `gold.shadow_pools_daily` | shadow pool × day | Are the rules tested on paper beating NIFTYBEES? | `pool` (swing_shadow, long_term_shadow), `equity`, `return_pct`, `nifty_return_pct` (NIFTYBEES since the pool's first day here), `vs_nifty_pct` |
 | `gold.longterm_candidates` | company | What would the long-term pool buy this week? | `rank`, `is_pick` (top 10, max 2 per industry), `score` (100 × quality + growth bonus − price penalty), `target_weight_pct` (90% invested in equal parts, max 15%), `reasons` (plain words) |
 | `gold.company_fundamentals` | company | Which large companies pass the long-term pool's quality tests? | `roce_pct` (`roa_pct` for banks/lenders), `debt_to_equity`, `ocf_positive_years`, `revenue_cagr_3y_pct`, `profit_cagr_3y_pct`, `eps_ttm`, `pe`, `pe_percentile` (0 = cheapest), `profit_down_2q`, `pass_capital/balance/cash/growth/price`, `tests_passed`, `quality_score`. Not in this source: promoter pledges, bad-loan ratios, P/E history |
 | `gold.dashboard_summary_facts` | dashboard page | Short facts per page from the latest numbers (not a pipeline table: rebuilt by `sql/dashboard_summary.sql` after every refresh) | `page`, `facts` |

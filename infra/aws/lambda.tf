@@ -27,7 +27,7 @@ locals {
       role_key    = "news"
       timeout     = 120
       description = "NSE company news RSS (announcements, results, board meetings, corporate actions) -> news volume"
-      # Every 30 minutes, 08:00-19:30 IST, Monday-Friday
+      # Every 30 minutes, 08:00-19:30 IST, Monday-Friday; plus every minute 09:00-15:59 (news_live below)
       schedule = "cron(0/30 8-19 ? * MON-FRI *)"
       enabled  = var.news_enabled
     }
@@ -161,6 +161,33 @@ resource "aws_scheduler_schedule" "fetcher" {
     retry_policy {
       maximum_retry_attempts       = 2
       maximum_event_age_in_seconds = 3600
+    }
+  }
+}
+
+# Market hours: company news every minute (09:00-15:59 IST, Monday-Friday), so the paper trader can act on a
+# filing within about a minute. Same Lambda; it rewrites latest.jsonl each run and snapshots only when needed.
+resource "aws_scheduler_schedule" "news_live" {
+  name        = "${var.name_prefix}-fetch-news-live"
+  description = "NSE company news every minute during market hours"
+  state       = var.schedules_enabled && var.news_enabled ? "ENABLED" : "DISABLED"
+
+  schedule_expression          = "cron(* 9-15 ? * MON-FRI *)"
+  schedule_expression_timezone = "Asia/Kolkata"
+
+  flexible_time_window {
+    mode = "OFF"
+  }
+
+  target {
+    arn      = aws_lambda_function.fetcher["news"].arn
+    role_arn = aws_iam_role.scheduler.arn
+    input    = jsonencode({})
+
+    # No retries: the next minute's run replaces a failed one.
+    retry_policy {
+      maximum_retry_attempts       = 0
+      maximum_event_age_in_seconds = 60
     }
   }
 }
