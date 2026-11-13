@@ -24,6 +24,7 @@ covers the base view above, the full [architecture](docs/ARCHITECTURE_DIAGRAMS.m
 | Pre-market brief | Your Telegram | 08:45 IST, Mon–Fri |
 | Paper-trading analysis ([paper-trader](https://github.com/bumblebee26/paper-trader)) | `stocks.gold.trad*` tables + dashboard page "Intraday trading" (KPI tiles: net P&L, win rate, profit factor, expectancy, win/loss ratio; equity curve, daily P&L, drawdown, by setup and hour) | After the 15:45 IST export |
 | Dummy portfolio and holdings | `stocks.gold.portfolio_daily`, `stocks.gold.holdings_latest` + dashboard page "Portfolio" (value, return vs NIFTYBEES, fall from peak, allocation by pool and sector, holdings) | After the 15:45 IST export |
+| Your own trades from Telegram ([paper-trader](https://github.com/bumblebee26/paper-trader)) | `stocks.gold.custom_trades` (intraday and pool trades you placed, marked custom) | After each export |
 | News radar and swing shadow ([paper-trader](https://github.com/bumblebee26/paper-trader)) | `stocks.gold.intraday_universe` (Nifty 200 names the trader may trade, flagged on news/moves), `stocks.gold.swing_signals` (news breakouts), `stocks.gold.shadow_pools_daily` (shadow pools vs NIFTYBEES) | After each NSE day / daily |
 | Company quality and long-term picks | `stocks.gold.company_fundamentals`, `stocks.gold.longterm_candidates` (this week's 10 picks from the Nifty 200, max 2 per industry, with target weights and reasons) + dashboard page "Company quality" | Saturdays |
 

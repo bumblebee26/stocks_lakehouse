@@ -17,6 +17,7 @@ Paper trading (dummy money, from bumblebee26/paper-trader via stocks.silver.trad
   stocks.gold.trading_decisions            your YES/NO choices: taken trades vs what skipped ones would have made
   stocks.gold.proposal_outcomes           every proposal: scores, mood, mode, decision, outcome, the user's 👍/👎
   stocks.gold.track_record                 how proposals turned out by setup, hour, mood, suggestion band, ...
+  stocks.gold.custom_trades                your own trades placed from Telegram (intraday, swing, long-term)
   stocks.gold.company_fundamentals         per company: profitability, debt, cash, growth, P/E and the long-term pool's quality tests
   stocks.gold.portfolio_daily              whole dummy portfolio per day: value, P&L, return, fall from peak, NIFTYBEES alongside
   stocks.gold.holdings_latest              current holdings with P&L, weight and days held
@@ -790,11 +791,14 @@ def track_record():
     po = (spark.read.table("stocks.gold.proposal_outcomes")  # noqa: F821
           .filter(F.col("outcome_rs").isNotNull())
           .filter(F.col("trade_date") >= F.date_sub(F.current_date(), TRACK_DAYS)))
+    # Your own (custom) trades appear only under dimension 'source', so they don't change how the trader's
+    # own setups, hours, moods and suggestion bands are judged.
+    own = po.filter(F.col("source") != "custom")
     parts = []
     for dimension, column in TRACK_DIMENSIONS:
         value = F.lit("all") if column is None else F.col(column).cast("string")
         parts.append(
-            po.withColumn("value", value).filter(F.col("value").isNotNull())
+            (po if dimension == "source" else own).withColumn("value", value).filter(F.col("value").isNotNull())
             .groupBy(F.lit(dimension).alias("dimension"), "value")
             .agg(F.count("*").alias("trades"), F.sum("won").alias("wins"),
                  F.round(F.avg("outcome_rs"), 2).alias("avg_outcome_rs"),
@@ -1196,3 +1200,35 @@ def shadow_pools_daily():
             .withColumn("vs_nifty_pct", F.round(F.col("return_pct") - F.col("nifty_return_pct"), 2))
             .select("snapshot_date", "pool", "capital", "cash", "holdings_value", "equity", "return_pct",
                     "niftybees_close", "nifty_return_pct", "vs_nifty_pct"))
+
+
+# ---------------------------------------------------------------------------
+# Your own trades from Telegram (/buy, /short, /swing, /longterm in paper-trader): marked custom
+# ---------------------------------------------------------------------------
+# SQL equivalent:
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.custom_trades AS
+#   SELECT trade_date, 'intraday' AS pool, symbol, side, qty, entry_price AS price, exit_price, net_pnl_rs AS pnl_rs,
+#          fees_rs, status, entry_time AS event_ts FROM stocks.gold.trades WHERE setup = 'Custom'
+#   UNION ALL
+#   SELECT trade_date, regexp_extract(note, 'pool (\\w+)', 1) AS pool, symbol, side, qty, fill_price AS price,
+#          NULL AS exit_price, pnl_rs, fees_rs, CASE side WHEN 'BUY' THEN 'bought' ELSE 'sold' END AS status, event_ts
+#   FROM stocks.silver.trade_events WHERE event = 'pool_trade' AND note LIKE '%source custom%';
+@dp.materialized_view(
+    name="stocks.gold.custom_trades",
+    comment="Your own trades placed from Telegram (dummy money): intraday ones with their net P&L and status, and "
+            "swing / long-term buys and sells (pnl_rs on sells, after costs). NIFTYBEES sells that paid for a "
+            "swing buy are included. The trader's own trades are in gold.trades.",
+    table_properties={"quality": "gold"},
+)
+def custom_trades():
+    intraday = (spark.read.table("stocks.gold.trades")  # noqa: F821
+                .filter(F.col("setup") == "Custom")
+                .select("trade_date", F.lit("intraday").alias("pool"), "symbol", "side", "qty",
+                        F.col("entry_price").alias("price"), "exit_price", F.col("net_pnl_rs").alias("pnl_rs"),
+                        "fees_rs", "status", F.col("entry_time").alias("event_ts")))
+    pool = (_trade_events_df()
+            .filter((F.col("event") == "pool_trade") & F.col("note").contains("source custom"))
+            .select("trade_date", F.regexp_extract("note", r"pool (\w+)", 1).alias("pool"), "symbol", "side", "qty",
+                    F.col("fill_price").alias("price"), F.lit(None).cast("double").alias("exit_price"), "pnl_rs",
+                    "fees_rs", F.when(F.col("side") == "BUY", "bought").otherwise("sold").alias("status"), "event_ts"))
+    return intraday.unionByName(pool)
