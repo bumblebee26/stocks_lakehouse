@@ -9,6 +9,7 @@
   stocks.silver.fundamentals   company financials, one row per symbol x metric x period (newest fetch wins)
   stocks.silver.portfolio_pools     paper-trader pools per day (capital, cash, equity)
   stocks.silver.portfolio_holdings  paper-trader holdings per day
+  stocks.silver.shadow_pools   paper-trader shadow pools per day (rules tested on paper; never in portfolio totals)
   stocks.silver.index_members  the latest Nifty 200 list: symbol, company, industry
 
 Materialized views: they recompute incrementally where possible, and make
@@ -493,6 +494,22 @@ def portfolio_holdings():
     return (_latest_portfolio_file().filter("record_type = 'holding'")
             .select("snapshot_date", "pool", "symbol", "sector", "qty", "avg_cost", "last_price", "value", "pnl",
                     F.to_date("opened").alias("opened")))
+
+
+# SQL equivalent:
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.silver.shadow_pools AS
+#   SELECT to_date(snapshot_date) AS snapshot_date, pool, capital, cash, holdings_value, equity
+#   FROM stocks.bronze.portfolio_raw WHERE record_type = 'shadow_pool';   -- newest file per day wins
+@dp.materialized_view(
+    name="stocks.silver.shadow_pools",
+    comment="Paper-trader SHADOW pools per day (swing_shadow, long_term_shadow): rules tested on paper, never part "
+            "of the portfolio totals. Capital, cash, holdings value, equity (dummy Rs).",
+    table_properties={"quality": "silver"},
+)
+@dp.expect_all_or_drop({"has_keys": "snapshot_date IS NOT NULL AND pool IS NOT NULL", "has_equity": "equity IS NOT NULL"})
+def shadow_pools():
+    return (_latest_portfolio_file().filter("record_type = 'shadow_pool'")
+            .select("snapshot_date", "pool", "capital", "cash", "holdings_value", "equity"))
 
 
 # ---------------------------------------------------------------------------
