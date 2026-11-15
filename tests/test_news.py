@@ -128,5 +128,25 @@ class NewsTest(unittest.TestCase):
         self.assertTrue(req.call_args_list[0].args[1].endswith("/directories/Volumes/stocks/bronze/news/date=2026-11-09"))
 
 
+
+class OtherSourcesTest(unittest.TestCase):
+    EQ = {"names": {"TATA CONSULTANCY SERVICES": "TCS", "HDFC BANK": "HDFCBANK", "ITC": "ITC"},
+          "symbols": {"TCS", "HDFCBANK", "ITC", "SBIN"}}
+
+    def test_headline_symbols(self):
+        self.assertEqual(news.symbol_in_headline("HDFC Bank shares jump after Q2 beat", self.EQ), "HDFCBANK")
+        self.assertEqual(news.symbol_in_headline("TCS bags $1 bn deal", self.EQ), "TCS")
+        self.assertIsNone(news.symbol_in_headline("RBI keeps repo rate unchanged; FII outflows continue", self.EQ))
+
+    def test_bse_duplicates_are_dropped(self):
+        nse_item = {"id": "a", "feed": "results", "symbol": "TCS", "category": "results",
+                    "published_ist": "2026-11-16 10:05:00"}
+        bse_item = {"id": "b", "feed": "bse", "symbol": "TCS", "category": "results",
+                    "published_ist": "2026-11-16 10:02:00"}
+        other = {"id": "c", "feed": "bse", "symbol": "ITC", "category": "order", "published_ist": "2026-11-16 10:00:00"}
+        kept = news.dedup([nse_item, bse_item, other])
+        self.assertEqual(sorted(i["id"] for i in kept), ["b", "c"])     # BSE was first: it wins; NSE copy dropped
+
+
 if __name__ == "__main__":
     unittest.main()

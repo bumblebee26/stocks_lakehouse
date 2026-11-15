@@ -16,148 +16,178 @@ import premarket  # noqa: E402
 import telegram  # noqa: E402
 
 
-def g(instrument, obs_date, value, change_pct, change_5d_pct=None, change_abs=None):
-    return {"instrument": instrument, "obs_date": obs_date, "value": value, "change_pct": change_pct,
-            "change_5d_pct": change_5d_pct, "change_abs": change_abs}
+D = dt.date
+TODAY = D(2026, 11, 16)  # Monday
+SESSIONS = {"NSE": "2026-11-13", "US": "2026-11-13"}
 
 
-SAMPLE = {
-    "us_bars": [
-        {"trade_date": "2026-11-06", "symbol": "SPY", "close": 650.0, "return_pct": 1.42},
-        {"trade_date": "2026-11-06", "symbol": "QQQ", "close": 560.0, "return_pct": 1.91},
-        {"trade_date": "2026-11-06", "symbol": "INFY", "close": 21.0, "return_pct": 2.3},
-        {"trade_date": "2026-11-06", "symbol": "HDB", "close": 70.0, "return_pct": -0.4},
-    ],
-    "us_breadth": [{"trade_date": "2026-11-06", "advances": 3210.0, "declines": 1980.0,
-                    "pct_above_ma20": 61.6, "median_return_pct": 0.5}],
-    "global": [
-        g("NIKKEI225", "2026-11-06", 50120.0, -5.96, -3.1, -3180.0),
-        g("EWY", "2026-11-06", 71.0, 4.07, 6.2, 2.8),
-        g("FXI", "2026-11-06", 38.0, 0.03, 1.1, 0.01),
-        g("VGK", "2026-11-05", 72.1, -1.26, -2.0, -0.9),
-        g("INDA", "2026-11-06", 52.0, 0.4, 0.9, 0.2),
-        g("VIXCLS", "2026-11-06", 28.2, 70.0, None, 11.6),
-        g("DGS10", "2026-11-06", 4.84, -1.2, None, -0.06),
-        g("DCOILBRENTEU", "2026-11-03", 107.0, -0.3, None, -0.3),
-        g("DEXINUS", "2026-10-30", 94.94, 0.1, None, 0.09),
-        g("DEXUSEU", "2026-10-30", 1.0712, -0.2, None, -0.002),
-    ],
-    "linked": [
-        {"instrument": "EWY", "corr_with_india_gap": 0.41, "sessions": 380.0},
-        {"instrument": "NIKKEI225", "corr_with_india_gap": 0.37, "sessions": 370.0},
-    ],
-    "summary": [
-        {"us_move": "US up big", "sessions": 48.0, "avg_us_return_pct": 1.6, "avg_india_gap_pct": 0.35,
-         "avg_india_return_pct": 0.2, "pct_india_up_days": 64.0, "pct_gap_same_direction_as_us": 71.0,
-         "corr_us_return_india_gap": 0.4},
-        {"us_move": "US flat", "sessions": 300.0, "avg_us_return_pct": 0.1, "avg_india_gap_pct": 0.02,
-         "avg_india_return_pct": 0.05, "pct_india_up_days": 52.0, "pct_gap_same_direction_as_us": 55.0,
-         "corr_us_return_india_gap": 0.2},
-    ],
-    "study_start": [{"first_day": "2024-11-12"}],
-    "unusual_in": [
-        {"symbol": "ABC&CO", "trade_date": "2026-11-06", "close": 120.0, "return_pct": 4.3, "volume_ratio": 5.2},
-        {"symbol": "XYZ", "trade_date": "2026-11-06", "close": 50.0, "return_pct": -2.1, "volume_ratio": 3.4},
-    ],
-}
+def live(**over):
+    base = {"^GSPC": (0.4, 6800.0), "^IXIC": (0.6, 23000.0), "BZ=F": (-1.2, 72.3), "INR=X": (0.1, 84.12),
+            "^INDIAVIX": (3.1, 13.4), "INFY": (2.3, 21.0), "HDB": (-0.4, 70.0)}
+    base.update(over)
+    return {k: {"date": "2026-11-13", "close": v[1], "change_pct": v[0]} for k, v in base.items() if v}
 
 
-def pre_blocks(msg):
-    return re.findall(r"<pre>(.*?)</pre>", msg, re.S)
+def pick(sym, list_type="strict", **over):
+    r = {"symbol": sym, "company": f"{sym.title()} Industries Ltd.", "trade_date": "2026-11-13",
+         "list_type": list_type, "rank": 1, "close": 1234.5, "setup": "20-day breakout", "stance": "buy-on-dip",
+         "rsi14": 58.2, "macd": 12.1, "macd_signal": 10.3, "macd_cross_up": True, "adx14": 24.5, "above_mas": True,
+         "above20": True, "above50": True, "above200": True, "vol_ratio": 2.1, "deliv_per": 54.0, "fno": True,
+         "entry_low": 1220.0, "entry_high": 1240.0, "trigger": 1220.0, "stop": 1180.0, "stop_basis": "swing low",
+         "target1": 1300.0, "target1_basis": "resistance", "target2": 1420.0, "rr": 2.4, "misses": "",
+         "filters_passed": 6, "nifty200_as_of": "2026-10-01", "fno_as_of": "2026-11-09",
+         "regime_close": 268.4, "regime_rsi": 57.0, "regime_sma20": 265.0, "regime_sma50": 260.0,
+         "regime_sma200": 250.0, "regime_adx": 22.0}
+    r.update(over)
+    return r
 
 
-class BuildMessage(unittest.TestCase):
-    def setUp(self):
-        self.msg = premarket.build_message(SAMPLE, dt.date(2026, 11, 9))
+def sample(**over):
+    d = {
+        "freshness": [{"source": "nse_prices", "latest_date": "2026-11-13"},
+                      {"source": "nse_delivery", "latest_date": "2026-11-13"},
+                      {"source": "technical_scanner", "latest_date": "2026-11-13"}],
+        "summary": [{"us_move": "US down big", "sessions": 14, "avg_india_gap_pct": -0.62}],
+        "unusual_in": [{"symbol": "M&M", "trade_date": "2026-11-13", "close": 3000.0, "return_pct": 3.2,
+                        "volume_ratio": 3.4}],
+        "screen": [pick("ABC"), pick("M&M"), pick("XYZ", "near-miss", misses="volume under 1.5x its 20-day average",
+                                                  stance="wait")],
+    }
+    d.update(over)
+    return d
 
-    def test_header_and_takeaways(self):
-        m = self.msg
-        self.assertIn("📊 <b>Pre-market brief</b> · Mon 09 Nov 2026", m)
-        self.assertIn("<i>Markets as of the Fri 06 Nov close</i>", m)
-        self.assertIn("• <b>US:</b> S&amp;P +1.42%, Nasdaq +1.91%, a big US up day.", m)
-        self.assertIn("• <b>World:</b> weakest Japan -5.96%, strongest Korea +4.07%.", m)
-        self.assertIn("• <b>Risk:</b> VIX 28.2 (+11.6), elevated · Brent $107 · USD/INR 94.94.", m)
-        self.assertIn("• <b>India:</b> after similar US days, NIFTYBEES opened +0.35% on average.", m)
-        self.assertNotIn("⚠️", m)
 
-    def test_tables_are_aligned_and_escaped(self):
-        blocks = pre_blocks(self.msg)
-        self.assertEqual(len(blocks), 6)  # US, world, macro, India stats, ADRs, unusual
-        for block in blocks:
-            rows = block.split("\n")
-            self.assertLessEqual(max(len(r) for r in rows), 40, block)  # fits a phone screen
-        world = blocks[1]
-        self.assertIn("Japan", world)
-        self.assertIn("Europe*", world)  # earlier session than the US close
-        self.assertRegex(world, r"Korea\s+\+4\.07\s+\+6\.20")
-        self.assertIn("ABC&amp;CO", blocks[5])  # escaped inside <pre>
-        self.assertIn("* = earlier session.", self.msg)
+def build(data=None, lv=None, sessions=SESSIONS, today=TODAY, failed=()):
+    data = data or sample()
+    exp = premarket.expected_dates(today, sessions)
+    fresh = premarket.freshness(data, exp)
+    lv = live() if lv is None else lv
+    return (premarket.build_brief(data, lv, exp, fresh, today, failed),
+            *premarket.build_scanner(data, exp, fresh, failed))
 
-    def test_macro_formats(self):
-        macro = pre_blocks(self.msg)[2]
-        self.assertRegex(macro, r"VIX\s+28\.20\s+\+11\.6\s+06 Nov")
-        self.assertRegex(macro, r"US 10Y\s+4\.84%\s+-6bp\s+06 Nov")
-        self.assertRegex(macro, r"USD/INR\s+94\.94\s+\+0\.1%\s+30 Oct")
-        self.assertRegex(macro, r"EUR/USD\s+1\.0712\s+-0\.2%\s+30 Oct")
 
-    def test_india_setup_and_linked(self):
-        self.assertIn("After a <i>big US up day</i> (48 sessions since Nov 2024):", self.msg)
-        self.assertRegex(pre_blocks(self.msg)[3], r"Avg opening gap\s+\+0\.35%")
-        self.assertIn("Most linked to India's open: Korea +4.1% (r=0.41) · Japan -6.0% (r=0.37)", self.msg)
+class Calendar(unittest.TestCase):
+    def test_holiday_is_stated(self):
+        exp = premarket.expected_dates(D(2026, 11, 17), {"NSE": "2026-11-13", "US": "2026-11-16"})
+        self.assertEqual(exp["NSE"][0], D(2026, 11, 13))
+        self.assertEqual(exp["NSE"][1], [D(2026, 11, 16)])
+        msg, _, _ = build(sessions={"NSE": "2026-11-13", "US": "2026-11-16"}, today=D(2026, 11, 17),
+                          lv=live(**{"^GSPC": None, "^IXIC": None, "BZ=F": None, "INR=X": None}))
+        self.assertIn("NSE closed Mon 16 Nov (holiday)", msg)
 
-    def test_flat_day_uses_flat_bucket(self):
-        data = json.loads(json.dumps(SAMPLE))
-        data["us_bars"][0]["return_pct"] = 0.3
-        msg = premarket.build_message(data, dt.date(2026, 11, 9))
-        self.assertIn("After a <i>flat US day</i> (300 sessions", msg)
+    def test_no_calendar_falls_back_to_previous_weekday(self):
+        exp = premarket.expected_dates(TODAY, {})
+        self.assertEqual(exp["US"], (D(2026, 11, 13), [], False))
 
-    def test_stale_data_warning(self):
-        msg = premarket.build_message(SAMPLE, dt.date(2026, 11, 16))
-        self.assertIn("⚠️ US data for Fri 13 Nov hasn't arrived", msg)
-        self.assertIn("are from Fri 06 Nov", msg)
-        tue = premarket.build_message(SAMPLE, dt.date(2026, 11, 10))  # Monday's US data missing
-        self.assertIn("US data for Mon 09 Nov hasn't arrived", tue)
-        mon = premarket.build_message(SAMPLE, dt.date(2026, 11, 9))  # Friday's data is the latest: fine
-        self.assertNotIn("hasn't arrived", mon)
 
-    def test_empty_tables_do_not_crash(self):
-        empty = {k: [] for k in SAMPLE}
-        msg = premarket.build_message(empty, dt.date(2026, 11, 9))
-        self.assertIn("No US index data.", msg)
-        self.assertIn("Not enough history", msg)
-        self.assertIn("None above the threshold.", msg)
-        self.assertNotIn("World markets", msg)
+class Brief(unittest.TestCase):
+    def test_india_first_then_global_supporting(self):
+        msg, _, _ = build()
+        self.assertIn("India VIX 13.4", msg)
+        self.assertIn("1% of the pool at risk", msg)
+        self.assertIn("above its 20/50/200-day averages", msg)
+        self.assertIn("2 strict picks, 1 near-miss", msg)
+        self.assertLess(msg.index("Risk:"), msg.index("Global"))
+        self.assertIn("S&amp;P +0.40%", msg)
+        self.assertNotIn("Global shock", msg)
+        self.assertIn("M&amp;M", msg)                 # escaped
+        self.assertNotIn("World markets", msg)       # no US/world tables any more
 
-    def test_fits_one_telegram_message(self):
-        self.assertLess(len(self.msg), telegram.MAX_LENGTH)
+    def test_vix_sets_risk(self):
+        self.assertEqual(premarket.vix_risk(22), ("elevated", 0.75))
+        self.assertEqual(premarket.vix_risk(31), ("high", 0.5))
+        self.assertEqual(premarket.vix_risk(12)[1], 1.0)
 
-    def test_handler_dry_run_does_not_send(self):
-        with mock.patch.object(databricks_sql, "query", side_effect=lambda sql: []), \
+    def test_global_shock_line(self):
+        msg, _, _ = build(lv=live(**{"^GSPC": (-2.4, 6500.0)}))
+        self.assertIn("Global shock:</b> S&amp;P 500 -2.40%", msg)
+        self.assertIn("opened -0.62% on average (14 sessions)", msg)
+
+    def test_stale_us_is_left_out_not_used(self):
+        stale = live()
+        for k in stale:
+            stale[k]["date"] = "2026-11-12"
+        stale["^INDIAVIX"]["date"] = "2026-11-13"
+        msg, _, _ = build(lv=stale)
+        self.assertNotIn("S&amp;P +", msg)
+        self.assertNotIn("Indian ADRs", msg)
+        self.assertIn("Not available this morning: S&amp;P 500, Nasdaq, Brent, USD/INR: left out", msg)
+        self.assertIn("India VIX 13.4", msg)
+
+    def test_stale_nse_is_left_out(self):
+        data = sample(freshness=[{"source": "nse_prices", "latest_date": "2026-11-12"},
+                                 {"source": "technical_scanner", "latest_date": "2026-11-12"}])
+        msg, scan, buttons = build(data)
+        self.assertIn("NSE prices for Fri 13 Nov hasn't arrived (latest Thu 12 Nov): left out", msg)
+        self.assertNotIn("Unusual volume", msg)
+        self.assertNotIn("Scanner:", msg)
+        self.assertIn("hasn't run", scan)
+        self.assertEqual(buttons, [])
+
+    def test_fits_telegram(self):
+        msg, scan, _ = build(sample(screen=[pick(f"S{i}") for i in range(10)] +
+                                    [pick(f"N{i}", "near-miss", misses="x") for i in range(5)]))
+        self.assertLessEqual(len(msg), telegram.MAX_LENGTH)
+        for part in premarket.chunks(scan):
+            self.assertLessEqual(len(part) + 12, telegram.MAX_LENGTH)
+        self.assertGreater(len(premarket.chunks(scan)), 1)
+        for block in re.findall(r"<pre>(.*?)</pre>", msg, re.S):
+            self.assertLessEqual(max(len(x) for x in block.splitlines()), 40)
+
+
+class Scanner(unittest.TestCase):
+    def test_picks_levels_links_and_buttons(self):
+        _, scan, buttons = build()
+        self.assertIn("<b>1. ABC</b> Rs 1,234.5 · 20-day breakout · <b>buy-on-dip</b>", scan)
+        self.assertIn("MACD 12.10/10.30 crossed ↑", scan)
+        self.assertIn("stop 1,180.0 (swing low)", scan)
+        self.assertIn("R:R 2.4", scan)
+        self.assertIn("symbol=M%26M", scan)
+        self.assertIn("groww.in/stocks/abc-industries-ltd", scan)
+        self.assertIn("XYZ Rs 1,234.5, wait: missed volume under 1.5x", scan)
+        self.assertIn("never a guaranteed return", scan)
+        self.assertEqual(buttons[0], [("Swing buy ABC (asks first)", "sw:ABC:1180.00:1420.00")])
+        self.assertEqual(len(buttons), 2)
+
+    def test_empty_list_says_so(self):
+        _, scan, buttons = build(sample(screen=[]))
+        self.assertIn("No stock passed all six filters today; none forced.", scan)
+        self.assertEqual(buttons, [])
+
+    def test_groww_slug(self):
+        self.assertEqual(premarket.groww_slug("Dr. Reddy's Laboratories Ltd."), "dr-reddys-laboratories-ltd")
+        self.assertEqual(premarket.groww_slug("Larsen & Toubro Limited"), "larsen-toubro-ltd")
+
+
+class Handler(unittest.TestCase):
+    def _run(self, fake_query, event=None):
+        with mock.patch.object(databricks_sql, "query", side_effect=fake_query), \
+             mock.patch.object(premarket, "fetch_live", return_value=(SESSIONS, live())), \
+             mock.patch.object(premarket.dt, "datetime", wraps=dt.datetime) as fake_dt, \
              mock.patch.object(telegram, "send") as send:
-            out = premarket.handler({"dry_run": True}, None)
+            fake_dt.now.return_value = dt.datetime(2026, 11, 16, 8, 45, tzinfo=premarket.IST)
+            return premarket.handler(event or {}, None), send
+
+    def test_dry_run_does_not_send(self):
+        out, send = self._run(lambda sql: [], {"dry_run": True})
         send.assert_not_called()
-        self.assertFalse(out["sent"])
-        self.assertIn("Pre-market brief", out["message"])
+        self.assertIn("Technical scanner", out["scanner"])
 
+    def test_one_failed_query_still_sends_both(self):
+        data = sample()
 
-class SoftFailure(unittest.TestCase):
-    def test_one_failed_query_still_sends_with_warning(self):
         def fake_query(sql):
-            if "global_snapshot" in sql:
-                raise RuntimeError("TABLE_OR_VIEW_NOT_FOUND stocks.gold.global_snapshot")
-            if "daily_bars" in sql:
-                return SAMPLE["us_bars"]
+            if "technical_screen" in sql:
+                raise RuntimeError("TABLE_OR_VIEW_NOT_FOUND stocks.gold.technical_screen")
+            if "data_freshness" in sql:
+                return data["freshness"]
             return []
 
-        with mock.patch.object(databricks_sql, "query", side_effect=fake_query), \
-             mock.patch.object(telegram, "send") as send:
-            out = premarket.handler({}, None)
-        send.assert_called_once()
-        self.assertEqual(out["failed_queries"], ["global"])
-        msg = send.call_args.args[0]
-        self.assertIn("⚠️ Unavailable today: world markets", msg)
-        self.assertIn("S&amp;P 500", msg)  # the rest of the brief is intact
-        self.assertNotIn("World markets", msg)
+        out, send = self._run(fake_query)
+        self.assertEqual(send.call_count, 2)
+        self.assertEqual(out["failed_queries"], ["screen"])
+        self.assertIn("Unavailable today: technical scanner", send.call_args_list[0].args[0])
+        self.assertIn("Scanner unavailable today", send.call_args_list[1].args[0])
 
 
 class DatabricksSql(unittest.TestCase):
@@ -217,6 +247,17 @@ class TelegramSend(unittest.TestCase):
         self.assertEqual(body["chat_id"], "12345")
         self.assertEqual(body["parse_mode"], "HTML")
         self.assertLessEqual(len(body["text"]), telegram.MAX_LENGTH)
+        self.assertNotIn("reply_markup", body)
+
+    def test_buttons(self):
+        ssm = mock.MagicMock()
+        ssm.get_parameter.return_value = {"Parameter": {"Value": "1"}}
+        os.environ.update(TELEGRAM_TOKEN_PARAM="/t", TELEGRAM_CHAT_ID_PARAM="/c")
+        with mock.patch.object(telegram.boto3, "client", return_value=ssm), \
+             mock.patch.object(telegram, "http_request") as req:
+            telegram.send("hi", buttons=[[("Swing buy ABC", "sw:ABC:1.00:2.00")]])
+        body = json.loads(req.call_args.kwargs["data"])
+        self.assertEqual(body["reply_markup"]["inline_keyboard"][0][0]["callback_data"], "sw:ABC:1.00:2.00")
 
 
 if __name__ == "__main__":

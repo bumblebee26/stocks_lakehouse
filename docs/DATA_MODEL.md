@@ -12,6 +12,8 @@ Same layout in S3 (`s3://stocks-lakehouse-landing-<account-id>/landing/`) and in
 |---|---|---|
 | `nse/date=YYYY-MM-DD/bhavcopy_cm_YYYYMMDD.csv.zip` | NSE UDiFF cash-market bhavcopy (S3) | zip |
 | `nse/date=YYYY-MM-DD/bhavcopy_cm_YYYYMMDD.csv` | Same, unzipped (volume only) | CSV |
+| `nse_delivery/date=YYYY-MM-DD/delivery_YYYYMMDD.jsonl` | NSE's delivery file (`sec_bhavdata_full`): delivered quantity and delivery % per stock, fetched with the bhavcopy | NDJSON |
+| `nse_fo/date=YYYY-MM-DD/fno_symbols.jsonl` | NSE's F&O stock list (`fo_mktlots.csv`, index rows dropped), Mondays 08:00 IST | NDJSON |
 | `massive/date=YYYY-MM-DD/grouped_daily_YYYYMMDD.json` | Massive grouped daily, all US tickers | JSON |
 | `fred/date=YYYY-MM-DD/fred_<start>_<end>.json` | FRED observations for a date range | NDJSON |
 | `trades/date=YYYY-MM-DD/events.jsonl` | Paper-trader journal (dummy money), pushed 15:45 IST by `stocks-trader-guardian` (volume; S3 copy in the trader's own bucket) | NDJSON |
@@ -57,6 +59,8 @@ Each new file is read once. Every bronze table has these lineage columns: `_sour
 | `silver.news` | news item | `id`, `feed`, `symbol`, `category` (results, board_meeting, order, management, regulatory, rating, pledge, insider, dividend_split_bonus, mna, meeting, corporate_action, other), `title`, `link`, `published_ts`, `first_seen_ts`, `news_ts`, `news_date`. Earliest snapshot of each item wins. | id and title present |
 | `silver.index_members` | company | The latest Nifty 200 list: `symbol`, `company`, `industry` | symbol present |
 | `silver.portfolio_pools` | day × pool | `capital`, `cash`, `holdings_value`, `equity` (newest file per day) | keys and equity present |
+| `silver.nse_delivery` | symbol × series × day | `deliv_qty`, `deliv_per` (share of traded quantity taken as delivery) | keys present |
+| `silver.fno_symbols` | symbol | NSE's latest F&O stock list: `symbol`, `underlying`, `as_of` | — |
 | `silver.shadow_pools` | day × shadow pool | `pool` (swing_shadow, long_term_shadow), `capital`, `cash`, `holdings_value`, `equity` (newest file per day; never in the portfolio totals) | keys and equity present |
 | `silver.portfolio_holdings` | day × pool × symbol | `sector`, `qty`, `avg_cost`, `last_price`, `value`, `pnl`, `opened` | keys present |
 | `silver.fundamentals` | company × metric × period | `symbol`, `metric`, `period_type`, `period_end`, `value`, `currency`, `fetched_at`. Newest weekly fetch wins (restatements replace old figures). | keys and value present |
@@ -96,11 +100,28 @@ For NSE, `series = 'EQ'` is the main board. Gold uses `EQ` only.
 | `gold.custom_trades` | trade (yours) | What did my own Telegram trades do? | `pool` (intraday, swing, long_term), `side`, `qty`, `price`, `exit_price` (intraday), `pnl_rs` (net; pool sells), `status` |
 | `gold.intraday_universe` | Nifty 200 stock, latest NSE day | Which stocks may paper-trader trade intraday beyond its watchlist, and which have news today? | `eligible` (EQ series, close ≥ Rs 50, Rs 50 crore+ traded a day over 20 days), `flagged` (eligible and a fresh NSE filing, a 3%+ move or 2x volume), `reasons`, `latest_news_title` |
 | `gold.swing_signals` | stock × day (last 45 days) | Which news breakouts does the swing shadow pool trade? | eligible stock within 2 days of an NSE filing, close above its 20-day high on 2x volume, up 2%+, above its 50-day average; `stop` (5-day low, at most 8% below) |
+| `gold.technical_indicators` | Nifty 200 stock (and NIFTYBEES) × day, ~14 months | The scanner's maths for every day: split/bonus-adjusted prices, SMA 20/50/200, RSI(14), MACD(12,26,9), ADX(14) and whether it is rising, ATR(14), MFI(14), volume vs its 20-day average | `setup` (20-day breakout, at resistance, pullback to the 20-day average, trend, extended), `stance` (buy-on-dip, breakout-only, wait, wait/avoid), `entry_low`/`entry_high`, `trigger`, `stop` + `stop_basis`, `target1` + `target1_basis`, `target2`, `rr`, the six filter booleans, `filters_passed`, `strict`, `near_miss`, `misses` (plain words), `score` |
+| `gold.technical_screen` | Nifty 200 stock, latest NSE day | Today's scanner: which stocks pass all six filters? | everything above plus `list_type` (strict, near-miss, none), `rank`, `deliv_per`, `fno`, `company`, `industry`, `nifty200_as_of`, `fno_as_of`, `regime_*` (NIFTYBEES close, RSI, averages, ADX) |
+| `gold.signal_performance` | signal × horizon | Has each scanner signal worked? | `signal` (strict, near_miss, above_mas, macd_cross_up, breakout, pullback), `horizon_days` (5, 10, 20), `signals`, `avg_return_pct`, `avg_excess_pct` (vs NIFTYBEES), `beat_niftybees_pct` |
+| `gold.data_freshness` | source | Which day does each source have? Readers leave out a source that is missing the day it should have | `source` (nse_prices, nse_delivery, us_prices, fred_global, company_news, fno_list, nifty200_list, technical_scanner), `latest_date`, `checked_at` |
 | `gold.shadow_pools_daily` | shadow pool × day | Are the rules tested on paper beating NIFTYBEES? | `pool` (swing_shadow, long_term_shadow), `equity`, `return_pct`, `nifty_return_pct` (NIFTYBEES since the pool's first day here), `vs_nifty_pct` |
 | `gold.longterm_candidates` | company | What would the long-term pool buy this week? | `rank`, `is_pick` (top 10, max 2 per industry), `score` (100 × quality + growth bonus − price penalty), `target_weight_pct` (90% invested in equal parts, max 15%), `reasons` (plain words) |
 | `gold.company_fundamentals` | company | Which large companies pass the long-term pool's quality tests? | `roce_pct` (`roa_pct` for banks/lenders), `debt_to_equity`, `ocf_positive_years`, `revenue_cagr_3y_pct`, `profit_cagr_3y_pct`, `eps_ttm`, `pe`, `pe_percentile` (0 = cheapest), `profit_down_2q`, `pass_capital/balance/cash/growth/price`, `tests_passed`, `quality_score`. Not in this source: promoter pledges, bad-loan ratios, P/E history |
 | `gold.dashboard_summary_facts` | dashboard page | Short facts per page from the latest numbers (not a pipeline table: rebuilt by `sql/dashboard_summary.sql` after every refresh) | `page`, `facts` |
 | `gold.dashboard_summary` | dashboard page | The "In plain words" text on each dashboard page | `page`, `facts`, `ai_text` (`ai_summarize` of the facts; the dashboard shows the facts when it is empty), `generated_at` |
+
+### Technical scanner
+
+The six filters: close above its 20, 50 and 200-day averages; RSI 50–65; MACD above its signal line; ADX above
+20 and higher than 3 days earlier; volume at least 1.5x the previous 20 days' average; reward at least twice the
+risk. A **strict** pick passes all six and isn't extended (RSI > 70, MFI > 80 or more than 8% above the 20-day
+average are wait/avoid: no chasing); a **near-miss** is above all three averages and passes 4 or 5. Levels are
+indicative: swing points (a high or low that is the extreme of 5 days either side, used only once confirmed)
+give resistance, support and T1; ATR gives the rest (stop 1.5 ATR under the entry when there is no swing low
+within 3 ATR; T1 2R when there is no resistance; T2 3R, at least T1 + 1R). Prices are adjusted for splits,
+bonuses and rights from NSE's own previous close (an ex-date shows the adjusted previous close; factor =
+previous close ÷ our last close, applied when more than 3% off 1). The maths is pandas, per stock, in
+`pipeline/gold.py` between the `technicals` markers; `tests/test_technicals.py` tests that block directly.
 
 ### Definitions
 

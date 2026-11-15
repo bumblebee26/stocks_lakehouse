@@ -17,14 +17,14 @@ snapshot back at 15:45 IST, and sends company financials every Saturday. How the
 
 | Component | What it does |
 |---|---|
-| **Fetcher Lambdas** | One per source (NSE, Massive, FRED, news). Download one day (or a date range) and write the raw file to S3, then push the same file to the Databricks volume. NSE zips are unzipped on the way into the volume. |
+| **Fetcher Lambdas** | One per source (NSE bhavcopy + delivery, NSE F&O list, Massive, FRED, news). Download one day (or a date range) and write the raw file to S3, then push the same file to the Databricks volume. NSE zips are unzipped on the way into the volume. |
 | **S3 landing bucket** | The permanent, untouched raw archive. Private, encrypted, versioned, HTTPS-only. |
 | **Databricks volume** | The copy the pipeline reads. Same folder layout as S3. |
 | **News volume** | `/Volumes/stocks/bronze/news/`: the news Lambda writes `latest.jsonl` (read directly by paper-trader) every minute 09:00–15:59 IST and every 30 minutes otherwise (08:00–19:30), plus a snapshot at :00/:30 and when new items appear. Kept out of the landing volume so news doesn't trigger a pipeline refresh each time; the pipeline picks it up at its next refresh. |
 | **Lakeflow pipeline** | Bronze (Auto Loader streaming tables), silver and gold (materialized views). Written in Python, with the equivalent SQL in comments. |
 | **Refresh job** | Runs the pipeline when new files land (waits 5 minutes after the last file, at most every 15 minutes), then runs `sql/dashboard_summary.sql` on the SQL warehouse: short facts per dashboard page from the latest numbers, rewritten by `ai_summarize` into `gold.dashboard_summary`. |
 | **Dashboard** | AI/BI (Lakeview) dashboard on the gold tables, defined in Terraform. Pages: Overview (markets), Portfolio, Intraday trading, Company quality (with the long-term pool's weekly picks), Details (full tables behind the Overview charts). Each page opens with an "In plain words" summary (the AI text, or the plain facts if AI Functions fail) and every chart has a caption. KPI tiles are counters on one-row datasets; every derived number is computed in SQL, not in widgets. |
-| **Pre-market Lambda** | Queries gold through the Databricks SQL Statement API and sends a Telegram message. |
+| **Pre-market Lambda** | Queries gold through the Databricks SQL Statement API, reads live quotes and the market calendars (Nifty 50 and S&P 500 daily candles) from Yahoo Finance, checks each source has the day it should, and sends the brief and the technical scanner to Telegram. |
 | **Sync Lambda** | Copies anything in S3 that's missing from the volume. Used after backfills and to repair gaps. |
 | **Paper-trader feed** | [paper-trader](https://github.com/bumblebee26/paper-trader)'s `stocks-trader-guardian` Lambda pushes the day's trade journal to `landing/trades/` and a portfolio snapshot (every pool and holding) to `landing/portfolio/` at 15:45 IST (same Files API and pusher token). The journal is both a backup copy of the trader's S3 journal and the input to the `trad*` gold tables and the "Intraday trading" page; the snapshot feeds `portfolio_daily`, `holdings_latest` and the "Portfolio" page. On Saturdays at 07:15 IST paper-trader's *Company fundamentals* workflow pushes company financials to `landing/fundamentals/` and NSE's Nifty 200 list to `landing/index_members/`, the inputs to `company_fundamentals` and `longterm_candidates`. |
 | **CI/CD** | GitHub Actions: checks on every push, plan on PR (plus every dashboard and `sql/` query checked against the SQL warehouse with `EXPLAIN` by `scripts/check_sql.py`), apply on merge to `main`. |
@@ -76,7 +76,7 @@ undone and removes the spend limit.
 | Identity | Can | Cannot |
 |---|---|---|
 | You (`aws login` → `AccountFullAccessRole`) | Everything in the project | — |
-| `stocks-fetch-nse-role` | `PutObject` to `landing/nse/*`, read Databricks push config | Read/list/delete S3, other prefixes |
+| `stocks-fetch-nse-role` | `PutObject` to `landing/nse/*`, `landing/nse_delivery/*`, `landing/nse_fo/*`, read Databricks push config | Read/list/delete S3, other prefixes |
 | `stocks-fetch-us-role` | `PutObject` to `landing/massive/*`, read Massive key + push config | Same |
 | `stocks-fetch-global-role` | `PutObject` to `landing/fred/*`, read FRED key + push config | Same |
 | `stocks-fetch-news-role` | `PutObject` to `landing/news/*`, read push config | Same |

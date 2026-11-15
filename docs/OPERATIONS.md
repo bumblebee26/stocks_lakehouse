@@ -6,16 +6,17 @@ Day-to-day running of the lakehouse once [SETUP.md](SETUP.md) is done.
 
 | Time (IST) | Job | Writes |
 |---|---|---|
-| 04:30 and 07:30 Tue–Sat | `stocks-fetch-massive` (07:30 = retry; each run fetches any of the last 3 weekdays not yet in the volume) | `landing/massive/date=<US date>/grouped_daily_YYYYMMDD.json` |
+| 11:00 Tue–Sat | `stocks-fetch-massive` (the free plan releases a US day ~10:30 IST; each run fetches any of the last 3 weekdays not yet in the volume) | `landing/massive/date=<US date>/grouped_daily_YYYYMMDD.json` |
 | 06:00 Tue–Sat | `stocks-fetch-fred` | `landing/fred/date=<today>/fred_<start>_<end>.json` (last 21 days) |
 | 5 min after files stop arriving | Databricks job `stocks-refresh` | Refreshes all bronze/silver/gold tables, then `sql/dashboard_summary.sql` rebuilds `gold.dashboard_summary_facts` and `gold.dashboard_summary` (the dashboard's "In plain words" text) |
 | every minute 09:00–15:59 (schedule `stocks-fetch-news-live`), every 30 min otherwise 08:00–19:30, Mon–Fri | `stocks-fetch-news` | `latest.jsonl` in the news volume every run (read by paper-trader); `date=<today>/snap_HHMM.jsonl` (+ S3 copy under `landing/news/`) at :00/:30 and when new items appear (at most every 5 min); read by the pipeline at its next refresh |
-| 08:45 Mon–Fri | `stocks-premarket-brief` | Telegram message |
+| 08:00 Mon | `stocks-fetch-nse_fo` | `landing/nse_fo/date=<today>/fno_symbols.jsonl` (fails if fewer than 100 stocks) |
+| 08:45 Mon–Fri | `stocks-premarket-brief` | Two Telegram messages: the brief (data check, India VIX risk, Nifty 50 regime, global as support, ADRs, unusual volume) and the technical scanner (strict picks with levels, links and a Swing buy button; near-misses). A source missing the day it should have is left out and named, never replaced by an older day |
 | 15:45 Mon–Fri | paper-trader's `stocks-trader-guardian` (other repo) | `landing/trades/date=<today>/events.jsonl` and `landing/portfolio/date=<today>/portfolio.jsonl` (volume only; the S3 copies are in the trader's own bucket) |
-| 19:30 Mon–Fri | `stocks-fetch-nse` | `landing/nse/date=<today>/bhavcopy_cm_YYYYMMDD.csv.zip` (+ `.csv` in the volume) |
+| 19:30 Mon–Fri | `stocks-fetch-nse` | `landing/nse/date=<today>/bhavcopy_cm_YYYYMMDD.csv.zip` (+ `.csv` in the volume) and `landing/nse_delivery/date=<today>/delivery_YYYYMMDD.jsonl` |
 | 07:15 Sat | paper-trader's *Company fundamentals* workflow (other repo, GitHub Actions) | `landing/fundamentals/date=<today>/fundamentals.jsonl` and `landing/index_members/date=<today>/nifty200.jsonl` (volume only) |
 
-Market holidays are handled: the fetchers record `no_file` / `no_data` instead of failing.
+Market holidays are handled: the fetchers record `no_file` / `no_data` instead of failing. The brief reads each market's own calendar (the dates of Yahoo's Nifty 50 and S&P 500 daily candles), says which weekdays were holidays, and leaves out any source missing a day that wasn't one (`gold.data_freshness`).
 
 ## Making a change
 

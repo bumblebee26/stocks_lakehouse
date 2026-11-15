@@ -22,7 +22,7 @@ variable "fetchers" {
     needs_fred_key    = bool
   }))
   default = {
-    nse    = { landing_prefixes = ["nse"], needs_massive_key = false, needs_fred_key = false }
+    nse    = { landing_prefixes = ["nse", "nse_delivery", "nse_fo"], needs_massive_key = false, needs_fred_key = false }
     us     = { landing_prefixes = ["massive"], needs_massive_key = true, needs_fred_key = false }
     global = { landing_prefixes = ["fred"], needs_massive_key = false, needs_fred_key = true }
     news   = { landing_prefixes = ["news"], needs_massive_key = false, needs_fred_key = false }
@@ -69,6 +69,12 @@ variable "databricks_news_volume_path" {
   description = "Unity Catalog volume for company news (kept out of the landing volume so news doesn't trigger a pipeline refresh every 30 minutes)."
   type        = string
   default     = "/Volumes/stocks/bronze/news"
+}
+
+variable "bse_news_enabled" {
+  description = "Also read BSE corporate announcements (the JSON behind bseindia.com; no public feed). Off until BSE's terms are checked."
+  type        = bool
+  default     = false
 }
 
 variable "news_enabled" {

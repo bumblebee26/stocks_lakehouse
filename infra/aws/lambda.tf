@@ -17,9 +17,19 @@ locals {
       role_key    = "us"
       timeout     = 900 # backfills sleep between calls for the free-plan rate limit
       description = "Massive grouped daily (all US stocks) -> landing/massive/"
-      # 04:30 IST, Tuesday-Saturday = after the US close the previous evening; 07:30 IST retry
+      # 11:00 IST Tue-Sat: the free plan releases a US day just after midnight New York time (~10:30 IST).
+      # History only: the morning brief reads the few US figures it needs from Yahoo, live.
       # (each run also fetches any of the last 3 weekdays still missing; see massive.py)
-      schedule = "cron(30 4,7 ? * TUE-SAT *)"
+      schedule = "cron(0 11 ? * TUE-SAT *)"
+      enabled  = true
+    }
+    nse_fo = {
+      handler     = "nse_fo.handler"
+      role_key    = "nse"
+      timeout     = 120
+      description = "NSE F&O stock list (fo_mktlots.csv) -> landing/nse_fo/"
+      # Mondays 08:00 IST
+      schedule = "cron(0 8 ? * MON *)"
       enabled  = true
     }
     news = {
@@ -86,6 +96,7 @@ resource "aws_lambda_function" "fetcher" {
       DATABRICKS_TOKEN_PARAM = local.databricks_token_param
       LANDING_VOLUME_PATH    = var.databricks_volume_path
       NEWS_VOLUME_PATH       = var.databricks_news_volume_path
+      BSE_NEWS_ENABLED       = var.bse_news_enabled ? "true" : "false"
     }
   }
 

@@ -2,10 +2,11 @@
 
 API: GET https://api.massive.com/v2/aggs/grouped/locale/us/market/stocks/{YYYY-MM-DD}
 The API key is read from SSM Parameter Store (MASSIVE_KEY_PARAM), never from code or env vars.
-Scheduled for 04:30 IST (after the US close the previous evening, New York time) and again at 07:30 IST.
+Scheduled for 11:00 IST Mon-Fri: the free Basic plan releases a US day just after midnight New York time
+(about 10:30 IST), so earlier runs only got a refusal. History only; the morning brief reads Yahoo live.
 Each scheduled run also catches up: it fetches any of the last CATCH_UP_DAYS weekdays whose file isn't in
 the Databricks landing volume yet (a failed or empty run, e.g. data not yet published), and skips days
-already there, so the 07:30 retry costs one check when 04:30 worked.
+already there.
 
 Lands at: landing/massive/date=YYYY-MM-DD/grouped_daily_YYYYMMDD.json (raw API response)
 """
