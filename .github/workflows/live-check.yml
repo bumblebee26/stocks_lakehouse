@@ -1,0 +1,35 @@
+# Temporary one-off check of the live data sources (removed after use). No secrets.
+name: Live check
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13"
+      - name: Lakehouse sources
+        run: python scripts/live_check.py
+      - name: Trader plan from live Yahoo
+        run: |
+          git clone --depth 1 https://github.com/bumblebee26/paper-trader.git /tmp/pt
+          cd /tmp/pt && python - <<'PY'
+          import sys; sys.path.insert(0, "trader")
+          from unittest import mock; sys.modules["boto3"] = mock.MagicMock()
+          import brief, market, screen
+          today = market.now_ist().date()
+          sessions, live = brief.fetch_live(today)
+          print("sessions", sessions); print("live", live)
+          plan = brief.build_plan({}, ["all"], live=live, sessions=sessions, today=today)
+          for k in ("nse_session", "us_session", "holidays", "missing", "india_vix", "risk_per_trade_pct", "bias", "global_supporting", "adr_moves_pct"):
+              print(k, "=", plan[k])
+          print(brief.plan_message(plan, ["TCS", "INFY"]))
+          print("scanner expected session:", screen.expected_session())
+          assert plan["india_vix"] is not None and plan["global_supporting"]["sp500_pct"] is not None
+          PY
