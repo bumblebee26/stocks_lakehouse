@@ -110,6 +110,16 @@ class NseFetch(unittest.TestCase):
         rows = nse_fo.parse(text, "2026-11-16")
         self.assertEqual(rows, [{"symbol": "TCS", "underlying": "TATA CONSULTANCY SERV LT", "as_of": "2026-11-16"}])
 
+    def test_fno_list_real_layout(self):
+        # NSE's file as of 16 Nov 2026: index rows (some not in INDEX_ROWS) above a "Symbol" divider row
+        import nse_fo
+        text = ("UNDERLYING                         ,SYMBOL    ,NOV-26    ,DEC-26\n"
+                "NIFTY 50                           ,NIFTY     ,65        ,65\n"
+                "NIFTY FPI 150                      ,NIFTYFPI  ,1100      ,1100\n"
+                "Derivatives on Individual Securities,Symbol    ,NOV-26    ,DEC-26\n"
+                "ADANI ENERGY SOLUTION LTD          ,ADANIENSOL,675       ,675\n")
+        self.assertEqual([r["symbol"] for r in nse_fo.parse(text, "2026-11-16")], ["ADANIENSOL"])
+
     def test_holiday_404_is_not_an_error(self):
         with mock.patch.object(nse, "http_get", side_effect=common.NotFound("x")):
             out = nse.handler({"date": "2026-11-06"}, None)

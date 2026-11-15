@@ -26,10 +26,14 @@ def parse(text, as_of):
         i_sym, i_und = header.index("SYMBOL"), header.index("UNDERLYING")
     except ValueError:
         raise RuntimeError(f"unexpected fo_mktlots header: {header[:4]}")
+    rows = [r for r in reader if len(r) > max(i_sym, i_und)]
+    # NSE lists index derivatives first, then a divider row ("Derivatives on Individual Securities", "Symbol");
+    # only rows after it are stocks. INDEX_ROWS still guards a file without the divider.
+    divider = next((n for n, r in enumerate(rows) if r[i_sym].strip().upper() == "SYMBOL"), None)
+    if divider is not None:
+        rows = rows[divider + 1:]
     out = []
-    for row in reader:
-        if len(row) <= max(i_sym, i_und):
-            continue
+    for row in rows:
         sym = row[i_sym].strip().upper()
         if not sym or sym == "SYMBOL" or sym in INDEX_ROWS:
             continue
