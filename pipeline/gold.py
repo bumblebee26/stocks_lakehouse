@@ -707,11 +707,13 @@ def trading_decisions():
 #   LEFT JOIN latest user_feedback fb ...;
 #   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.track_record AS
 #   SELECT 'setup' AS dimension, setup AS value, count(*) AS trades, sum(won) AS wins, ... FROM outcomes
-#   GROUP BY setup UNION ALL ... (hour, mood, yes_band, reviewer, mode, decision, feedback, all);
+#   GROUP BY setup UNION ALL ... (hour, mood, yes_band, reviewer, mode, decision, feedback, source, sector, side,
+#   scanner, all);
 TRACK_DAYS = 90
 TRACK_DIMENSIONS = [("all", None), ("setup", "setup"), ("hour", "hour"), ("mood", "mood"), ("yes_band", "yes_band"),
                     ("reviewer", "reviewer_verdict"), ("mode", "mode"), ("decision", "decision"),
-                    ("feedback", "feedback"), ("source", "source"), ("sector", "sector"), ("side", "side")]
+                    ("feedback", "feedback"), ("source", "source"), ("sector", "sector"), ("side", "side"),
+                    ("scanner", "scanner")]
 
 # Sector of each watchlist stock, as paper-trader names them (trader/sectors.py), for proposals made before the
 # trader wrote "sector ..." into its note (16 Nov). Newer proposals carry their own sector; others are "Other".
@@ -806,6 +808,7 @@ def proposal_outcomes():
         .withColumn("mood", _note_value(r"mood ([a-z ]+?) \|"))
         .withColumn("mode", F.coalesce(_note_value(r"mode (\w+)"), F.lit("human")))
         .withColumn("source", F.coalesce(_note_value(r"source (\w+)"), F.lit("watchlist")))
+        .withColumn("scanner", _note_value(r"scanner (strict|near|none)"))   # from 17 Nov; older rows: null
         .withColumn("sector", F.coalesce(_note_value(r"sector ([A-Za-z&/ -]+?) \|"),
                                          F.element_at(F.create_map(*[F.lit(x) for kv in WATCHLIST_SECTOR.items()
                                                                      for x in kv]), F.col("symbol")),
