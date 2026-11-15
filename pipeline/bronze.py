@@ -349,3 +349,50 @@ def index_members_raw():
         .schema(INDEX_MEMBERS_SCHEMA)
         .load(f"{LANDING}/index_members/")
     )
+
+
+# ---------------------------------------------------------------------------
+# NSE delivery figures (from sec_bhavdata_full, cleaned by the NSE Lambda) and the F&O stock list
+# ---------------------------------------------------------------------------
+# SQL equivalent:
+#   CREATE OR REFRESH STREAMING TABLE stocks.bronze.nse_delivery_raw AS
+#   SELECT *, <lineage columns> FROM STREAM read_files('/Volumes/stocks/bronze/landing/nse_delivery/',
+#     format => 'json', pathGlobFilter => '*.jsonl', schema => 'symbol STRING, series STRING, deliv_qty DOUBLE,
+#     deliv_per DOUBLE');
+#   (stocks.bronze.nse_fo_raw: the same from landing/nse_fo/, schema 'symbol STRING, underlying STRING, as_of STRING')
+DELIVERY_SCHEMA = "symbol STRING, series STRING, deliv_qty DOUBLE, deliv_per DOUBLE"
+FNO_SCHEMA = "symbol STRING, underlying STRING, as_of STRING"
+
+
+@dp.table(
+    name="stocks.bronze.nse_delivery_raw",
+    comment="Raw NSE delivery figures per stock per day (delivered quantity and % of traded quantity).",
+    table_properties={"quality": "bronze"},
+)
+def nse_delivery_raw():
+    return with_lineage(
+        spark.readStream.format("cloudFiles")  # noqa: F821
+        .option("cloudFiles.format", "json")
+        .option("pathGlobFilter", "*.jsonl")
+        .option("rescuedDataColumn", "_rescued_data")
+        .option("cloudFiles.partitionColumns", "")
+        .schema(DELIVERY_SCHEMA)
+        .load(f"{LANDING}/nse_delivery/")
+    )
+
+
+@dp.table(
+    name="stocks.bronze.nse_fo_raw",
+    comment="Raw NSE F&O stock lists, one row per stock per weekly file.",
+    table_properties={"quality": "bronze"},
+)
+def nse_fo_raw():
+    return with_lineage(
+        spark.readStream.format("cloudFiles")  # noqa: F821
+        .option("cloudFiles.format", "json")
+        .option("pathGlobFilter", "*.jsonl")
+        .option("rescuedDataColumn", "_rescued_data")
+        .option("cloudFiles.partitionColumns", "")
+        .schema(FNO_SCHEMA)
+        .load(f"{LANDING}/nse_fo/")
+    )

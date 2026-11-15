@@ -40,6 +40,23 @@ FEEDS = {
     "board_meeting": BASE + "Board_Meetings.xml",
     "corporate_action": BASE + "Corporate_action.xml",
 }
+# Other sources (checked to be public RSS feeds, 15 Nov 2026), polled every few minutes, not every minute:
+#   media    headlines matched to NSE companies by name (category "media")
+#   official market-wide notices: RBI and SEBI press releases (category "market", no symbol)
+# Sites that refuse automated reading (ET Markets, Mint, Moneycontrol, Yahoo's headline feed) are left out.
+# BSE corporate announcements: BSE publishes no public feed; the code below reads the JSON its website uses,
+# off by default (BSE_NEWS_ENABLED) until its terms are checked.
+EXTRA_FEEDS = {
+    "bs_markets": ("https://www.business-standard.com/rss/markets-106.rss", 4, "media"),
+    "rbi": ("https://www.rbi.org.in/pressreleases_rss.xml", 5, "official"),
+    "sebi": ("https://www.sebi.gov.in/sebirss.xml", 5, "official"),
+}
+BSE_URL = ("https://api.bseindia.com/BseIndiaAPI/api/AnnSubCategoryGetData/w?pageno=1&strCat=-1&strPrevDate={d}"
+           "&strScrip=&strSearch=P&strToDate={d}&strType=C&subcategory=-1")
+BSE_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0 Safari/537.36",
+               "Accept": "application/json", "Referer": "https://www.bseindia.com/", "Origin": "https://www.bseindia.com"}
+DEDUP_MINUTES = 120   # the same company + category from NSE and BSE within this window is one item (first wins)
+_extra = {}           # feed -> (fetched_minute, items): kept between minute runs of a warm Lambda
 EQUITY_LIST_URL = "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv"
 HEADERS = {
     "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -156,6 +173,95 @@ def parse_feed(feed, body, eq, fetched_at):
     return out
 
 
+def symbol_in_headline(text, eq):
+    """A media headline's NSE company: a full company name (5+ letters) or an NSE symbol written as a word."""
+    norm = f" {norm_name(text)} "
+    best = None
+    for name, sym in eq["names"].items():
+        if len(name) >= 5 and f" {name} " in norm and (best is None or len(name) > len(best[0])):
+            best = (name, sym)
+    if best:
+        return best[1]
+    for word in re.findall(r"\b[A-Z][A-Z0-9&]{2,14}\b", text or ""):
+        if word in eq["symbols"] and word not in {"THE", "AND", "FOR", "NEW", "IPO", "GDP", "RBI", "SEBI", "FII", "DII"}:
+            return word
+    return None
+
+
+def extra_items(now, eq, fetched_at):
+    """Media and official feeds, each on its own interval; the last good fetch is reused in between."""
+    out = []
+    for feed, (url, every, kind) in EXTRA_FEEDS.items():
+        last = _extra.get(feed)
+        if last is None or now.minute % every == 0:
+            try:
+                items = parse_feed(feed, http_get(url, HEADERS, retries=1), eq, fetched_at)
+                for i in items:
+                    if kind == "media":
+                        i["symbol"] = symbol_in_headline(i["title"], eq)
+                        i["category"] = "media"
+                    else:
+                        i["symbol"], i["category"] = None, "market"
+                _extra[feed] = (now, items)
+            except Exception as err:  # noqa: BLE001 - an extra source never stops the NSE feeds
+                log.warning("Extra feed %s failed: %s", feed, err)
+                if last is not None and (now - last[0]).total_seconds() > 30 * 60:
+                    _extra.pop(feed, None)    # too old to keep showing
+        if feed in _extra:
+            out += _extra[feed][1]
+    return out
+
+
+def bse_items(now, eq, fetched_at):
+    if os.environ.get("BSE_NEWS_ENABLED", "false").lower() != "true":
+        return []
+    import json as _json
+    try:
+        data = _json.loads(http_get(BSE_URL.format(d=now.strftime("%Y%m%d")), BSE_HEADERS, retries=1))
+    except Exception as err:  # noqa: BLE001
+        log.warning("BSE announcements failed: %s", err)
+        return []
+    out = []
+    for r in data.get("Table") or []:
+        title = " ".join(str(r.get("NEWSSUB") or r.get("HEADLINE") or "").split())
+        name = str(r.get("SLONGNAME") or "")
+        item = {"title": title, "description": str(r.get("HEADLINE") or "")[:2000]}
+        published = (str(r.get("NEWS_DT") or "").replace("T", " ")[:19]) or None
+        out.append({
+            "id": hashlib.sha1(f"bse|{r.get('NEWSID')}".encode()).hexdigest()[:16], "feed": "bse",
+            "symbol": eq["names"].get(norm_name(name)), "company": name,
+            "category": category_for("announcement", item), "title": title, "description": item["description"],
+            "link": (f"https://www.bseindia.com/xml-data/corpfiling/AttachLive/{r['ATTACHMENTNAME']}"
+                     if r.get("ATTACHMENTNAME") else "https://www.bseindia.com/corporates/ann.html"),
+            "published_ist": published, "published_raw": str(r.get("NEWS_DT") or ""), "fetched_at_ist": fetched_at,
+        })
+    return out
+
+
+def dedup(items):
+    """NSE and BSE often carry the same filing: same company and category within DEDUP_MINUTES is kept once,
+    the earliest published."""
+    def t(i):
+        try:
+            return dt.datetime.strptime(i["published_ist"], "%Y-%m-%d %H:%M:%S")
+        except (TypeError, ValueError):
+            return None
+    kept = []
+    for i in sorted(items, key=lambda x: (t(x) is None, t(x) or dt.datetime.max)):
+        if i["feed"] == "bse" and i["symbol"] and any(
+                k["symbol"] == i["symbol"] and k["category"] == i["category"] and t(k) and t(i)
+                and abs((t(k) - t(i)).total_seconds()) <= DEDUP_MINUTES * 60 for k in kept):
+            continue
+        if i["feed"] != "bse" and i["symbol"]:
+            dup = next((k for k in kept if k["feed"] == "bse" and k["symbol"] == i["symbol"]
+                        and k["category"] == i["category"] and t(k) and t(i)
+                        and abs((t(k) - t(i)).total_seconds()) <= DEDUP_MINUTES * 60), None)
+            if dup:
+                continue
+        kept.append(i)
+    return kept
+
+
 def put_news(relative, body):
     """S3 copy under landing/news/, then the news volume (when pushing is on)."""
     bucket = os.environ["LANDING_BUCKET"]
@@ -179,6 +285,7 @@ def handler(event, context):
             failed[feed] = str(err)[:200]
     if len(failed) == len(FEEDS):
         raise RuntimeError(f"All NSE news feeds failed: {failed}")
+    items = dedup(items + bse_items(now, eq, fetched_at)) + extra_items(now, eq, fetched_at)
     body = "".join(json.dumps(i, ensure_ascii=False) + "\n" for i in items).encode()
     day = f"date={now:%Y-%m-%d}"
     ids = frozenset(i["id"] for i in items)

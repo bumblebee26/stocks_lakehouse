@@ -21,7 +21,8 @@ def esc(value):
     return html.escape(str(value), quote=False)
 
 
-def send(text):
+def send(text, buttons=None):
+    """buttons: optional rows of (label, callback_data) for an inline keyboard."""
     ssm = boto3.client("ssm")
     token = ssm.get_parameter(Name=os.environ["TELEGRAM_TOKEN_PARAM"], WithDecryption=True)["Parameter"]["Value"]
     chat_id = ssm.get_parameter(Name=os.environ["TELEGRAM_CHAT_ID_PARAM"], WithDecryption=True)["Parameter"]["Value"]
@@ -34,6 +35,8 @@ def send(text):
         "text": text,
         "parse_mode": "HTML",
         "disable_web_page_preview": True,
+        **({"reply_markup": {"inline_keyboard": [[{"text": t, "callback_data": c} for t, c in row]
+                                                 for row in buttons]}} if buttons else {}),
     }).encode()
     http_request(
         "POST",

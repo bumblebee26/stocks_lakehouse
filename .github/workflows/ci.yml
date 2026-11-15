@@ -28,7 +28,10 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Unit tests (fetchers, pre-market brief)
+      - name: Test libraries (pandas for the scanner's indicator maths)
+        run: python -m pip install --quiet "pandas>=2.2" "numpy>=2.0"
+
+      - name: Unit tests (fetchers, pre-market brief, scanner)
         run: python -m unittest discover -s tests -v
 
       - name: Pipeline wiring (tables defined, dependencies resolve)

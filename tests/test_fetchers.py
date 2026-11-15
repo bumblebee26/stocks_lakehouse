@@ -83,10 +83,32 @@ class NseFetch(unittest.TestCase):
     def test_writes_zip_to_dated_prefix(self):
         with mock.patch.object(nse, "http_get", return_value=b"PK\x03\x04data") as get:
             out = nse.handler({"date": "2026-11-06"}, None)
-        self.assertIn("20261106", get.call_args.args[0])
+        self.assertIn("20261106", get.call_args_list[0].args[0])
         self.assertEqual(out["written"], 1)
         self.assertEqual(self.s3.puts[0]["Key"],
                          "landing/nse/date=2026-11-06/bhavcopy_cm_20261106.csv.zip")
+        self.assertEqual(out["results"][0]["delivery"], "empty")     # the fake body isn't a delivery CSV
+
+    def test_delivery_file(self):
+        csv_text = ("SYMBOL, SERIES, DATE1, PREV_CLOSE, CLOSE_PRICE, TTL_TRD_QNTY, DELIV_QTY, DELIV_PER\n"
+                    "TCS, EQ, 06-Nov-2026, 2400, 2410, 1000000, 550000, 55.00\n"
+                    "SOMEBOND, N1, 06-Nov-2026, 100, 100, 10, -, -\n")
+        rows = nse.parse_delivery(csv_text)
+        self.assertEqual(rows, [{"symbol": "TCS", "series": "EQ", "deliv_qty": 550000.0, "deliv_per": 55.0}])
+        bodies = {"cm": b"PK\x03\x04data", "sec": csv_text.encode()}
+        with mock.patch.object(nse, "http_get", side_effect=lambda url, h: bodies["sec" if "sec_" in url else "cm"]):
+            out = nse.handler({"date": "2026-11-06"}, None)
+        self.assertEqual(out["results"][0]["delivery"], "written (1 rows)")
+        self.assertEqual(self.s3.puts[1]["Key"], "landing/nse_delivery/date=2026-11-06/delivery_20261106.jsonl")
+
+    def test_fno_list(self):
+        import nse_fo
+        text = ("UNDERLYING                    ,SYMBOL    ,NOV-26,DEC-26\n"
+                "Derivatives on Individual Securities,,,\n"
+                "NIFTY 50                      ,NIFTY     ,75,75\n"
+                "TATA CONSULTANCY SERV LT      ,TCS       ,175,175\n")
+        rows = nse_fo.parse(text, "2026-11-16")
+        self.assertEqual(rows, [{"symbol": "TCS", "underlying": "TATA CONSULTANCY SERV LT", "as_of": "2026-11-16"}])
 
     def test_holiday_404_is_not_an_error(self):
         with mock.patch.object(nse, "http_get", side_effect=common.NotFound("x")):

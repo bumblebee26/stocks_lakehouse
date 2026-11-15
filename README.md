@@ -25,6 +25,7 @@ covers the base view above, the full [architecture](docs/ARCHITECTURE_DIAGRAMS.m
 | Paper-trading analysis ([paper-trader](https://github.com/bumblebee26/paper-trader)) | `stocks.gold.trad*` tables + dashboard page "Intraday trading" (KPI tiles: net P&L, win rate, profit factor, expectancy, win/loss ratio; equity curve, daily P&L, drawdown, by setup and hour) | After the 15:45 IST export |
 | Dummy portfolio and holdings | `stocks.gold.portfolio_daily`, `stocks.gold.holdings_latest` + dashboard page "Portfolio" (value, return vs NIFTYBEES, fall from peak, allocation by pool and sector, holdings) | After the 15:45 IST export |
 | Your own trades from Telegram ([paper-trader](https://github.com/bumblebee26/paper-trader)) | `stocks.gold.custom_trades` (intraday and pool trades you placed, marked custom) | After each export |
+| Technical scanner (Nifty 200) | `stocks.gold.technical_screen` (today's strict picks, near-misses, levels), `stocks.gold.technical_indicators` (daily history), `stocks.gold.signal_performance` (how each signal did 5/10/20 days later vs NIFTYBEES), `stocks.gold.data_freshness` | After each NSE day |
 | News radar and swing shadow ([paper-trader](https://github.com/bumblebee26/paper-trader)) | `stocks.gold.intraday_universe` (Nifty 200 names the trader may trade, flagged on news/moves), `stocks.gold.swing_signals` (news breakouts), `stocks.gold.shadow_pools_daily` (shadow pools vs NIFTYBEES) | After each NSE day / daily |
 | Company quality and long-term picks | `stocks.gold.company_fundamentals`, `stocks.gold.longterm_candidates` (this week's 10 picks from the Nifty 200, max 2 per industry, with target weights and reasons) + dashboard page "Company quality" | Saturdays |
 
@@ -35,20 +36,21 @@ market breadth, unusual volume, Indian ADR premium vs USD/INR, and a global mark
 
 | Time | What happens |
 |---|---|
-| 04:30 Tue–Sat (07:30 retry) | Massive: previous US session (all US stocks), catching up missed days |
+| 11:00 Tue–Sat | Massive: previous US session (all US stocks; the free plan releases it ~10:30 IST), catching up missed days. History only |
+| 08:00 Mon | NSE F&O stock list |
 | 06:00 Tue–Sat | FRED: global indices, FX, VIX, oil, rates (rolling 21-day window) |
 | after each file | Databricks job refreshes the pipeline (file-arrival trigger), then rebuilds the dashboard summaries |
-| every minute 09:00–15:59, every 30 min otherwise (08:00–19:30) Mon–Fri | NSE company news (announcements, results, board meetings, corporate actions) |
-| 08:45 Mon–Fri | Pre-market brief to Telegram |
+| every minute 09:00–15:59, every 30 min otherwise (08:00–19:30) Mon–Fri | Company news: NSE (announcements, results, board meetings, corporate actions) every run; Business Standard markets, RBI and SEBI press releases at most every 4–5 minutes; BSE announcements built but off (`bse_news_enabled`) |
+| 08:45 Mon–Fri | Pre-market brief and the technical scanner to Telegram (India first; US figures live from Yahoo) |
 | 15:45 Mon–Fri | paper-trader pushes the day's trade journal to `landing/trades/` and a portfolio snapshot to `landing/portfolio/` |
-| 19:30 Mon–Fri | NSE: today's equities bhavcopy |
+| 19:30 Mon–Fri | NSE: today's equities bhavcopy and delivery file |
 | 23:30 Mon–Fri | paper-trader re-sends the last 4 days' journals, so evening 👍/👎 ratings reach `gold.track_record` |
 | 07:15 Sat | paper-trader pushes company financials to `landing/fundamentals/` and NSE's Nifty 200 list to `landing/index_members/` |
 
 ## Repository layout
 
 ```
-fetchers/          Lambda code: nse, massive, fred, news, sync, premarket (+ shared helpers). Python stdlib + boto3 only.
+fetchers/          Lambda code: nse (+ delivery), nse_fo, massive, fred, news, sync, premarket, yahoo (+ shared helpers). Python stdlib + boto3 only.
 pipeline/          Lakeflow pipeline in Python (bronze.py, silver.py, gold.py), SQL equivalents in comments
 sql/               dashboard_summary.sql: "In plain words" page summaries, run by the refresh job after the pipeline
 infra/

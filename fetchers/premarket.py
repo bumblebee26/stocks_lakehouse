@@ -1,124 +1,80 @@
-"""Pre-market brief for the Indian session, sent to Telegram at 08:45 IST Mon-Fri.
+"""Pre-market brief for the Indian session, sent to Telegram at 08:45 IST Mon-Fri, as two messages.
 
-Reads the gold/silver tables through Databricks SQL and builds one message:
+1) The brief, India first:
+  Data check        each source's date against the date it should have (from the market's own calendar: the
+                    dates of Yahoo's Nifty 50 and S&P 500 daily candles). A source that is missing a day that
+                    wasn't a holiday is LEFT OUT and named; an older day is never used in its place. Holidays
+                    are stated.
+  Key takeaways     India VIX and the risk per trade it implies (1%; 0.75% at 20+; 0.5% at 30+), the Nifty 50
+                    regime (NIFTYBEES vs its 20/50/200-day averages), the scanner's count, and global markets
+                    in a supporting role: S&P 500, Nasdaq, Brent, USD/INR, live from Yahoo.
+  Global shock      only when the S&P 500 moved 2% or more: one line, with what usually followed in India.
+  Indian ADRs       New York close of INFY, WIT, HDB, IBN, RDY: evidence for those five stocks only.
+  Unusual volume    NSE's last session (only when that session's file has arrived).
+2) The technical scanner (Nifty 200): up to 10 strict picks (all six filters; never forced), the closest
+   near-misses with the filter each missed, the Nifty 50 regime, and the lists' dates and sources. Each pick has
+   indicative levels, NSE and Groww links, and a "Swing buy" button the paper trader confirms before acting.
 
-  Key takeaways      4 one-line bullets: US, world, risk, India
-  US session         index ETFs (table) + breadth
-  World markets      Asia, Europe, Americas, EM: 1-day and 5-day change (table)
-  Rates, FX, oil     VIX, US 10Y, Brent, WTI, dollar, USD/INR, USD/JPY, EUR/USD (table)
-  India setup        what usually follows, markets most linked to India's open,
-                     ADRs overnight (table), unusual volume (table)
-
-Telegram has no table markup, so tables are <pre> blocks (monospaced) kept narrow
-enough for a phone screen.
-
-Event: {} for a normal run, {"dry_run": true} to return the message without sending.
+Telegram has no table markup, so tables are <pre> blocks kept narrow enough for a phone.
+Event: {} for a normal run, {"dry_run": true} to return the messages without sending.
 """
 
 import datetime as dt
 import os
+import re
 from zoneinfo import ZoneInfo
 
 import databricks_sql
 import telegram
+import yahoo
 from common import log
 from telegram import esc
 
 IST = ZoneInfo("Asia/Kolkata")
-US_PROXY = os.environ.get("US_PROXY", "SPY")
 INDIA_PROXY = os.environ.get("INDIA_PROXY", "NIFTYBEES")
-BIG_MOVE_PCT = float(os.environ.get("BIG_MOVE_PCT", "1.0"))
-UNUSUAL_TOP_N = int(os.environ.get("UNUSUAL_TOP_N", "10"))
+UNUSUAL_TOP_N = int(os.environ.get("UNUSUAL_TOP_N", "8"))
+SHOCK_PCT = float(os.environ.get("SHOCK_PCT", "2.0"))
+STRICT_MAX = 10
+NEAR_MAX = 5
 
-US_INDEX_ETFS = [(US_PROXY, "S&P 500"), ("QQQ", "Nasdaq 100"), ("DIA", "Dow"), ("IWM", "Russell 2000")]
 ADRS = [("INFY", "INFY"), ("WIT", "WIPRO"), ("HDB", "HDFCBANK"), ("IBN", "ICICIBANK"), ("RDY", "DRREDDY")]
+CALENDARS = {"NSE": "^NSEI", "US": "^GSPC"}
+LIVE = [("^GSPC", "S&P 500"), ("^IXIC", "Nasdaq"), ("BZ=F", "Brent"), ("INR=X", "USD/INR"),
+        ("^INDIAVIX", "India VIX")] + [(a, a) for a, _ in ADRS]
 
-# World markets table: (instrument, label). Japan is the Nikkei index; the rest are US-listed
-# country ETFs (USD), which trade during US hours.
-WORLD = [
-    ("NIKKEI225", "Japan"),
-    ("EWY", "Korea"),
-    ("FXI", "China"),
-    ("EWH", "Hong Kong"),
-    ("EWT", "Taiwan"),
-    ("VGK", "Europe"),
-    ("EWG", "Germany"),
-    ("EWU", "UK"),
-    ("EWZ", "Brazil"),
-    ("EEM", "Emerging mkts"),
-    ("INDA", "India (INDA)"),
-]
-
-# Rates, FX & commodities table: (instrument, label, how to show the change)
-MACRO = [
-    ("VIXCLS", "VIX", "pts"),
-    ("DGS10", "US 10Y", "bp"),
-    ("DCOILBRENTEU", "Brent", "pct"),
-    ("DCOILWTICO", "WTI", "pct"),
-    ("DTWEXBGS", "Dollar idx", "pct"),
-    ("DEXINUS", "USD/INR", "pct"),
-    ("DEXJPUS", "USD/JPY", "pct"),
-    ("DEXUSEU", "EUR/USD", "pct"),
-]
-
-BUCKET_PHRASE = {"US up big": "big US up day", "US down big": "big US down day", "US flat": "flat US day"}
-
-
-def _in_list(symbols):
-    return ", ".join(f"'{s}'" for s in symbols)  # symbols are constants from this file
-
+# Lakehouse sources the brief uses: (name in gold.data_freshness, label, calendar it follows)
+FRESHNESS = [("nse_prices", "NSE prices", "NSE"), ("nse_delivery", "NSE delivery %", "NSE"),
+             ("technical_scanner", "Scanner", "NSE")]
 
 QUERIES = {
-    "us_bars": f"""
-        SELECT b.trade_date, b.symbol, b.close, (b.close / b.prev_close - 1) * 100 AS return_pct
-        FROM stocks.silver.daily_bars b
-        WHERE b.market = 'US'
-          AND b.trade_date = (SELECT max(trade_date) FROM stocks.silver.trading_days WHERE market = 'US')
-          AND b.symbol IN ({_in_list([s for s, _ in US_INDEX_ETFS] + [a for a, _ in ADRS])})
-    """,
-    "us_breadth": """
-        SELECT trade_date, advances, declines, pct_above_ma20, median_return_pct
-        FROM stocks.gold.market_breadth WHERE market = 'US'
-        ORDER BY trade_date DESC LIMIT 1
-    """,
-    "global": f"""
-        SELECT instrument, obs_date, value, change_pct, change_5d_pct, change_abs
-        FROM stocks.gold.global_snapshot
-        WHERE instrument IN ({_in_list([i for i, _ in WORLD] + [i for i, _, _ in MACRO])})
-    """,
-    "linked": """
-        SELECT instrument, corr_with_india_gap, sessions
-        FROM stocks.gold.india_vs_global
-        WHERE asset_class IN ('equity_index', 'equity_etf') AND instrument NOT IN ('INDA', 'SP500', 'DJIA', 'NASDAQCOM')
-        ORDER BY abs(corr_with_india_gap) DESC
-        LIMIT 3
-    """,
+    "freshness": "SELECT source, CAST(latest_date AS STRING) AS latest_date FROM stocks.gold.data_freshness",
     "summary": "SELECT * FROM stocks.gold.nifty_after_us_moves_summary",
-    "study_start": "SELECT min(india_date) AS first_day FROM stocks.gold.nifty_after_us_moves",
     "unusual_in": f"""
-        SELECT symbol, trade_date, close, return_pct, volume_ratio
+        SELECT symbol, CAST(trade_date AS STRING) AS trade_date, close, return_pct, volume_ratio
         FROM stocks.gold.unusual_volume
         WHERE market = 'IN'
           AND trade_date = (SELECT max(trade_date) FROM stocks.silver.trading_days WHERE market = 'IN')
         ORDER BY volume_ratio DESC LIMIT {UNUSUAL_TOP_N}
     """,
+    "screen": """
+        SELECT symbol, company, CAST(trade_date AS STRING) AS trade_date, list_type, rank, close, setup, stance,
+               rsi14, macd, macd_signal, macd_cross_up, adx14, adx_ok, above_mas, close > sma20 AS above20,
+               close > sma50 AS above50, close > sma200 AS above200, vol_ratio, deliv_per, fno, entry_low,
+               entry_high, trigger, stop, stop_basis, target1, target1_basis, target2, rr, misses, filters_passed,
+               CAST(nifty200_as_of AS STRING) AS nifty200_as_of, CAST(fno_as_of AS STRING) AS fno_as_of,
+               regime_close, regime_rsi, regime_sma20, regime_sma50, regime_sma200, regime_adx
+        FROM stocks.gold.technical_screen
+        WHERE list_type IN ('strict', 'near-miss')
+        ORDER BY list_type DESC, rank
+    """,
 }
 
-# Friendly names for the "unavailable" warning when a query fails.
-SECTION_NAMES = {
-    "us_bars": "US session and ADRs",
-    "us_breadth": "US breadth",
-    "global": "world markets",
-    "linked": "markets linked to India",
-    "summary": "what usually follows",
-    "study_start": "what usually follows",
-    "unusual_in": "India unusual volume",
-}
+SECTION_NAMES = {"freshness": "data check", "summary": "what usually follows a shock",
+                 "unusual_in": "India unusual volume", "screen": "technical scanner"}
 
 
 def fetch_all(queries):
-    """Run every query; a failed one becomes [] and is reported, so one missing
-    table (e.g. a new gold table before its first pipeline run) can't stop the brief."""
+    """Run every query; a failed one becomes [] and is reported, so one missing table can't stop the brief."""
     data, failed = {}, []
     for name, sql in queries.items():
         try:
@@ -130,6 +86,72 @@ def fetch_all(queries):
     return data, failed
 
 
+def fetch_live(today):
+    """Yahoo: each market's last session date (the calendar) and the live figures. Missing ones are left out."""
+    sessions, live = {}, {}
+    for mkt, sym in CALENDARS.items():
+        try:
+            last, _ = yahoo.last_session(sym, today)
+            sessions[mkt] = last["date"] if last else None
+        except Exception as err:  # noqa: BLE001 - fall back to the previous weekday
+            log.warning("calendar %s unavailable: %s", sym, err)
+            sessions[mkt] = None
+    for sym, _ in LIVE:
+        try:
+            ch = yahoo.change(sym, today)
+        except Exception as err:  # noqa: BLE001 - that figure is left out
+            log.warning("quote %s unavailable: %s", sym, err)
+            ch = None
+        if ch:
+            live[sym] = ch
+    return sessions, live
+
+
+# ---------------------------------------------------------------------------
+# Calendar and freshness
+# ---------------------------------------------------------------------------
+def previous_weekday(d):
+    d -= dt.timedelta(days=1)
+    while d.weekday() >= 5:
+        d -= dt.timedelta(days=1)
+    return d
+
+
+def expected_dates(today, sessions):
+    """{market: (expected session date, [weekday holidays between it and today], from_calendar)}."""
+    out = {}
+    for mkt in CALENDARS:
+        iso = sessions.get(mkt)
+        if iso:
+            exp = dt.date.fromisoformat(iso)
+            holidays, d = [], previous_weekday(today)
+            while d > exp:
+                holidays.append(d)
+                d = previous_weekday(d)
+            out[mkt] = (exp, holidays, True)
+        else:
+            out[mkt] = (previous_weekday(today), [], False)
+    return out
+
+
+def freshness(data, expected):
+    """{source: {'label', 'latest', 'expected', 'fresh'}} for the lakehouse sources the brief uses."""
+    latest = {r["source"]: r["latest_date"] for r in data.get("freshness", [])}
+    out = {}
+    for src, label, mkt in FRESHNESS:
+        exp = expected[mkt][0]
+        got = latest.get(src)
+        out[src] = {"label": label, "latest": got, "expected": exp,
+                    "fresh": bool(got) and dt.date.fromisoformat(got[:10]) >= exp}
+    return out
+
+
+def fresh_live(live, sym, expected_day):
+    """A live Yahoo figure only counts if it is from the session it should be from."""
+    r = live.get(sym)
+    return r if r and dt.date.fromisoformat(r["date"]) >= expected_day else None
+
+
 # ---------------------------------------------------------------------------
 # Formatting helpers
 # ---------------------------------------------------------------------------
@@ -138,19 +160,19 @@ def pct(value, digits=2):
 
 
 def num(value, digits=2, sign=True):
-    """Number for a table cell: '+1.42', '-0.40', '—' for missing."""
     if value is None:
         return "—"
     return f"{value:+.{digits}f}" if sign else f"{value:,.{digits}f}"
 
 
-def nice_date(iso, fmt="%a %d %b"):
-    return dt.date.fromisoformat(iso).strftime(fmt) if iso else "n/a"
+def nice_date(d, fmt="%a %d %b"):
+    if not d:
+        return "n/a"
+    d = dt.date.fromisoformat(d[:10]) if isinstance(d, str) else d
+    return d.strftime(fmt)
 
 
 def table(headers, rows, align):
-    """Monospaced table in a Telegram <pre> block. align: 'l' or 'r' per column.
-    headers=None gives a plain two-column list without a header row."""
     cells = ([headers] if headers else []) + rows
     widths = [max(len(str(r[i])) for r in cells) for i in range(len(align))]
 
@@ -165,191 +187,245 @@ def table(headers, rows, align):
     return "<pre>" + esc("\n".join(lines)) + "</pre>"
 
 
-def us_move_bucket(return_pct):
-    if return_pct is None:
-        return None
-    if return_pct >= BIG_MOVE_PCT:
-        return "US up big"
-    if return_pct <= -BIG_MOVE_PCT:
-        return "US down big"
-    return "US flat"
+def vix_risk(level):
+    """India VIX -> (regime, risk per trade %)."""
+    if level >= 30:
+        return "high", 0.5
+    if level >= 20:
+        return "elevated", 0.75
+    if level >= 15:
+        return "normal", 1.0
+    return "calm", 1.0
 
 
-def vix_regime(level):
-    if level is None:
-        return ""
-    if level < 15:
-        return "calm"
-    if level < 20:
-        return "normal"
-    if level < 30:
-        return "elevated"
-    return "high"
+def rs(x):
+    return "—" if x is None else f"{x:,.2f}" if x < 1000 else f"{x:,.1f}"
 
 
-def macro_change(row, kind):
-    if kind == "bp":
-        return "—" if row["change_abs"] is None else f"{row['change_abs'] * 100:+.0f}bp"
-    if kind == "pts":
-        return num(row["change_abs"], 1)
-    return "—" if row["change_pct"] is None else f"{row['change_pct']:+.1f}%"
+def groww_slug(company):
+    """Groww names stock pages after the company: 'Dr. Reddy's Laboratories Ltd.' -> 'dr-reddys-laboratories-ltd'."""
+    s = (company or "").lower().replace("&", " ").replace("'", "").replace("’", "").replace(".", " ")
+    s = re.sub(r"\blimited\b", "ltd", s)
+    return re.sub(r"[^a-z0-9]+", "-", s).strip("-")
 
 
-def macro_value(row, kind):
-    value = row["value"]
-    if kind == "bp":
-        return f"{value:.2f}%"
-    if abs(value) < 10:  # e.g. EUR/USD 1.0712: two decimals would hide the move
-        return f"{value:.4f}"
-    return f"{value:,.2f}"
+def links(symbol, company):
+    nse = f'<a href="https://www.nseindia.com/get-quotes/equity?symbol={esc(symbol).replace("&amp;", "%26")}">NSE</a>'
+    slug = groww_slug(company)
+    return nse + (f' · <a href="https://groww.in/stocks/{slug}">Groww</a>' if slug else "")
 
 
 # ---------------------------------------------------------------------------
-# Sections
+# Message 1: the brief
 # ---------------------------------------------------------------------------
-def takeaways(data, bars, glob, stats, bucket):
-    out = []
-    spy, qqq = bars.get(US_PROXY), bars.get("QQQ")
-    if spy:
-        nas = f", Nasdaq {pct(qqq['return_pct'])}" if qqq else ""
-        out.append(f"<b>US:</b> S&amp;P {pct(spy['return_pct'])}{nas}, a {BUCKET_PHRASE[bucket]}.")
-
-    world = [(label, glob[i]["change_pct"]) for i, label in WORLD
-             if i in glob and glob[i]["change_pct"] is not None and i != "INDA"]
-    if world:
-        low = min(world, key=lambda x: x[1])
-        high = max(world, key=lambda x: x[1])
-        out.append(f"<b>World:</b> weakest {esc(low[0])} {pct(low[1])}, strongest {esc(high[0])} {pct(high[1])}.")
-
-    risk = []
-    if "VIXCLS" in glob:
-        v = glob["VIXCLS"]
-        change = "" if v["change_abs"] is None else f" ({v['change_abs']:+.1f})"
-        risk.append(f"VIX {v['value']:.1f}{change}, {vix_regime(v['value'])}")
-    if "DCOILBRENTEU" in glob:
-        risk.append(f"Brent ${glob['DCOILBRENTEU']['value']:.0f}")
-    if "DEXINUS" in glob:
-        risk.append(f"USD/INR {glob['DEXINUS']['value']:.2f}")
-    if risk:
-        out.append("<b>Risk:</b> " + " · ".join(risk) + ".")
-
-    if stats and stats["sessions"]:
-        out.append(f"<b>India:</b> after similar US days, {esc(INDIA_PROXY)} opened "
-                   f"{pct(stats['avg_india_gap_pct'])} on average.")
-    return out
-
-
-def build_message(data, today, failed=()):
-    bars = {r["symbol"]: r for r in data["us_bars"]}
-    glob = {r["instrument"]: r for r in data.get("global", [])}
-    us_date = data["us_bars"][0]["trade_date"] if data["us_bars"] else None
-    proxy_return = bars.get(US_PROXY, {}).get("return_pct")
-    bucket = us_move_bucket(proxy_return)
-    stats = next((r for r in data["summary"] if r["us_move"] == bucket), None)
-
-    lines = [f"📊 <b>Pre-market brief</b> · {today:%a %d %b %Y}"]
-    if us_date:
-        lines.append(f"<i>Markets as of the {nice_date(us_date)} close</i>")
-    lines.append("")
-
+def data_check(expected, fresh, live, failed):
+    lines = []
+    for mkt, name in (("NSE", "NSE"), ("US", "US")):
+        exp, hols, from_cal = expected[mkt]
+        if hols:
+            lines.append(f"🗓 {name} closed {', '.join(f'{d:%a %d %b}' for d in reversed(hols))} (holiday); "
+                         f"last session {exp:%a %d %b}.")
+        if not from_cal:
+            lines.append(f"⚠️ {name} calendar unavailable; assuming {exp:%a %d %b} was a session.")
+    ok = [f"{f['label']} {nice_date(f['latest'])}" for f in fresh.values() if f["fresh"]]
+    if ok:
+        lines.append("✅ " + " · ".join(ok) + f" · live quotes {dt.datetime.now(IST):%H:%M} IST")
+    for f in fresh.values():
+        if not f["fresh"] and "freshness" not in failed:
+            have = f"latest {nice_date(f['latest'])}" if f["latest"] else "none yet"
+            lines.append(f"⚠️ {f['label']} for {f['expected']:%a %d %b} hasn't arrived ({have}): left out, "
+                         "no older day used.")
+    us_exp = expected["US"][0]
+    missing = [label for sym, label in LIVE[:5] if not fresh_live(live, sym, us_exp if sym != "^INDIAVIX"
+                                                                    else expected["NSE"][0])]
+    if missing:
+        lines.append(f"⚠️ Not available this morning: {esc(', '.join(missing))}: left out.")
     if failed:
-        missing = sorted({SECTION_NAMES.get(n, n) for n in failed})
-        lines += [f"⚠️ Unavailable today: {esc(', '.join(missing))} (check the Databricks pipeline).", ""]
-    expected = today - dt.timedelta(days=1)
-    while expected.weekday() >= 5:
-        expected -= dt.timedelta(days=1)
-    if us_date and dt.date.fromisoformat(us_date) < expected:
-        lines += [f"⚠️ US data for {expected:%a %d %b} hasn't arrived (or US markets were closed); "
-                  f"the US figures below are from {nice_date(us_date)}.", ""]
+        names = sorted({SECTION_NAMES.get(n, n) for n in failed})
+        lines.append(f"⚠️ Unavailable today: {esc(', '.join(names))} (check the Databricks pipeline).")
+    return lines
 
-    # Key takeaways
-    bullets = takeaways(data, bars, glob, stats, bucket) if bucket else []
+
+def regime_words(r):
+    if not r or r.get("regime_close") is None:
+        return None
+    c = r["regime_close"]
+    above = [n for n, k in (("20", "regime_sma20"), ("50", "regime_sma50"), ("200", "regime_sma200"))
+             if r.get(k) is not None and c > r[k]]
+    if len(above) == 3:
+        where = "above its 20/50/200-day averages (uptrend)"
+    elif not above:
+        where = "below its 20/50/200-day averages (downtrend): fewer longs"
+    else:
+        where = f"above only its {'/'.join(above)}-day average{'s' if len(above) > 1 else ''} (mixed)"
+    rsi = f", RSI {r['regime_rsi']:.0f}" if r.get("regime_rsi") is not None else ""
+    adx = f", ADX {r['regime_adx']:.0f}" if r.get("regime_adx") is not None else ""
+    return f"Nifty 50 ({esc(INDIA_PROXY)} {rs(c)}) {where}{rsi}{adx}."
+
+
+def build_brief(data, live, expected, fresh, today, failed=()):
+    us_exp, nse_exp = expected["US"][0], expected["NSE"][0]
+    lines = [f"📊 <b>Pre-market brief</b> · {today:%a %d %b %Y}",
+             f"<i>NSE last session {nse_exp:%a %d %b} · US last session {us_exp:%a %d %b}</i>", ""]
+    lines += data_check(expected, fresh, live, failed) + [""]
+
+    screen = data.get("screen", []) if fresh["technical_scanner"]["fresh"] else []
+    strict = [r for r in screen if r["list_type"] == "strict"]
+    near = [r for r in screen if r["list_type"] == "near-miss"]
+
+    bullets = []
+    vix = fresh_live(live, "^INDIAVIX", nse_exp)
+    if vix:
+        regime, risk = vix_risk(vix["close"])
+        bullets.append(f"<b>Risk:</b> India VIX {vix['close']:.1f} ({vix['change_pct']:+.1f}%), {regime}: "
+                       f"{risk:g}% of the pool at risk per trade.")
+    reg = regime_words(screen[0]) if screen else None
+    if reg:
+        bullets.append(f"<b>India:</b> {reg}")
+    if fresh["technical_scanner"]["fresh"] and "screen" not in failed:
+        bullets.append(f"<b>Scanner:</b> {len(strict)} strict pick{'s' if len(strict) != 1 else ''}, "
+                       f"{len(near)} near-miss{'es' if len(near) != 1 else ''} (next message).")
+    glob = []
+    for sym, label in (("^GSPC", "S&amp;P"), ("^IXIC", "Nasdaq")):
+        r = fresh_live(live, sym, us_exp)
+        if r:
+            glob.append(f"{label} {pct(r['change_pct'])}")
+    for sym, label, fmt in (("BZ=F", "Brent", "${:.0f}"), ("INR=X", "USD/INR", "{:.2f}")):
+        r = fresh_live(live, sym, us_exp)
+        if r:
+            glob.append(f"{label} {fmt.format(r['close'])} ({r['change_pct']:+.1f}%)")
+    if glob:
+        bullets.append(f"<b>Global</b> (supporting only, {us_exp:%a}): " + " · ".join(glob) + ".")
     if bullets:
         lines += ["🔎 <b>Key takeaways</b>", *[f"• {b}" for b in bullets], ""]
 
-    # US session
-    us_rows = [[label, num(bars[s]["return_pct"])] for s, label in US_INDEX_ETFS if s in bars]
-    lines.append(f"🇺🇸 <b>US session</b> · {nice_date(us_date)}" if us_date else "🇺🇸 <b>US session</b>")
-    if us_rows:
-        lines.append(table(["Index (ETF)", "1D %"], us_rows, "lr"))
-    else:
-        lines.append("No US index data.")
-    if data["us_breadth"]:
-        b = data["us_breadth"][0]
-        lines.append(f"Breadth: {int(b['advances']):,} up / {int(b['declines']):,} down · "
-                     f"{b['pct_above_ma20']:.0f}% above 20-day avg")
-    lines.append("")
+    spx = fresh_live(live, "^GSPC", us_exp)
+    if spx and abs(spx["change_pct"]) >= SHOCK_PCT:
+        side = "down" if spx["change_pct"] < 0 else "up"
+        stats = next((r for r in data.get("summary", []) if r["us_move"] == f"US {side} big"), None)
+        hist = (f" After big US {side} days, {esc(INDIA_PROXY)} opened {pct(stats['avg_india_gap_pct'])} on "
+                f"average ({int(stats['sessions'])} sessions)." if stats and stats.get("sessions") else "")
+        lines += [f"🌐 <b>Global shock:</b> S&amp;P 500 {pct(spx['change_pct'])} on {us_exp:%a}. Expect a "
+                  f"{'weak' if side == 'down' else 'strong'} open; let the first 15 minutes settle.{hist}", ""]
 
-    # World markets
-    stale_marks = False
-    world_rows = []
-    for i, label in WORLD:
-        r = glob.get(i)
-        if not r:
-            continue
-        stale = us_date is not None and r["obs_date"] < us_date
-        stale_marks |= stale
-        world_rows.append([label + ("*" if stale else ""), num(r["change_pct"]), num(r.get("change_5d_pct"))])
-    if world_rows:
-        lines += ["🌏 <b>World markets</b>", table(["Market", "1D %", "5D %"], world_rows, "lrr")]
-        note = "Japan: Nikkei 225. Others: US-listed country ETFs."
-        if stale_marks:
-            note += " * = earlier session."
-        lines += [f"<i>{note}</i>", ""]
-
-    # Rates, FX & commodities
-    macro_rows = [[label, macro_value(glob[i], kind), macro_change(glob[i], kind), nice_date(glob[i]["obs_date"], "%d %b")]
-                  for i, label, kind in MACRO if i in glob]
-    if macro_rows:
-        lines += ["💱 <b>Rates, FX &amp; oil</b>", table(["", "Last", "Chg", "As of"], macro_rows, "lrrr"), ""]
-
-    # India setup
-    lines.append(f"🇮🇳 <b>India setup</b> ({esc(INDIA_PROXY)})")
-    if stats and stats["sessions"]:
-        since = nice_date(data["study_start"][0]["first_day"], "%b %Y") if data["study_start"] else "start"
-        lines.append(f"After a <i>{BUCKET_PHRASE[bucket]}</i> ({int(stats['sessions'])} sessions since {since}):")
-        lines.append(table(None, [
-            ["Avg opening gap", pct(stats["avg_india_gap_pct"])],
-            ["Closed higher", f"{stats['pct_india_up_days']:.0f}% of days"],
-            ["Gap same way as US", f"{stats['pct_gap_same_direction_as_us']:.0f}% of days"],
-        ], "lr"))
-    else:
-        lines.append("Not enough history for this kind of US day yet.")
-
-    linked = [r for r in data.get("linked", []) if r["instrument"] in glob]
-    if linked:
-        labels = dict(WORLD)
-        parts = [f"{esc(labels.get(r['instrument'], r['instrument']))} {pct(glob[r['instrument']]['change_pct'], 1)} "
-                 f"(r={r['corr_with_india_gap']:.2f})" for r in linked]
-        lines.append("Most linked to India's open: " + " · ".join(parts))
-    lines.append("")
-
-    # ADRs
-    adr_rows = [[adr, nse, num(bars[adr]["return_pct"])] for adr, nse in ADRS if adr in bars]
+    adr_rows = [[adr, nse, num(r["change_pct"])] for adr, nse in ADRS if (r := fresh_live(live, adr, us_exp))]
     if adr_rows:
-        lines += ["🏦 <b>Indian ADRs</b> (New York close)", table(["ADR", "NSE", "1D %"], adr_rows, "llr"), ""]
+        lines += [f"🏦 <b>Indian ADRs</b> (New York, {us_exp:%a}) · evidence for these stocks only",
+                  table(["ADR", "NSE", "1D %"], adr_rows, "llr"), ""]
 
-    # Unusual volume
-    unusual = data["unusual_in"]
-    in_date = unusual[0]["trade_date"] if unusual else None
-    lines.append(f"🔥 <b>Unusual volume</b> · NSE {nice_date(in_date)}" if in_date else "🔥 <b>Unusual volume</b> · NSE")
-    if unusual:
-        rows = [[str(n), r["symbol"], f"{r['volume_ratio']:.1f}×", num(r["return_pct"], 1)]
-                for n, r in enumerate(unusual, 1)]
-        lines.append(table(["#", "Symbol", "Volume", "1D %"], rows, "llrr"))
-    else:
-        lines.append("None above the threshold.")
+    if fresh["nse_prices"]["fresh"]:
+        unusual = [r for r in data.get("unusual_in", []) if r["trade_date"][:10] >= nse_exp.isoformat()]
+        lines.append(f"🔥 <b>Unusual volume</b> · NSE {nse_exp:%a %d %b}")
+        if unusual:
+            rows = [[str(n), r["symbol"], f"{r['volume_ratio']:.1f}×", num(r["return_pct"], 1)]
+                    for n, r in enumerate(unusual, 1)]
+            lines.append(table(["#", "Symbol", "Volume", "1D %"], rows, "llrr"))
+        else:
+            lines.append("None above the threshold.")
+        lines.append("")
 
-    lines += ["", "<i>Sources: NSE, Massive, FRED. Historical tendencies, not advice.</i>"]
+    lines.append("<i>Sources: NSE (bhavcopy), Yahoo Finance (live quotes, market calendars). "
+                 "Tendencies and indicative figures, not advice.</i>")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Message 2: the technical scanner
+# ---------------------------------------------------------------------------
+def _pick_lines(n, r):
+    dma = "/".join(k for k, f in (("20", "above20"), ("50", "above50"), ("200", "above200")) if r.get(f)) or "none"
+    macd = f"MACD {r['macd']:.2f}/{r['macd_signal']:.2f}" + (" crossed ↑" if r.get("macd_cross_up") else "")
+    deliv = f" · Deliv {r['deliv_per']:.0f}%" if r.get("deliv_per") is not None else ""
+    out = [f"<b>{n}. {esc(r['symbol'])}</b> Rs {rs(r['close'])} · {esc(r['setup'])} · <b>{esc(r['stance'])}</b>",
+           f"RSI {r['rsi14']:.0f} · {macd} · ADX {r['adx14']:.0f}{' rising' if r.get('adx_ok') else ''} · above DMA {dma} · Vol {r['vol_ratio']:.1f}×"
+           f"{deliv} · {'F&amp;O' if r.get('fno') else 'not F&amp;O'}"]
+    if r.get("entry_high") is not None and r.get("stop") is not None:
+        trig = f" · trigger {rs(r['trigger'])}" if r.get("trigger") is not None else ""
+        out.append(f"Entry {rs(r['entry_low'])}–{rs(r['entry_high'])}{trig} · stop {rs(r['stop'])} "
+                   f"({esc(r['stop_basis'])}) · T1 {rs(r['target1'])} · T2 {rs(r['target2'])} · R:R {r['rr']:.1f}")
+    out.append(links(r["symbol"], r.get("company")))
+    return out
+
+
+def build_scanner(data, expected, fresh, failed=()):
+    """(message, buttons). Always says something, including when the list is empty or the data is missing."""
+    nse_exp = expected["NSE"][0]
+    head = f"🧭 <b>Technical scanner</b> · Nifty 200 · NSE close {nse_exp:%a %d %b}"
+    if "screen" in failed:
+        return f"{head}\n⚠️ Scanner unavailable today (check the Databricks pipeline).", []
+    f = fresh["technical_scanner"]
+    if not f["fresh"]:
+        have = nice_date(f["latest"]) if f["latest"] else "none yet"
+        return (f"{head}\n⚠️ The scan for {nse_exp:%a %d %b} hasn't run (latest {have}). Left out today; an "
+                f"older day's scan isn't used."), []
+    screen = data.get("screen", [])
+    strict = [r for r in screen if r["list_type"] == "strict"][:STRICT_MAX]
+    near = [r for r in screen if r["list_type"] == "near-miss"][:NEAR_MAX]
+    lines = [head]
+    reg = regime_words(screen[0]) if screen else None
+    if reg:
+        lines.append(f"<i>{reg}</i>")
+    lines.append("")
+    if strict:
+        lines.append("<b>Strict picks</b> (all six: above 20/50/200 DMA, RSI 50-65, MACD above signal, "
+                     "ADX &gt;20 rising, volume ≥1.5×, R:R ≥2)")
+        for n, r in enumerate(strict, 1):
+            lines += _pick_lines(n, r) + [""]
+    else:
+        lines += ["No stock passed all six filters today; none forced.", ""]
+    if near:
+        lines.append("<b>Near-misses</b> (watch, don't act)")
+        for r in near:
+            lines.append(f"• {esc(r['symbol'])} Rs {rs(r['close'])}, {esc(r['stance'])}: missed "
+                         f"{esc(r['misses'] or 'not extended check')}")
+        lines.append("")
+    asof = screen[0] if screen else {}
+    lines.append(f"<i>Levels are indicative (swing points and ATR), never a guaranteed return. No chasing: RSI "
+                 f"&gt;70, MFI &gt;80 or &gt;8% above the 20 DMA is wait/avoid. Lists: Nifty 200 as of "
+                 f"{nice_date(asof.get('nifty200_as_of'), '%d %b %Y')} (niftyindices.com), F&amp;O as of "
+                 f"{nice_date(asof.get('fno_as_of'), '%d %b %Y')} (NSE fo_mktlots). Prices: NSE bhavcopy, "
+                 f"split/bonus-adjusted; delivery: NSE sec_bhavdata_full.</i>")
+    buttons = []
+    for r in strict:
+        if r.get("stop") is None or r.get("target2") is None:
+            continue
+        data_ = f"sw:{r['symbol']}:{r['stop']:.2f}:{r['target2']:.2f}"
+        if len(data_.encode()) <= 64:
+            buttons.append([(f"Swing buy {r['symbol']} (asks first)", data_)])
+    return "\n".join(lines), buttons
+
+
+def chunks(text, limit=telegram.MAX_LENGTH - 96):
+    """Split a long message at blank lines (between picks) so no part is cut mid-tag."""
+    parts, cur = [], ""
+    for block in text.split("\n\n"):
+        add = (cur + "\n\n" + block) if cur else block
+        if len(add) > limit and cur:
+            parts.append(cur)
+            cur = block
+        else:
+            cur = add
+    parts.append(cur)
+    return parts
 
 
 def handler(event, context):
     event = event or {}
+    today = dt.datetime.now(IST).date()
     data, failed = fetch_all(QUERIES)
-    message = build_message(data, dt.datetime.now(IST).date(), failed)
+    sessions, live = fetch_live(today)
+    expected = expected_dates(today, sessions)
+    fresh = freshness(data, expected)
+    brief = build_brief(data, live, expected, fresh, today, failed)
+    scan, buttons = build_scanner(data, expected, fresh, failed)
     if event.get("dry_run"):
-        log.info("Dry run; message not sent:\n%s", message)
-        return {"sent": False, "failed_queries": failed, "message": message}
-    telegram.send(message)
-    return {"sent": True, "failed_queries": failed, "chars": len(message)}
+        log.info("Dry run; messages not sent:\n%s\n\n%s", brief, scan)
+        return {"sent": False, "failed_queries": failed, "message": brief, "scanner": scan, "buttons": buttons}
+    telegram.send(brief)
+    parts = chunks(scan)
+    for i, part in enumerate(parts):
+        last = i == len(parts) - 1
+        telegram.send(part if len(parts) == 1 else f"{part}\n<i>({i + 1}/{len(parts)})</i>",
+                      buttons=buttons if last else None)
+    return {"sent": True, "failed_queries": failed, "chars": len(brief) + len(scan),
+            "scanner_parts": len(parts), "swing_buttons": len(buttons)}

@@ -10,6 +10,8 @@
   stocks.silver.portfolio_pools     paper-trader pools per day (capital, cash, equity)
   stocks.silver.portfolio_holdings  paper-trader holdings per day
   stocks.silver.shadow_pools   paper-trader shadow pools per day (rules tested on paper; never in portfolio totals)
+  stocks.silver.nse_delivery   delivery % per NSE stock per day
+  stocks.silver.fno_symbols    the latest NSE F&O stock list (with its date)
   stocks.silver.index_members  the latest Nifty 200 list: symbol, company, industry
 
 Materialized views: they recompute incrementally where possible, and make
@@ -531,3 +533,38 @@ def index_members():
     latest = raw.agg(F.max("as_of").alias("as_of"))
     return (raw.join(latest, "as_of").dropDuplicates(["symbol"])
             .select("symbol", "company", "industry", "isin", "index_name", "as_of"))
+
+
+# ---------------------------------------------------------------------------
+# NSE delivery % and the F&O list
+# ---------------------------------------------------------------------------
+# SQL equivalent:
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.silver.nse_delivery AS
+#   SELECT DISTINCT trade_date, symbol, series, deliv_qty, deliv_per FROM stocks.bronze.nse_delivery_raw;
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.silver.fno_symbols AS
+#   SELECT DISTINCT symbol, underlying, to_date(as_of) AS as_of FROM stocks.bronze.nse_fo_raw
+#   WHERE to_date(as_of) = (SELECT max(to_date(as_of)) FROM stocks.bronze.nse_fo_raw);
+@dp.materialized_view(
+    name="stocks.silver.nse_delivery",
+    comment="Delivery per NSE stock per day: delivered quantity and delivery % (share of traded quantity taken "
+            "for delivery rather than squared off the same day).",
+    table_properties={"quality": "silver"},
+)
+@dp.expect_or_drop("has_keys", "trade_date IS NOT NULL AND symbol IS NOT NULL")
+def nse_delivery():
+    return (spark.read.table("stocks.bronze.nse_delivery_raw")  # noqa: F821
+            .select("trade_date", F.trim("symbol").alias("symbol"), F.trim("series").alias("series"),
+                    "deliv_qty", "deliv_per")
+            .dropDuplicates(["trade_date", "symbol", "series"]))
+
+
+@dp.materialized_view(
+    name="stocks.silver.fno_symbols",
+    comment="The latest NSE F&O stock list (stocks with futures and options), with the date it was fetched.",
+    table_properties={"quality": "silver"},
+)
+def fno_symbols():
+    raw = spark.read.table("stocks.bronze.nse_fo_raw").withColumn("as_of", F.to_date("as_of"))  # noqa: F821
+    latest = raw.agg(F.max("as_of").alias("as_of"))
+    return raw.join(latest, "as_of").select(F.upper(F.trim("symbol")).alias("symbol"), "underlying", "as_of") \
+        .dropDuplicates(["symbol"])
