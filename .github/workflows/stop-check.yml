@@ -1,0 +1,81 @@
+# Temporary one-off replay of today's stopped trades under other stop rules (removed after use). No secrets.
+name: Stop check
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13"
+      - name: Replay
+        run: |
+          git clone --depth 1 https://github.com/bumblebee26/paper-trader.git /tmp/pt
+          cd /tmp/pt && python - <<'PY'
+          import sys; sys.path.insert(0, "trader")
+          from unittest import mock; sys.modules["boto3"] = mock.MagicMock()
+          import market, fees, config
+
+          def slip(p, side, entry):
+              f = config.SLIPPAGE_PCT / 100
+              up = (side == "BUY") == entry
+              return p * (1 + f) if up else p * (1 - f)
+
+          def pnl(side, qty, fill, exit_px):
+              d = 1 if side == "BUY" else -1
+              x = slip(exit_px, side, False)
+              ex_side = "SELL" if side == "BUY" else "BUY"
+              return (x - fill) * d * qty - fees.order(fill * qty, side) - fees.order(x * qty, ex_side)
+
+          def sim(bars, side, fill, stop, target, mode):
+              """mode: wick (today's rule), close5 (stop only on a 5-min close beyond it), none (no stop)."""
+              d = 1 if side == "BUY" else -1
+              five = {}
+              for b in bars:
+                  hh, mm = b["time"][11:13], int(b["time"][14:16])
+                  k = f"{hh}:{mm // 5 * 5:02d}"
+                  five.setdefault(k, []).append(b)
+              for b in bars:
+                  t = b["time"][11:16]
+                  if t >= "15:10":
+                      return b["open"], "15:10 square-off", t
+                  adverse = b["low"] if d == 1 else b["high"]
+                  fav = b["high"] if d == 1 else b["low"]
+                  if mode == "wick" and (adverse - stop) * d <= 0:
+                      return stop, "stop", t
+                  if mode == "close5":
+                      hh, mm = t[:2], int(t[3:5])
+                      grp = five[f"{hh}:{mm // 5 * 5:02d}"]
+                      if b is grp[-1] and (b["close"] - stop) * d <= 0:
+                          return b["close"], "stop on 5-min close", t
+                  if (fav - target) * d >= 0:
+                      return target, "target", t
+              return bars[-1]["close"], "last price", bars[-1]["time"][11:16]
+
+          trades = [  # today's two stopped trades (from the session logs); entry time = first cross after the stated window
+              ("ASHOKLEY", "BUY", 160, 172.17, 170.04, None, "09:30"),
+              ("COALINDIA", "SELL", 100, 396.65, 400.60, 389.80, "10:15"),
+          ]
+          for sym, side, qty, fill, stop, target, after in trades:
+              d = 1 if side == "BUY" else -1
+              r = (fill - stop) * d
+              target = target or fill + d * 2 * r
+              bars = [b for b in market.candles(sym, "1m", 1) if b["time"][11:16] >= after]
+              i = next(n for n, b in enumerate(bars) if (b["high"] >= fill if d == 1 else b["low"] <= fill))
+              opened = bars[i]["time"][11:16]
+              day = bars[i:]
+              hi = max(b["high"] for b in day); lo = min(b["low"] for b in day)
+              print(f"\n=== {sym} {side} {qty} @ {fill} (entry ~{opened}), stop {stop} ({r / fill * 100:.2f}%), target {target:.2f}")
+              print(f"    rest of day: high {hi}, low {lo}, 15:10 price {next((b['open'] for b in day if b['time'][11:16] >= '15:10'), day[-1]['close'])}")
+              print(f"    best move for us {(hi - fill if d == 1 else fill - lo) / r:.1f}R, worst against us {(fill - lo if d == 1 else hi - fill) / r:.1f}R")
+              for mode, label in (("wick", "today's rule (1-min touch)"), ("close5", "stop on a 5-min close"), ("none", "no stop, hold to target or 15:10")):
+                  px, why, t = sim(day, side, fill, stop, target, mode)
+                  print(f"    {label:36} {why:22} at {t} {px:9.2f}  net Rs {pnl(side, qty, fill, px):8.2f}")
+              for mult in (1.5, 2.0):
+                  wstop = fill - d * r * mult; q = int(qty / mult)
+                  px, why, t = sim(day, side, fill, wstop, target, "wick")
+                  print(f"    stop {mult}x wider, {q} shares (same Rs risk) {why:13} at {t} {px:9.2f}  net Rs {pnl(side, q, fill, px):8.2f}")
+          PY
