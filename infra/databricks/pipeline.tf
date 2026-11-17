@@ -46,11 +46,21 @@ locals {
   retries       = 4
 }
 
+# One folder per pipeline, made before its files. The provider makes a missing parent folder itself, but several
+# files of one new folder at once race for it (the first apply of the split failed that way on 17 Nov).
+resource "databricks_directory" "pipeline" {
+  for_each = local.pipelines
+
+  path = "${local.pipeline_workspace}/${each.key}"
+}
+
 resource "databricks_workspace_file" "pipeline" {
   for_each = toset(local.pipeline_file_list)
 
   source = "${path.module}/../../pipeline/${each.value}.py"
   path   = "${local.pipeline_workspace}/${each.value}.py"
+
+  depends_on = [databricks_directory.pipeline]
 }
 
 resource "databricks_pipeline" "stocks" {
