@@ -1,5 +1,5 @@
 -- "In plain words" summaries for the dashboard (one row per page).
--- Runs as the second task of the stocks-refresh job, after the pipeline (Databricks SQL warehouse).
+-- Runs as the last task of each job (stocks-market-close, stocks-market-weekend, stocks-trading), after its pipelines.
 -- 1) Facts: short sentences built from the latest numbers. A sentence whose data is missing is
 --    simply left out (concat_ws skips NULLs), so a page never shows a broken sentence.
 -- 2) AI text: ai_summarize rewrites the facts more fluently. If AI Functions fail, the dashboard

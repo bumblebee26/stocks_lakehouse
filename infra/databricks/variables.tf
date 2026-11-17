@@ -58,7 +58,7 @@ variable "pipeline_development_mode" {
 }
 
 variable "job_trigger" {
-  description = "How the refresh job starts: \"file_arrival\" (when new files land in the volume) or \"schedule\" (06:00 IST Tue-Sat)."
+  description = "How the market-close and trading jobs start: \"file_arrival\" (when their files land in the volume) or \"schedule\" (fixed times: 20:15, and 15:55/23:55 IST Mon-Fri)."
   type        = string
   default     = "file_arrival"
 

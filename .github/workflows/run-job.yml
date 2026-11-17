@@ -1,0 +1,37 @@
+# Run Databricks jobs on demand, one after another, and wait for each to finish (e.g. to rebuild every table after a
+# pipeline change: "stocks-market-weekend stocks-trading" runs market -> research -> trading).
+#   Repository variable: DATABRICKS_WORKSPACE_URL     Repository secret: DATABRICKS_TOKEN   (the same ones as Terraform)
+name: Run Databricks jobs
+
+on:
+  workflow_dispatch:
+    inputs:
+      jobs:
+        description: "Job names, in order, separated by spaces"
+        required: true
+        default: "stocks-market-weekend stocks-trading"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: run-databricks-jobs
+  cancel-in-progress: false
+
+jobs:
+  run:
+    name: run ${{ inputs.jobs }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Run the jobs and wait
+        env:
+          DATABRICKS_HOST: ${{ vars.DATABRICKS_WORKSPACE_URL }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          JOBS: ${{ inputs.jobs }}
+        # JOBS is split into names on purpose; run_job.py rejects anything that isn't a plain job name
+        run: python3 scripts/run_job.py $JOBS

@@ -39,13 +39,14 @@ flowchart TB
         direction TB
         VOL[("<b>Volume</b><br/>stocks.bronze.landing")]
         NVOL[("<b>News volume</b><br/>stocks.bronze.news")]
-        JOB["<b>Job: stocks-refresh</b><br/>file-arrival trigger<br/>pipeline, then dashboard summaries"]
-        subgraph PIPE["Lakeflow pipeline: stocks-medallion (serverless)"]
+        JOB["<b>Jobs</b><br/>market-close: NSE file → market → research<br/>market-weekend: Sat 08:00 · 12:00, the same<br/>trading: trades file → trading<br/>each then the dashboard summaries"]
+        subgraph PIPE["Lakeflow pipelines (serverless, one runs at a time)"]
             direction LR
-            BR["<b>Bronze</b><br/>10 streaming tables<br/>Auto Loader"]
-            SI["<b>Silver</b><br/>17 materialized views<br/>typed · de-duplicated · DQ"]
-            GO["<b>Gold</b><br/>27 materialized views<br/>markets · scanner · news · trading · portfolio · long-term"]
-            BR --> SI --> GO
+            BR["<b>stocks-market</b><br/>bronze 8 · silver 12 · gold 13<br/>NSE · US · FRED · news · fundamentals"]
+            SI["<b>stocks-research</b><br/>gold 5 (pandas)<br/>scanner · momentum ranks · signal record"]
+            GO["<b>stocks-trading</b><br/>bronze 2 · silver 5 · gold 16<br/>journal · portfolio · shadows · models"]
+            BR --> SI
+            BR --> GO
         end
         WH["<b>SQL warehouse</b>"]
         DASH["<b>Dashboard</b><br/>Stocks lakehouse: India × US"]
@@ -71,12 +72,12 @@ flowchart TB
     FNSE & FFO & FMAS & FFRED & FNEWS -- "3 · raw file" --> S3
     FNSE & FFO & FMAS & FFRED -- "4 · push (Files API)" --> VOL
     FNEWS -- "4 · push (Files API)" --> NVOL
-    NVOL -. "read at the next refresh" .-> PIPE
+    NVOL -. "read at the next market run" .-> BR
     SYNC -. "reads" .-> S3
     SYNC -. "push missing" .-> VOL
-    VOL -- "5 · new file" --> JOB
-    JOB -- "6 · refresh" --> PIPE
-    GO --> WH --> DASH
+    VOL -- "5 · new NSE or trades file" --> JOB
+    JOB -- "6 · run in order" --> PIPE
+    PIPE --> WH --> DASH
     SCH -- "7 · invoke" --> PM
     PM -- "8 · SQL Statement API" --> WH
     PM -- "9 · send" --> TG
@@ -101,9 +102,8 @@ flowchart TB
     class SCH,FNSE,FFO,FMAS,FFRED,FNEWS,SYNC,PM aws
     class S3,SSM store
     class VOL,NVOL,JOB,WH dbx
-    class BR bronze
-    class SI silver
-    class GO gold
+    class BR silver
+    class SI,GO gold
     class DASH,TG out
     classDef trader fill:#f5f3ff,stroke:#8b5cf6,color:#2e1065
     class GUARD,SESS,FUND trader

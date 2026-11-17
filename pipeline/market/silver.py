@@ -1,23 +1,26 @@
-"""SILVER: cleaned, typed, de-duplicated daily bars, unified across markets.
+"""MARKET pipeline (stocks-market): market data in, cleaned, and the light market summaries. Runs after the NSE evening
+file (job stocks-market-close, then the research pipeline) and at 11:30 IST Mon-Sat (job stocks-market-morning: US
+prices, FRED, the F&O list, Saturday fundamentals).
 
-  stocks.silver.nse_eq_daily   NSE equities (typed, one row per symbol/series/day)
-  stocks.silver.us_daily       US stocks from Massive (exploded, OTC excluded)
-  stocks.silver.daily_bars     both markets in ONE schema  <- what gold reads
-  stocks.silver.trading_days   each market's trading calendar, derived from the data
-  stocks.silver.trade_events   paper-trader journal events (dummy money), one row per event_id
-  stocks.silver.news           NSE company news, one row per item (id), typed
-  stocks.silver.fundamentals   company financials, one row per symbol x metric x period (newest fetch wins)
-  stocks.silver.portfolio_pools     paper-trader pools per day (capital, cash, equity)
-  stocks.silver.portfolio_holdings  paper-trader holdings per day
-  stocks.silver.shadow_pools   paper-trader shadow pools per day (rules tested on paper; never in portfolio totals)
-  stocks.silver.shadow_holdings what each shadow pool holds per day
-  stocks.silver.nse_delivery   delivery % per NSE stock per day
-  stocks.silver.fno_symbols    the latest NSE F&O stock list (with its date)
-  stocks.silver.index_members  the latest Nifty 200 list: symbol, company, industry
-
-Materialized views: they recompute incrementally where possible, and make
-de-duplication simple (a re-fetched day replaces the old copy: latest file wins).
+SILVER: cleaned, typed, de-duplicated tables. Materialized views: they recompute incrementally where
+possible, and make de-duplication simple (a re-fetched day replaces the old copy: latest file wins).
 Data-quality expectations drop bad rows and report counts in the pipeline UI.
+
+  stocks.silver.nse_eq_daily                 NSE equities (typed, one row per symbol/series/day)
+  stocks.silver.us_daily                     US stocks from Massive (exploded, OTC excluded)
+  stocks.silver.daily_bars                   both markets in ONE schema  <- what gold reads
+  stocks.silver.trading_days                 each market's trading calendar, derived from the data
+  stocks.silver.fred_daily
+  stocks.silver.country_etfs
+  stocks.silver.global_daily
+  stocks.silver.news                         NSE company news, one row per item (id), typed
+  stocks.silver.fundamentals                 company financials, one row per symbol x metric x period (newest fetch wins)
+  stocks.silver.index_members                the latest Nifty 200 list: symbol, company, industry
+  stocks.silver.nse_delivery                 delivery % per NSE stock per day
+  stocks.silver.fno_symbols                  the latest NSE F&O stock list (with its date)
+
+Tables of the research and trading pipelines are never defined here; the three pipelines never run at
+the same time (Free Edition allows one active pipeline).
 """
 
 try:
@@ -38,18 +41,15 @@ VALID_OHLC = {
     "has_trade_date": "trade_date IS NOT NULL",
 }
 
-
 MASSIVE_RESULTS_SCHEMA = (
     "ARRAY<STRUCT<T: STRING, o: DOUBLE, h: DOUBLE, l: DOUBLE, c: DOUBLE, "
     "v: DOUBLE, vw: DOUBLE, n: BIGINT, ts: BIGINT, otc: BOOLEAN>>"
 )
 
-
 def latest_file_wins(df, keys):
     """Keep one row per key: the one from the most recently modified file."""
     w = Window.partitionBy(*keys).orderBy(F.col("_file_modified_at").desc())
     return df.withColumn("_rn", F.row_number().over(w)).filter("_rn = 1").drop("_rn")
-
 
 # ---------------------------------------------------------------------------
 # NSE equities
@@ -110,7 +110,6 @@ def nse_eq_daily():
         "_file_modified_at",
     )
     return latest_file_wins(typed, ["symbol", "series", "trade_date"])
-
 
 # ---------------------------------------------------------------------------
 # US stocks (Massive grouped daily)
@@ -175,7 +174,6 @@ def us_daily():
     by_symbol = Window.partitionBy("symbol").orderBy("trade_date")
     return bars.withColumn("prev_close", F.lag("close").over(by_symbol))
 
-
 # ---------------------------------------------------------------------------
 # Unified daily bars (what gold reads)
 # ---------------------------------------------------------------------------
@@ -195,7 +193,6 @@ UNIFIED_COLUMNS = [
     "volume", "turnover", "vwap", "trades", "currency", "_source_file",
 ]
 
-
 @dp.materialized_view(
     name="stocks.silver.daily_bars",
     comment="Daily OHLCV for NSE equities and US stocks in one schema (prices in local currency).",
@@ -214,7 +211,6 @@ def daily_bars():
         .withColumn("isin", F.lit(None).cast("string"))
     )
     return nse.select(*UNIFIED_COLUMNS).unionByName(us.select(*UNIFIED_COLUMNS))
-
 
 # ---------------------------------------------------------------------------
 # Trading calendar per market, derived from the data
@@ -239,7 +235,6 @@ def trading_days():
     )
     w = Window.partitionBy("market").orderBy("trade_date")
     return days.withColumn("prev_trade_date", F.lag("trade_date").over(w))
-
 
 # ---------------------------------------------------------------------------
 # FRED series, de-duplicated (each run re-fetches a window; latest file wins)
@@ -277,7 +272,6 @@ def fred_daily():
     )
     return latest_file_wins(typed, ["series_id", "obs_date"])
 
-
 # ---------------------------------------------------------------------------
 # Global instruments in one long table: FRED series + US-listed country ETFs
 # ---------------------------------------------------------------------------
@@ -301,7 +295,6 @@ COUNTRY_ETFS = [
 
 GLOBAL_COLUMNS = ["instrument", "name", "region", "asset_class", "unit", "source", "obs_date", "value"]
 
-
 # SQL equivalent:
 #   CREATE OR REFRESH MATERIALIZED VIEW stocks.silver.global_daily AS
 #   SELECT series_id AS instrument, name, region, asset_class, unit, 'FRED' AS source, obs_date, value
@@ -319,7 +312,6 @@ GLOBAL_COLUMNS = ["instrument", "name", "region", "asset_class", "unit", "source
 )
 def country_etfs():
     return spark.createDataFrame(COUNTRY_ETFS, "symbol STRING, name STRING, region STRING")  # noqa: F821
-
 
 @dp.materialized_view(
     name="stocks.silver.global_daily",
@@ -343,49 +335,6 @@ def global_daily():
         )
     )
     return fred.select(*GLOBAL_COLUMNS).unionByName(etfs.select(*GLOBAL_COLUMNS))
-
-
-# ---------------------------------------------------------------------------
-# Paper trades (dummy money) from bumblebee26/paper-trader
-# ---------------------------------------------------------------------------
-# SQL equivalent:
-#   CREATE OR REFRESH MATERIALIZED VIEW stocks.silver.trade_events (
-#     CONSTRAINT has_event_id EXPECT (event_id IS NOT NULL) ON VIOLATION DROP ROW,
-#     CONSTRAINT has_event    EXPECT (event IS NOT NULL)    ON VIOLATION DROP ROW,
-#     CONSTRAINT has_time     EXPECT (event_ts IS NOT NULL) ON VIOLATION DROP ROW
-#   ) AS
-#   SELECT * EXCEPT (rn) FROM (
-#     SELECT trade_date, event_id, proposal_id,
-#            to_timestamp(timestamp_ist, 'yyyy-MM-dd HH:mm:ss') AS event_ts,
-#            event, symbol, setup, side, entry, stop, target, CAST(qty AS INT) AS qty, risk_rs, rr,
-#            reasons, user_reply, fill_price, exit_price, exit_reason, pnl_rs, fees_rs, note,
-#            balance, starting_capital, realized_today, _source_file, _file_modified_at,
-#            row_number() OVER (PARTITION BY event_id ORDER BY _file_modified_at DESC) AS rn
-#     FROM stocks.bronze.trades_raw
-#   ) WHERE rn = 1;
-@dp.materialized_view(
-    name="stocks.silver.trade_events",
-    comment="Paper-trader journal events (dummy money), typed, one row per event_id (newest export wins).",
-    table_properties={"quality": "silver"},
-)
-@dp.expect_all_or_drop({
-    "has_event_id": "event_id IS NOT NULL",
-    "has_event": "event IS NOT NULL",
-    "has_time": "event_ts IS NOT NULL",
-})
-def trade_events():
-    raw = spark.read.table("stocks.bronze.trades_raw")  # noqa: F821
-    typed = raw.select(
-        "trade_date", "event_id", "proposal_id",
-        F.to_timestamp("timestamp_ist", "yyyy-MM-dd HH:mm:ss").alias("event_ts"),
-        "event", "symbol", "setup", "side", "entry", "stop", "target",
-        F.col("qty").cast("int").alias("qty"),
-        "risk_rs", "rr", "reasons", "user_reply", "fill_price", "exit_price", "exit_reason",
-        "pnl_rs", "fees_rs", "note", "balance", "starting_capital", "realized_today",
-        "_source_file", "_file_modified_at",
-    )
-    return latest_file_wins(typed, ["event_id"])
-
 
 # ---------------------------------------------------------------------------
 # Company news (NSE RSS)
@@ -425,7 +374,6 @@ def news():
         .withColumn("news_date", F.to_date("news_ts"))
     )
 
-
 # ---------------------------------------------------------------------------
 # Company fundamentals
 # ---------------------------------------------------------------------------
@@ -455,84 +403,6 @@ def fundamentals():
                 "currency", "source", F.to_timestamp("fetched_at_ist", "yyyy-MM-dd HH:mm:ss").alias("fetched_at"))
     )
 
-
-# ---------------------------------------------------------------------------
-# Paper-trader portfolio (dummy money)
-# ---------------------------------------------------------------------------
-# SQL equivalent:
-#   CREATE OR REFRESH MATERIALIZED VIEW stocks.silver.portfolio_pools AS
-#   SELECT to_date(snapshot_date) AS snapshot_date, pool, capital, cash, holdings_value, equity
-#   FROM stocks.bronze.portfolio_raw WHERE record_type = 'pool'   -- newest file per day wins
-def _latest_portfolio_file():
-    raw = spark.read.table("stocks.bronze.portfolio_raw").withColumn(  # noqa: F821
-        "snapshot_date", F.to_date("snapshot_date"))
-    newest = Window.partitionBy("snapshot_date").orderBy(F.col("_file_modified_at").desc())
-    files = (raw.select("snapshot_date", "_source_file", "_file_modified_at").distinct()
-             .withColumn("rn", F.row_number().over(newest)).filter("rn = 1").select("snapshot_date", "_source_file"))
-    return raw.join(files, ["snapshot_date", "_source_file"])
-
-
-@dp.materialized_view(
-    name="stocks.silver.portfolio_pools",
-    comment="Paper-trader pools (intraday, swing, long_term) per day: capital, cash, holdings value, equity (dummy Rs).",
-    table_properties={"quality": "silver"},
-)
-@dp.expect_all_or_drop({"has_keys": "snapshot_date IS NOT NULL AND pool IS NOT NULL", "has_equity": "equity IS NOT NULL"})
-def portfolio_pools():
-    return (_latest_portfolio_file().filter("record_type = 'pool'")
-            .select("snapshot_date", "pool", "capital", "cash", "holdings_value", "equity"))
-
-
-# SQL equivalent:
-#   CREATE OR REFRESH MATERIALIZED VIEW stocks.silver.portfolio_holdings AS
-#   SELECT to_date(snapshot_date) AS snapshot_date, pool, symbol, sector, qty, avg_cost, last_price, value, pnl,
-#          to_date(opened) AS opened FROM stocks.bronze.portfolio_raw WHERE record_type = 'holding';
-@dp.materialized_view(
-    name="stocks.silver.portfolio_holdings",
-    comment="Paper-trader holdings per day: pool, symbol, sector, quantity, average cost, last price, value, P&L (dummy Rs).",
-    table_properties={"quality": "silver"},
-)
-@dp.expect_all_or_drop({"has_keys": "snapshot_date IS NOT NULL AND pool IS NOT NULL AND symbol IS NOT NULL"})
-def portfolio_holdings():
-    return (_latest_portfolio_file().filter("record_type = 'holding'")
-            .select("snapshot_date", "pool", "symbol", "sector", "qty", "avg_cost", "last_price", "value", "pnl",
-                    F.to_date("opened").alias("opened")))
-
-
-# SQL equivalent:
-#   CREATE OR REFRESH MATERIALIZED VIEW stocks.silver.shadow_pools AS
-#   SELECT to_date(snapshot_date) AS snapshot_date, pool, capital, cash, holdings_value, equity
-#   FROM stocks.bronze.portfolio_raw WHERE record_type = 'shadow_pool';   -- newest file per day wins
-@dp.materialized_view(
-    name="stocks.silver.shadow_pools",
-    comment="Paper-trader SHADOW pools per day (swing_shadow, long_term_shadow): rules tested on paper, never part "
-            "of the portfolio totals. Capital, cash, holdings value, equity (dummy Rs).",
-    table_properties={"quality": "silver"},
-)
-@dp.expect_all_or_drop({"has_keys": "snapshot_date IS NOT NULL AND pool IS NOT NULL", "has_equity": "equity IS NOT NULL"})
-def shadow_pools():
-    return (_latest_portfolio_file().filter("record_type = 'shadow_pool'")
-            .select("snapshot_date", "pool", "capital", "cash", "holdings_value", "equity"))
-
-
-# SQL equivalent:
-#   CREATE OR REFRESH MATERIALIZED VIEW stocks.silver.shadow_holdings AS
-#   SELECT to_date(snapshot_date) AS snapshot_date, pool, symbol, sector, qty, avg_cost, last_price, value, pnl,
-#          to_date(opened) AS opened
-#   FROM stocks.bronze.portfolio_raw WHERE record_type = 'shadow_holding';   -- newest file per day wins
-@dp.materialized_view(
-    name="stocks.silver.shadow_holdings",
-    comment="What each paper-trader SHADOW pool holds per day (swing_shadow, swing_tech_shadow, long_term_shadow): "
-            "quantity, average cost, last price, value and P&L (dummy Rs). Never part of the portfolio.",
-    table_properties={"quality": "silver"},
-)
-@dp.expect_all_or_drop({"has_keys": "snapshot_date IS NOT NULL AND pool IS NOT NULL AND symbol IS NOT NULL"})
-def shadow_holdings():
-    return (_latest_portfolio_file().filter("record_type = 'shadow_holding'")
-            .select("snapshot_date", "pool", "symbol", "sector", "qty", "avg_cost", "last_price", "value", "pnl",
-                    F.to_date("opened").alias("opened")))
-
-
 # ---------------------------------------------------------------------------
 # Index members (latest list only)
 # ---------------------------------------------------------------------------
@@ -552,7 +422,6 @@ def index_members():
     latest = raw.agg(F.max("as_of").alias("as_of"))
     return (raw.join(latest, "as_of").dropDuplicates(["symbol"])
             .select("symbol", "company", "industry", "isin", "index_name", "as_of"))
-
 
 # ---------------------------------------------------------------------------
 # NSE delivery % and the F&O list
@@ -575,7 +444,6 @@ def nse_delivery():
             .select("trade_date", F.trim("symbol").alias("symbol"), F.trim("series").alias("series"),
                     "deliv_qty", "deliv_per")
             .dropDuplicates(["trade_date", "symbol", "series"]))
-
 
 @dp.materialized_view(
     name="stocks.silver.fno_symbols",

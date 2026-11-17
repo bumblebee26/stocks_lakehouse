@@ -941,7 +941,7 @@ resource "databricks_dashboard" "stocks" {
   serialized_dashboard = jsonencode(local.dashboard)
   embed_credentials    = true
 
-  depends_on = [databricks_pipeline.medallion]
+  depends_on = [databricks_pipeline.stocks]
 }
 
 output "dashboard_url" {

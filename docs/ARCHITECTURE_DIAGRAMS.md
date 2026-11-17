@@ -27,7 +27,7 @@ The whole system is four stages, read left to right:
 |---|---|---|
 | **① Sources** | Three public data sources, plus news feeds. **NSE** publishes one file per trading day with every Indian equity (and a delivery file beside it), a weekly list of stocks with futures and options (F&O), and RSS feeds of company news (fetched every minute in market hours, every 30 minutes otherwise; Business Standard markets, RBI and SEBI are read every few minutes too). **Massive** returns one file per US trading day with every US stock and ETF (including the country ETFs used for world markets). **FRED** provides 14 global series: equity indices, exchange rates, VIX, oil and US rates. | Third parties |
 | **② Ingest** | **EventBridge** triggers a **Lambda fetcher** per source on a schedule (daily; news every minute in market hours, every 30 minutes otherwise). Each fetcher downloads the day's data, saves the untouched file in **S3** as a permanent raw archive, and **pushes** the same file into Databricks. | AWS |
-| **③ Lakehouse** | Files land in a Unity Catalog **volume**. The medallion pipeline turns them into tables: **bronze** (raw, as delivered), **silver** (cleaned, typed, de-duplicated, India and US unified into one schema), **gold** (insights). | Databricks |
+| **③ Lakehouse** | Files land in a Unity Catalog **volume**. Three pipelines (**market**, then **research**; **trading** for paper-trader's files) turn them into tables: **bronze** (raw, as delivered), **silver** (cleaned, typed, de-duplicated, India and US unified into one schema), **gold** (insights). | Databricks |
 | **④ Consume** | A **dashboard** shows the gold tables. At 08:45 IST, before the Indian market opens, two **Telegram messages**: the brief, India first (India VIX and the risk it implies, the Nifty 50's trend, world markets only as support), and the **technical scanner**'s picks from the Nifty 200. | Databricks, AWS, Telegram |
 
 The key design choice is the **push** arrow between ② and ③: AWS sends files to Databricks, instead of
@@ -46,7 +46,7 @@ bucket, but outbound calls from Lambda are allowed.
 |---|---|---|
 | **External data sources** | NSE archives (bhavcopy, delivery file, F&O list), news RSS feeds (NSE, Business Standard, RBI, SEBI), Massive API, FRED API | NSE needs browser-like headers; Massive and FRED need free API keys. |
 | **AWS account** (free plan, `ap-southeast-2` Sydney) | EventBridge Scheduler, 7 Lambda functions, S3 landing bucket, SSM Parameter Store | The free plan only allows the project's region (plus `us-east-1` / `us-west-2`), so everything runs in Sydney. |
-| **Databricks Free Edition** (Unity Catalog `stocks`) | Landing volume, news volume, refresh job, Lakeflow pipeline (bronze → silver → gold), SQL warehouse, dashboard | Serverless only. One pipeline, one job. |
+| **Databricks Free Edition** (Unity Catalog `stocks`) | Landing volume, news volume, 3 jobs, 3 Lakeflow pipelines (market, research, trading; each bronze → silver → gold), SQL warehouse, dashboard | Serverless only. One pipeline runs at a time. |
 | **Telegram** | Your chat with the bot | Receives the brief (and the paper trader's messages, same bot). |
 | **paper-trader** (purple) | `stocks-trader-guardian` Lambda in the same account; the trading session and the weekly fundamentals job in GitHub Actions | Not managed by this repo. Shown where it touches the lakehouse: flows 10 to 13. |
 | **Control plane** | GitHub, GitHub Actions, Terraform state in S3 | Deploys everything above. Not involved in the daily data flow. |
@@ -74,8 +74,8 @@ with the remaining dates, so one command can load years.
 | **2** | Source → fetcher | The fetcher downloads that day's data. API keys come from SSM at runtime. |
 | **3** | Fetcher → S3 | The raw file is written to `landing/<source>/date=YYYY-MM-DD/`. Each fetcher can only *add* files under its own prefix. |
 | **4** | Fetcher → Volume | The same file is pushed to the Databricks volume with the Files API, using a dedicated token from SSM (news goes to its own volume, read at the next refresh). |
-| **5** | Volume → Job | A new file triggers the `stocks-refresh` job (after 5 minutes without new files, at most every 15 minutes). |
-| **6** | Job → Pipeline | The pipeline refreshes: Auto Loader reads only new files into bronze; silver and gold recompute. A second task then runs `sql/dashboard_summary.sql` for the dashboard's "In plain words" summaries. |
+| **5** | Volume → Jobs | The NSE evening file starts `stocks-market-close`; paper-trader's export starts `stocks-trading` (each 5 minutes after the last file, at most every 15 minutes). `stocks-market-weekend` runs at 08:00 and 12:00 on Saturdays. |
+| **6** | Jobs → Pipelines | `stocks-market` then `stocks-research` (or `stocks-trading`) refresh: Auto Loader reads only new files into bronze; silver and gold recompute. A last task runs `sql/dashboard_summary.sql` for the dashboard's "In plain words" summaries. |
 | **7** | Scheduler → brief | At 08:45 IST the brief Lambda starts. |
 | **8** | Brief → SQL warehouse | It runs 4 queries on gold tables (data freshness, what usually follows a US shock, unusual volume, the technical scanner) through the SQL Statement API, and reads India VIX, the Nifty 50 and a few world figures live from Yahoo. If one fails, that section is skipped and the message says so; a source missing the day it should have is left out, never replaced by an older day. |
 | **9** | Brief → Telegram | Two messages are sent through the Telegram Bot API: the brief (takeaways, tables) and the technical scanner (strict picks with indicative levels and a Swing buy button for paper-trader). |
@@ -168,7 +168,7 @@ columns are kept as delivered, plus lineage columns (`_source_file`, `_ingested_
 | `data_freshness` | nse_eq_daily, nse_delivery, us_daily, fred_daily, news, fno_symbols, index_members, technical_indicators | Which day does each source have? The brief and paper-trader leave out a source missing the day it should have. |
 
 Two more gold tables are not in the pipeline: `dashboard_summary_facts` and `dashboard_summary`, rebuilt by
-`sql/dashboard_summary.sql` after each refresh for the dashboard's "In plain words" boxes.
+`sql/dashboard_summary.sql` after each job for the dashboard's "In plain words" boxes.
 
 Column-level detail: [DATA_MODEL.md](DATA_MODEL.md).
 
@@ -217,9 +217,9 @@ plan, Sydney), one Databricks workspace, one Telegram bot and the same CI/CD pat
 | 09:45 | lakehouse → trader | The guardian reads `technical_screen` to check the morning's strict picks against the first half hour. |
 | During sessions | lakehouse → trader | The session reads the news volume's `latest.jsonl` for each proposal and `/news`; `/analyze` reads `company_fundamentals` and `longterm_candidates` over SQL (also from the responder Lambda outside sessions). |
 | 15:50 | lakehouse → trader | The guardian reads `swing_signals` and the strict picks in `technical_indicators` for the two swing shadow tests. |
-| 15:45 | trader → lakehouse | The guardian Lambda pushes the day's journal to `landing/trades/` and a portfolio snapshot to `landing/portfolio/`; the pipeline builds the `trad*` and portfolio gold tables and the dashboard's Intraday trading and Portfolio pages. |
+| 15:45 | trader → lakehouse | The guardian Lambda pushes the day's journal to `landing/trades/` and a portfolio snapshot to `landing/portfolio/`; `stocks-trading` builds the `trad*` and portfolio gold tables and the dashboard's Intraday trading and Portfolio pages. |
 | 23:30 | trader → lakehouse | The guardian re-sends the last 4 days' journals, so evening 👍/👎 ratings reach `track_record`. |
-| Sat 07:15 | trader → lakehouse | The *Company fundamentals* workflow pushes financials to `landing/fundamentals/` and the Nifty 200 list to `landing/index_members/`; the pipeline builds `company_fundamentals` and `longterm_candidates` (Company quality page). |
+| Sat 07:15 | trader → lakehouse | The *Company fundamentals* workflow pushes financials to `landing/fundamentals/` and the Nifty 200 list to `landing/index_members/`; `stocks-market-weekend` (08:00) builds `company_fundamentals`, `longterm_candidates` and `momentum_ranks` before the 10:15 long-term shadow. |
 
 Shared resources: the Terraform state bucket (trader key `paper-trader/aws/…`), the CI users
 `stocks-gha-plan` / `stocks-gha-apply` (trader resources are named `stocks-trader-*` so the apply user may

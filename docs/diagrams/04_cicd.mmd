@@ -21,7 +21,7 @@ flowchart TB
     subgraph APPLY["7 · Apply: on merge · environment production · stocks-gha-apply"]
         direction LR
         A1["terraform apply: aws<br/>Lambdas · schedules · IAM · SSM"]
-        A2["terraform apply: databricks<br/>pipeline code · job · dashboard"]
+        A2["terraform apply: databricks<br/>pipeline code · 3 pipelines · 3 jobs · dashboard"]
         A1 --> A2
     end
     LIVE["🚀 <b>Live</b>"]
