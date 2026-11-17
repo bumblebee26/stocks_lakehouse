@@ -164,7 +164,7 @@ columns are kept as delivered, plus lineage columns (`_source_file`, `_ingested_
 | `trading_by_setup`, `trading_by_hour` | trades | Which setups and hours make money? |
 | `trading_decisions` | trades + trade_events | Did the YES/NO choices help? |
 | `proposal_outcomes` → `track_record` | trade_events + trades | How did every proposal turn out (taken or skipped), by setup, hour, mood, sector, direction (BUY/SELL), scanner (strict, near-miss or none), suggestion band, reviewer, mode, news or watchlist? Real outcomes only: your 👍/👎 never trains the trader (from 17 Nov). paper-trader reads `track_record` every session: the feedback loop. Your own (custom) trades count only under `source`. |
-| `rating_review` | proposal_outcomes | How did the trades you liked or disliked really do? For your own review ("Your ratings" page). |
+| `rating_review` | proposal_outcomes | How did the trades you liked or disliked really do? For your own review ("Your calls" page). |
 | `custom_trades` | trades + trade_events | What did my own Telegram trades (`/buy`, `/short`, `/swing`, `/longterm`) do? |
 | `portfolio_daily` | portfolio_pools + nse_eq_daily (NIFTYBEES) | How are all dummy pools doing, against just holding NIFTYBEES? |
 | `holdings_latest` | portfolio_holdings + portfolio_pools | What's held now, and what weight does each holding have? |
@@ -233,7 +233,7 @@ plan, Sydney), one Databricks workspace, one Telegram bot and the same CI/CD pat
 | During sessions | lakehouse → trader | The session reads the news volume's `latest.jsonl` for each proposal and `/news`; `/analyze` reads `company_fundamentals` and `longterm_candidates` over SQL (also from the responder Lambda outside sessions). |
 | 15:50 | lakehouse → trader | The guardian reads `swing_signals`, the strict picks in `technical_indicators` and the top of `momentum_ranks` for the swing shadow tests. |
 | 16:10 | lakehouse → trader | The shadow-models job reads the tradable list in `intraday_universe`. |
-| 15:45 | trader → lakehouse | The guardian Lambda pushes the day's journal to `landing/trades/` and a portfolio snapshot to `landing/portfolio/`; `stocks-trading` builds the `trad*` and portfolio gold tables and the dashboard's Intraday trading and Portfolio pages. |
+| 15:45 | trader → lakehouse | The guardian Lambda pushes the day's journal to `landing/trades/` and a portfolio snapshot to `landing/portfolio/`; `stocks-trading` builds the `trad*` and portfolio gold tables and the dashboard's Intraday trading and Desk pages. |
 | 23:30 | trader → lakehouse | The guardian re-sends the last 4 days' journals, so evening 👍/👎 ratings (`rating_review`) and the 16:10 shadow-model results (`model_backtest`, `shadow_rules_*`) arrive overnight. |
 | Sat 07:15 | trader → lakehouse | The *Company fundamentals* workflow pushes financials to `landing/fundamentals/` and the Nifty 200 list to `landing/index_members/`; `stocks-market-weekend` (08:00) builds `company_fundamentals`, `longterm_candidates` and `momentum_ranks` before the 10:15 long-term shadow (quality picks and the momentum shadows). |
 
