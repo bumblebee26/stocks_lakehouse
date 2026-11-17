@@ -25,6 +25,16 @@ except ImportError:
 from pyspark.sql import Window
 from pyspark.sql import functions as F
 
+# The paper-trading ledger was reset on 17 Nov 2026: every pool restarted with its starting cash on 18 Nov. Money
+# tables (portfolio, shadow pools, daily P&L, results per setup/hour, decisions, custom trades) start here. Learning
+# tables (trades, proposal_outcomes, track_record, rating_review, shadow rules, model and ORB tests) keep all history.
+LEDGER_START = spark.conf.get("stocks.ledger_start", "2026-11-18")  # noqa: F821
+
+
+def since_ledger_start(df, col="trade_date"):
+    return df.filter(F.col(col) >= F.to_date(F.lit(LEDGER_START)))
+
+
 def latest_file_wins(df, keys):
     """Keep one row per key: the one from the most recently modified file."""
     w = Window.partitionBy(*keys).orderBy(F.col("_file_modified_at").desc())
@@ -79,8 +89,8 @@ def trade_events():
 #   SELECT to_date(snapshot_date) AS snapshot_date, pool, capital, cash, holdings_value, equity
 #   FROM stocks.bronze.portfolio_raw WHERE record_type = 'pool'   -- newest file per day wins
 def _latest_portfolio_file():
-    raw = spark.read.table("stocks.bronze.portfolio_raw").withColumn(  # noqa: F821
-        "snapshot_date", F.to_date("snapshot_date"))
+    raw = since_ledger_start(spark.read.table("stocks.bronze.portfolio_raw").withColumn(  # noqa: F821
+        "snapshot_date", F.to_date("snapshot_date")), "snapshot_date")
     newest = Window.partitionBy("snapshot_date").orderBy(F.col("_file_modified_at").desc())
     files = (raw.select("snapshot_date", "_source_file", "_file_modified_at").distinct()
              .withColumn("rn", F.row_number().over(newest)).filter("rn = 1").select("snapshot_date", "_source_file"))

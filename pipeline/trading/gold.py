@@ -33,6 +33,16 @@ except ImportError:
 from pyspark.sql import Window
 from pyspark.sql import functions as F
 
+# The paper-trading ledger was reset on 17 Nov 2026: every pool restarted with its starting cash on 18 Nov. Money
+# tables (portfolio, shadow pools, daily P&L, results per setup/hour, decisions, custom trades) start here. Learning
+# tables (trades, proposal_outcomes, track_record, rating_review, shadow rules, model and ORB tests) keep all history.
+LEDGER_START = spark.conf.get("stocks.ledger_start", "2026-11-18")  # noqa: F821
+
+
+def since_ledger_start(df, col="trade_date"):
+    return df.filter(F.col(col) >= F.to_date(F.lit(LEDGER_START)))
+
+
 # ===========================================================================
 # Paper trading (dummy money). Source: stocks.silver.trade_events
 # ===========================================================================
@@ -133,7 +143,7 @@ def trades():
     table_properties={"quality": "gold"},
 )
 def trading_daily():
-    ev = _trade_events_df()
+    ev = since_ledger_start(_trade_events_df())
 
     def count_if(cond):
         return F.sum(F.when(F.expr(cond), 1).otherwise(0))
@@ -151,7 +161,7 @@ def trading_daily():
         F.sum(F.when(F.col("event") == "passed_outcome", F.col("pnl_rs"))).alias("passed_hypothetical_pnl_rs"),
     )
     closed = (
-        spark.read.table("stocks.gold.trades")  # noqa: F821
+        since_ledger_start(spark.read.table("stocks.gold.trades"))  # noqa: F821
         .filter("status = 'closed'")
         .groupBy("trade_date")
         .agg(
@@ -184,7 +194,7 @@ def trading_daily():
     )
 
 def _results(group_cols):
-    t = spark.read.table("stocks.gold.trades").filter("status = 'closed'")  # noqa: F821
+    t = since_ledger_start(spark.read.table("stocks.gold.trades")).filter("status = 'closed'")  # noqa: F821
     return (
         t.groupBy(*group_cols)
         .agg(
@@ -242,7 +252,7 @@ def trading_by_hour():
     table_properties={"quality": "gold"},
 )
 def trading_decisions():
-    ev = _trade_events_df()
+    ev = since_ledger_start(_trade_events_df())
     passed = F.col("event") == "passed_outcome"
     decisions = ev.groupBy("trade_date").agg(
         F.sum(F.when(F.col("event") == "filled", 1).otherwise(0)).alias("taken"),
@@ -253,7 +263,7 @@ def trading_decisions():
         F.sum(F.when(passed & (F.col("pnl_rs") > 0), 1).otherwise(0)).alias("passed_would_have_won"),
     )
     taken_pnl = (
-        spark.read.table("stocks.gold.trades")  # noqa: F821
+        since_ledger_start(spark.read.table("stocks.gold.trades"))  # noqa: F821
         .filter("status = 'closed'")
         .groupBy("trade_date")
         .agg(F.sum("net_pnl_rs").alias("taken_net_pnl_rs"))
@@ -603,12 +613,12 @@ def shadow_pools_daily():
     table_properties={"quality": "gold"},
 )
 def custom_trades():
-    intraday = (spark.read.table("stocks.gold.trades")  # noqa: F821
+    intraday = (since_ledger_start(spark.read.table("stocks.gold.trades"))  # noqa: F821
                 .filter(F.col("setup") == "Custom")
                 .select("trade_date", F.lit("intraday").alias("pool"), "symbol", "side", "qty",
                         F.col("entry_price").alias("price"), "exit_price", F.col("net_pnl_rs").alias("pnl_rs"),
                         "fees_rs", "status", F.col("entry_time").alias("event_ts")))
-    pool = (_trade_events_df()
+    pool = (since_ledger_start(_trade_events_df())
             .filter((F.col("event") == "pool_trade") & F.col("note").contains("source custom"))
             .select("trade_date", F.regexp_extract("note", r"pool (\w+)", 1).alias("pool"), "symbol", "side", "qty",
                     F.col("fill_price").alias("price"), F.lit(None).cast("double").alias("exit_price"), "pnl_rs",

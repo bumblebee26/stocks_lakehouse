@@ -103,3 +103,14 @@ variable "sql_warehouse_name" {
   type        = string
   default     = "Serverless Starter Warehouse"
 }
+
+variable "ledger_start" {
+  description = "First day of the paper-trading ledger (it was reset on 17 Nov 2026). Money tables and dashboard pages start here; the track record, ratings and rule tests keep all history."
+  type        = string
+  default     = "2026-11-18"
+
+  validation {
+    condition     = can(regex("^\\d{4}-\\d{2}-\\d{2}$", var.ledger_start))
+    error_message = "ledger_start must be a date like 2026-11-18."
+  }
+}

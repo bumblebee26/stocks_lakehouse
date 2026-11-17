@@ -40,6 +40,7 @@ locals {
     "stocks.big_move_pct"       = tostring(var.big_move_pct)
     "stocks.volume_spike_ratio" = tostring(var.volume_spike_ratio)
     "stocks.min_avg_volume"     = tostring(var.min_avg_volume)
+    "stocks.ledger_start"       = var.ledger_start
   }
   retry_minutes = 15
   retries       = 4

@@ -86,6 +86,7 @@ Options: `{"prefix": "landing/nse/"}` for one source, `{"overwrite": true}` to r
 | Schedules on? | `aws scheduler list-schedules --region ap-southeast-2 --query "Schedules[].[Name,State]" --output table` |
 | Files arriving? | `aws s3 ls s3://stocks-lakehouse-landing-<account-id>/landing/nse/` |
 | Pipeline runs | Databricks → **Jobs & Pipelines** → `stocks-market-close`, `stocks-market-weekend`, `stocks-trading` (pipeline tasks retry every 15 min up to 4 times, then `dashboard_summary`; failures email you) |
+| Paper-trading ledger start | `ledger_start` in `infra/databricks/variables.tf` (18 Nov 2026, after the 17 Nov reset): portfolio, shadow pools, daily P&L, results per setup/hour, decisions and custom trades start there; the track record, ratings, shadow rules and model tests keep all history |
 | Run jobs now | GitHub → Actions → **Run Databricks jobs** (job names in order; waits for each and shows every task), or **Run now** in Databricks |
 | Data freshness | `SELECT market, max(trade_date) FROM stocks.silver.trading_days GROUP BY market;` |
 | Global freshness | `SELECT instrument, obs_date FROM stocks.gold.global_snapshot ORDER BY obs_date;` |
