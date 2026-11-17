@@ -1343,6 +1343,120 @@ def custom_trades():
 
 
 # ---------------------------------------------------------------------------
+# Shadow results for the dashboard: what other rules and the shadow models would have done (paper only)
+# ---------------------------------------------------------------------------
+SHADOW_RULE_WORDS = {
+    "current": "current rules", "breakeven": "stop to entry at +1R", "half_and_run": "sell half at +1R",
+    "trailing": "trailing stop", "time_stop": "60-minute time stop", "no_stop": "no stop",
+    "wide_1_5": "stop 1.5x wider, same Rs risk", "wide_2": "stop 2x wider, same Rs risk",
+    "close_stop": "stop on a 5-min close", "filter": "model: trade filter", "vol_stop": "model: volatility stop",
+    "early_cut": "model: early cut", "let_run": "model: let winners run", "combined": "models combined",
+    "orb5_2r": "5-min range, 2R target", "orb5_eod": "5-min range, held to 15:10",
+    "orb15_2r": "15-min range, 2R target", "orb15_eod": "15-min range, held to 15:10",
+}
+
+
+def _rule_label():
+    m = F.create_map(*[F.lit(x) for kv in SHADOW_RULE_WORDS.items() for x in kv])
+    return F.coalesce(m[F.col("rule")], F.col("rule"))
+
+
+def _note_pairs(df, sep):
+    """Explode a 'k=v<sep>k=v' note into (rule, value) rows; empty values are dropped."""
+    return (df.withColumn("kv", F.explode(F.split("note", sep)))
+            .withColumn("rule", F.split("kv", "=").getItem(0))
+            .withColumn("value", F.expr("try_cast(split(kv, '=')[1] AS DOUBLE)"))
+            .filter(F.col("value").isNotNull() & (F.col("rule") != "")))
+
+
+# SQL equivalent (abridged):
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.shadow_rules_trades AS
+#   SELECT trade_date, proposal_id, symbol, setup, side, 'exit rules' AS test, rule, value AS would_have_made_rs,
+#          pnl_rs AS actual_rs FROM trade_events LATERAL VIEW explode(split(note, ';')) ... WHERE event = 'exit_variants'
+#   UNION ALL ... event = 'model_shadow' (test 'models'; p_win and filter_takes kept as columns);
+@dp.materialized_view(
+    name="stocks.gold.shadow_rules_trades",
+    comment="Your real intraday trades replayed under other rules (paper only): test 'exit rules' (stop variants, "
+            "trailing, breakeven, half and run, time stop; from the day report) and test 'models' (the shadow "
+            "models' decisions, from the 16:10 model job). One row per trade x rule: what it would have made (Rs) "
+            "next to what it really made.",
+    table_properties={"quality": "gold"},
+)
+def shadow_rules_trades():
+    ev = spark.read.table("stocks.silver.trade_events")  # noqa: F821
+    base = ["trade_date", "proposal_id", "symbol", "setup", "side", F.col("pnl_rs").alias("actual_rs")]
+    exits_ = (_note_pairs(ev.filter("event = 'exit_variants'"), ";")
+              .select(*base, F.lit("exit rules").alias("test"), "rule", F.col("value").alias("would_have_made_rs")))
+    m = ev.filter("event = 'model_shadow'")
+    models = (_note_pairs(m, ";").filter(~F.col("rule").isin("p_win", "filter_takes"))
+              .select(*base, F.lit("models").alias("test"), "rule", F.col("value").alias("would_have_made_rs")))
+    return (exits_.unionByName(models).withColumn("rule_label", _rule_label())
+            .withColumn("vs_actual_rs", F.round(F.col("would_have_made_rs") - F.col("actual_rs"), 2)))
+
+
+# SQL equivalent:
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.shadow_rules_summary AS
+#   SELECT test, rule, rule_label, count(*) AS trades, sum(would_have_made_rs), sum(actual_rs), ...
+#   FROM stocks.gold.shadow_rules_trades GROUP BY test, rule, rule_label;
+@dp.materialized_view(
+    name="stocks.gold.shadow_rules_summary",
+    comment="Totals of gold.shadow_rules_trades per test and rule: trades, what the rule would have made (Rs), what "
+            "really happened (Rs), the difference, and how often the rule beat the real result.",
+    table_properties={"quality": "gold"},
+)
+def shadow_rules_summary():
+    t = spark.read.table("stocks.gold.shadow_rules_trades")  # noqa: F821
+    return (t.groupBy("test", "rule", "rule_label")
+            .agg(F.count("*").alias("trades"), F.min("trade_date").alias("first_day"), F.max("trade_date").alias("last_day"),
+                 F.round(F.sum("would_have_made_rs"), 0).alias("would_have_made_rs"),
+                 F.round(F.sum("actual_rs"), 0).alias("actual_rs"),
+                 F.round(F.sum("vs_actual_rs"), 0).alias("vs_actual_rs"),
+                 F.round(F.avg(F.when(F.col("vs_actual_rs") > 0, 100).otherwise(0)), 0).alias("beat_actual_pct")))
+
+
+# SQL equivalent:
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.orb_test AS
+#   SELECT trade_date, symbol, rule, value AS would_have_made_rs
+#   FROM trade_events LATERAL VIEW explode(split(note, ';')) ... WHERE event = 'orb_shadow';
+@dp.materialized_view(
+    name="stocks.gold.orb_test",
+    comment="The opening-range test on paper (top stocks in play each day): 5- vs 15-minute ranges, with a 2R "
+            "target or held to 15:10. One row per stock x day x variant, in rupees at the real trade size.",
+    table_properties={"quality": "gold"},
+)
+def orb_test():
+    ev = spark.read.table("stocks.silver.trade_events").filter("event = 'orb_shadow'")  # noqa: F821
+    return (_note_pairs(ev, ";").select("trade_date", "symbol", "rule", F.col("value").alias("would_have_made_rs"))
+            .withColumn("rule_label", _rule_label()))
+
+
+# SQL equivalent:
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.model_backtest AS
+#   SELECT trade_date AS run_date, setup AS rule, <note fields as columns> FROM trade_events
+#   WHERE event = 'model_backtest';
+@dp.materialized_view(
+    name="stocks.gold.model_backtest",
+    comment="The shadow models' daily walk-forward backtest (every scanner setup on every tradable stock, each day "
+            "judged only by models trained on earlier days), one row per run day x rule: signals, trades, total and "
+            "average result in R (1R ~ Rs 400), win %, share of days up, worst day; is_latest marks the newest run.",
+    table_properties={"quality": "gold"},
+)
+def model_backtest():
+    ev = spark.read.table("stocks.silver.trade_events").filter("event = 'model_backtest'")  # noqa: F821
+    wide = (ev.withColumn("m", F.expr("str_to_map(note, ';', '=')"))
+            .select(F.col("trade_date").alias("run_date"), F.col("setup").alias("rule"),
+                    *[F.expr(f"try_cast(m['{k}'] AS DOUBLE)").alias(k) for k in
+                      ("signals", "traded", "total_r", "avg_r", "win_pct", "days", "days_up_pct", "worst_day_r")])
+            .withColumn("rule_label", _rule_label()))
+    latest = wide.agg(F.max("run_date").alias("run_date")).withColumn("is_latest", F.lit(True))
+    base = wide.filter("rule = 'current'").select("run_date", F.col("total_r").alias("current_total_r"))
+    return (wide.join(latest, "run_date", "left").join(base, "run_date", "left")
+            .withColumn("is_latest", F.coalesce("is_latest", F.lit(False)))
+            .withColumn("vs_current_r", F.round(F.col("total_r") - F.col("current_total_r"), 1))
+            .drop("current_total_r"))
+
+
+# ---------------------------------------------------------------------------
 # Technical scanner (Nifty 200): indicators, the daily screen and how each signal has done since
 # ---------------------------------------------------------------------------
 # The indicator maths is plain pandas, run per stock (applyInPandas), between the two markers below; the tests

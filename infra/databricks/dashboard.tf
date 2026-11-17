@@ -250,6 +250,123 @@ locals {
     SQL
 
 
+    # --- Strategies: every real pool and every shadow pool, with NIFTYBEES over the same days ---
+    strategy_scoreboard = <<-SQL
+      ${local.strategy_scoreboard_sql}
+    SQL
+
+    swing_scoreboard = <<-SQL
+      SELECT * FROM (${local.strategy_scoreboard_sql}) WHERE grp = 'Swing'
+    SQL
+
+    longterm_scoreboard = <<-SQL
+      SELECT * FROM (${local.strategy_scoreboard_sql}) WHERE grp = 'Long-term'
+    SQL
+
+    strategy_returns = <<-SQL
+      ${local.strategy_returns_sql}
+    SQL
+
+    swing_returns = <<-SQL
+      SELECT * FROM (${local.strategy_returns_sql}) WHERE grp IN ('Swing', 'Benchmark')
+    SQL
+
+    longterm_returns = <<-SQL
+      SELECT * FROM (${local.strategy_returns_sql}) WHERE grp IN ('Long-term', 'Benchmark')
+    SQL
+
+    swing_holdings = <<-SQL
+      ${replace(local.strategy_holdings_sql, "__POOLS__", "'swing', 'swing_shadow', 'swing_tech_shadow'")}
+    SQL
+
+    longterm_holdings = <<-SQL
+      ${replace(local.strategy_holdings_sql, "__POOLS__", "'long_term', 'long_term_shadow'")}
+    SQL
+
+    scanner_today = <<-SQL
+      SELECT list_type, CAST(rank AS INT) AS rank, symbol, company, round(close, 2) AS close, setup, stance,
+             round(rsi14, 0) AS rsi, round(adx14, 0) AS adx, round(vol_ratio, 1) AS volume_x,
+             round(deliv_per, 0) AS delivery_pct, fno, round(entry_low, 2) AS entry_low, round(entry_high, 2) AS entry_high,
+             round(stop, 2) AS stop, round(target2, 2) AS target2, round(rr, 1) AS rr, misses, trade_date
+      FROM stocks.gold.technical_screen
+      WHERE list_type IN ('strict', 'near-miss')
+      ORDER BY list_type DESC, rank
+    SQL
+
+    scanner_record = <<-SQL
+      SELECT signal_label AS signal, CAST(horizon_days AS INT) AS days_after, CAST(signals AS INT) AS signals,
+             avg_return_pct, avg_excess_pct AS vs_niftybees_pct, beat_niftybees_pct
+      FROM stocks.gold.signal_performance
+      ORDER BY signal, horizon_days
+    SQL
+
+    # --- Intraday: what other rules and the shadow models would have done (paper only) ---
+    shadow_exit_rules = <<-SQL
+      SELECT rule_label AS rule, CAST(trades AS INT) AS trades, would_have_made_rs, actual_rs, vs_actual_rs, beat_actual_pct
+      FROM stocks.gold.shadow_rules_summary WHERE test = 'exit rules' AND rule <> 'current'
+      ORDER BY vs_actual_rs DESC
+    SQL
+
+    shadow_models_real = <<-SQL
+      SELECT rule_label AS rule, CAST(trades AS INT) AS trades, would_have_made_rs, actual_rs, vs_actual_rs, beat_actual_pct
+      FROM stocks.gold.shadow_rules_summary WHERE test = 'models' AND rule <> 'current'
+      ORDER BY vs_actual_rs DESC
+    SQL
+
+    model_backtest_latest = <<-SQL
+      SELECT rule_label AS rule, CAST(traded AS INT) AS trades, total_r, vs_current_r, avg_r, win_pct, days_up_pct,
+             worst_day_r, CAST(days AS INT) AS days, run_date
+      FROM stocks.gold.model_backtest WHERE is_latest
+      ORDER BY total_r DESC
+    SQL
+
+    model_backtest_trend = <<-SQL
+      SELECT run_date, rule_label AS rule, vs_current_r FROM stocks.gold.model_backtest
+      WHERE rule IN ('filter', 'vol_stop', 'early_cut', 'let_run', 'combined', 'wide_2')
+    SQL
+
+    orb_summary = <<-SQL
+      SELECT rule_label AS variant, CAST(count(*) AS INT) AS trades, round(sum(would_have_made_rs), 0) AS would_have_made_rs,
+             round(100 * avg(CASE WHEN would_have_made_rs > 0 THEN 1 ELSE 0 END), 0) AS win_rate_pct
+      FROM stocks.gold.orb_test GROUP BY rule_label ORDER BY would_have_made_rs DESC
+    SQL
+
+    shadow_trades_recent = <<-SQL
+      SELECT trade_date, symbol, side, setup, test, rule_label AS rule, round(actual_rs, 0) AS actual_rs,
+             round(would_have_made_rs, 0) AS would_have_made_rs, round(vs_actual_rs, 0) AS vs_actual_rs
+      FROM stocks.gold.shadow_rules_trades
+      WHERE trade_date >= date_sub(current_date(), 14) AND rule <> 'current'
+      ORDER BY trade_date DESC, symbol, test, rule
+    SQL
+
+    # --- Your ratings: how your 👍/👎 calls really did (ratings never train the trader) ---
+    rating_summary = <<-SQL
+      SELECT CASE rating WHEN 'like' THEN '👍 liked' WHEN 'dislike' THEN '👎 disliked' ELSE 'not rated' END AS rating,
+             decision_group AS decisions, CAST(proposals AS INT) AS proposals, CAST(wins AS INT) AS wins, win_rate_pct,
+             round(total_outcome_rs, 0) AS total_rs, round(avg_outcome_rs, 0) AS avg_rs, avg_outcome_r AS avg_r,
+             CAST(right_calls AS INT) AS right_calls, right_pct
+      FROM stocks.gold.rating_review
+      ORDER BY CASE rating WHEN 'like' THEN 1 WHEN 'dislike' THEN 2 ELSE 3 END,
+               CASE decision_group WHEN 'all' THEN 1 WHEN 'taken' THEN 2 ELSE 3 END
+    SQL
+
+    rating_chart = <<-SQL
+      SELECT CASE rating WHEN 'like' THEN '👍 liked' WHEN 'dislike' THEN '👎 disliked' ELSE 'not rated' END AS rating,
+             decision_group AS decisions, round(avg_outcome_rs, 0) AS avg_rs, win_rate_pct
+      FROM stocks.gold.rating_review WHERE decision_group IN ('taken', 'skipped')
+    SQL
+
+    rating_trades = <<-SQL
+      SELECT trade_date, symbol, setup, side,
+             CASE feedback WHEN 'like' THEN '👍' WHEN 'dislike' THEN '👎' END AS your_rating,
+             decision, suggested_yes_pct AS suggestion_pct, round(outcome_rs, 0) AS outcome_rs, round(outcome_r, 2) AS outcome_r,
+             CASE WHEN (feedback = 'like' AND won = 1) OR (feedback = 'dislike' AND won = 0) THEN 'right' ELSE 'wrong' END AS your_call
+      FROM stocks.gold.proposal_outcomes
+      WHERE feedback IS NOT NULL AND outcome_rs IS NOT NULL
+      ORDER BY proposed_at DESC
+      LIMIT 200
+    SQL
+
     trading_recent = <<-SQL
       SELECT trade_date, symbol, side, setup, CAST(qty AS INT) AS qty,
              entry_price, exit_price, exit_reason,
@@ -260,6 +377,63 @@ locals {
       LIMIT 50
     SQL
   }
+
+  # Every strategy (real pools and shadow pools) in one shape: label, group, start, latest return, NIFTYBEES over the
+  # same days (from the pool's first snapshot to its latest), and the difference.
+  strategy_label_sql = <<-SQL
+    CASE pool WHEN 'intraday' THEN 'Intraday (real)' WHEN 'swing' THEN 'Swing (real: held in NIFTYBEES)'
+              WHEN 'long_term' THEN 'Long-term (real: cash until buying starts)'
+              WHEN 'swing_shadow' THEN 'Swing shadow: news breakouts' WHEN 'swing_tech_shadow' THEN 'Swing shadow: technical scanner'
+              WHEN 'long_term_shadow' THEN 'Long-term shadow: quality picks' ELSE pool END
+  SQL
+  strategy_group_sql = "CASE WHEN pool LIKE 'swing%' THEN 'Swing' WHEN pool LIKE 'long_term%' THEN 'Long-term' ELSE 'Intraday' END"
+
+  strategy_daily_sql = <<-SQL
+    SELECT snapshot_date, pool, capital, equity, 'real' AS kind FROM stocks.silver.portfolio_pools
+    UNION ALL
+    SELECT snapshot_date, pool, capital, equity, 'shadow' AS kind FROM stocks.silver.shadow_pools
+  SQL
+
+  strategy_scoreboard_sql = <<-SQL
+    WITH d AS (${local.strategy_daily_sql}),
+         nb AS (SELECT trade_date, close FROM stocks.silver.nse_eq_daily WHERE symbol = 'NIFTYBEES' AND series = 'EQ'),
+         span AS (SELECT pool, kind, min(snapshot_date) AS start_date, max(snapshot_date) AS last_date FROM d GROUP BY pool, kind),
+         last AS (SELECT d.* FROM d JOIN span s ON d.pool = s.pool AND d.snapshot_date = s.last_date)
+    SELECT ${replace(local.strategy_group_sql, "pool", "s.pool")} AS grp,
+           ${replace(local.strategy_label_sql, "pool", "s.pool")} AS strategy,
+           s.kind, s.start_date, s.last_date, round(l.equity, 0) AS value_rs,
+           round((l.equity / l.capital - 1) * 100, 2) AS return_pct,
+           round(((SELECT max_by(close, trade_date) FROM nb WHERE trade_date <= s.last_date)
+                / (SELECT max_by(close, trade_date) FROM nb WHERE trade_date <= s.start_date) - 1) * 100, 2) AS niftybees_pct,
+           round((l.equity / l.capital - 1) * 100
+                 - ((SELECT max_by(close, trade_date) FROM nb WHERE trade_date <= s.last_date)
+                    / (SELECT max_by(close, trade_date) FROM nb WHERE trade_date <= s.start_date) - 1) * 100, 2) AS vs_niftybees_pct
+    FROM span s JOIN last l ON l.pool = s.pool
+  SQL
+
+  strategy_returns_sql = <<-SQL
+    WITH d AS (${local.strategy_daily_sql})
+    SELECT snapshot_date, ${local.strategy_label_sql} AS strategy, ${local.strategy_group_sql} AS grp,
+           round((equity / capital - 1) * 100, 2) AS return_pct
+    FROM d
+    UNION ALL
+    SELECT snapshot_date, 'NIFTYBEES (since the portfolio started)' AS strategy, 'Benchmark' AS grp,
+           round(nifty_index - 100, 2) AS return_pct
+    FROM stocks.gold.portfolio_daily WHERE nifty_index IS NOT NULL
+  SQL
+
+  strategy_holdings_sql = <<-SQL
+    WITH h AS (
+      SELECT pool, symbol, sector, qty, avg_cost, last_price, value, pnl, opened, snapshot_date FROM stocks.silver.portfolio_holdings
+      UNION ALL
+      SELECT pool, symbol, sector, qty, avg_cost, last_price, value, pnl, opened, snapshot_date FROM stocks.silver.shadow_holdings)
+    SELECT ${local.strategy_label_sql} AS strategy, symbol, sector, CAST(qty AS INT) AS qty, round(avg_cost, 2) AS avg_cost,
+           round(last_price, 2) AS last_price, round(value, 0) AS value_rs, round(pnl, 0) AS pnl_rs,
+           round(100 * pnl / nullif(value - pnl, 0), 2) AS pnl_pct, opened
+    FROM h
+    WHERE pool IN (__POOLS__) AND snapshot_date = (SELECT max(snapshot_date) FROM h)
+    ORDER BY strategy, value DESC
+  SQL
 
   # Helpers to keep widget definitions short.
   raw_fields = {
@@ -291,6 +465,25 @@ locals {
       summary_portfolio    = ["in_plain_words"]
       summary_intraday     = ["in_plain_words"]
       summary_quality      = ["in_plain_words"]
+      strategy_scoreboard  = ["grp", "strategy", "kind", "start_date", "last_date", "value_rs", "return_pct", "niftybees_pct", "vs_niftybees_pct"]
+      swing_scoreboard     = ["strategy", "kind", "start_date", "last_date", "value_rs", "return_pct", "niftybees_pct", "vs_niftybees_pct"]
+      longterm_scoreboard  = ["strategy", "kind", "start_date", "last_date", "value_rs", "return_pct", "niftybees_pct", "vs_niftybees_pct"]
+      strategy_returns     = ["snapshot_date", "strategy", "grp", "return_pct"]
+      swing_returns        = ["snapshot_date", "strategy", "return_pct"]
+      longterm_returns     = ["snapshot_date", "strategy", "return_pct"]
+      swing_holdings       = ["strategy", "symbol", "sector", "qty", "avg_cost", "last_price", "value_rs", "pnl_rs", "pnl_pct", "opened"]
+      longterm_holdings    = ["strategy", "symbol", "sector", "qty", "avg_cost", "last_price", "value_rs", "pnl_rs", "pnl_pct", "opened"]
+      scanner_today        = ["list_type", "rank", "symbol", "company", "close", "setup", "stance", "rsi", "adx", "volume_x", "delivery_pct", "fno", "entry_low", "entry_high", "stop", "target2", "rr", "misses", "trade_date"]
+      scanner_record       = ["signal", "days_after", "signals", "avg_return_pct", "vs_niftybees_pct", "beat_niftybees_pct"]
+      shadow_exit_rules    = ["rule", "trades", "would_have_made_rs", "actual_rs", "vs_actual_rs", "beat_actual_pct"]
+      shadow_models_real   = ["rule", "trades", "would_have_made_rs", "actual_rs", "vs_actual_rs", "beat_actual_pct"]
+      model_backtest_latest = ["rule", "trades", "total_r", "vs_current_r", "avg_r", "win_pct", "days_up_pct", "worst_day_r", "days", "run_date"]
+      model_backtest_trend = ["run_date", "rule", "vs_current_r"]
+      orb_summary          = ["variant", "trades", "would_have_made_rs", "win_rate_pct"]
+      shadow_trades_recent = ["trade_date", "symbol", "side", "setup", "test", "rule", "actual_rs", "would_have_made_rs", "vs_actual_rs"]
+      rating_summary       = ["rating", "decisions", "proposals", "wins", "win_rate_pct", "total_rs", "avg_rs", "avg_r", "right_calls", "right_pct"]
+      rating_chart         = ["rating", "decisions", "avg_rs", "win_rate_pct"]
+      rating_trades        = ["trade_date", "symbol", "setup", "side", "your_rating", "decision", "suggestion_pct", "outcome_rs", "outcome_r", "your_call"]
     } : ds => [for c in cols : { name = c, expression = "`${c}`" }]
   }
 
@@ -354,7 +547,16 @@ locals {
       intra_drawdown    = { ds = "intraday_curve", type = "area", x = "trade_date", xt = "temporal", y = "below_peak_rs", color = null, title = "Below the best P&L so far (Rs)", desc = "How far the P&L is below its best total (Rs). Deep or long dips mean risky trading.", pos = [0, 15, 4, 5] }
       intra_setup       = { ds = "intraday_setup_chart", type = "bar", x = "setup", xt = "categorical", y = "net_pnl_rs", color = null, title = "P&L by setup (Rs)", desc = "Which kinds of trade made or lost money.", pos = [4, 15, 4, 5] }
       intra_hour        = { ds = "intraday_hour_chart", type = "bar", x = "entry_hour", xt = "categorical", y = "net_pnl_rs", color = null, title = "P&L by entry hour, IST (Rs)", desc = "Which entry times made or lost money (IST).", pos = [8, 15, 4, 5] }
-      quality_scatter   = { ds = "quality_scatter", type = "scatter", x = "roce_pct", xt = "quantitative", y = "pe", color = "tests", title = "Quality vs price: return on capital (%) against P/E, coloured by tests passed (excl. banks)", desc = "Each dot is a company (banks left out). Further right = more profitable; lower = cheaper. Bottom right is the sweet spot.", pos = [0, 6, 12, 7] }
+      port_strategies   = { ds = "strategy_returns", type = "line", x = "snapshot_date", xt = "temporal", y = "return_pct", color = "strategy", title = "Every strategy: return since it started (%), real and shadow", desc = "Real pools hold real dummy money; shadow pools test other rules on paper with the same costs. Each line starts at 0 on its own first day.", pos = [0, 31, 12, 7] }
+      intra_exit_rules  = { ds = "shadow_exit_rules", type = "bar", x = "rule", xt = "categorical", y = "vs_actual_rs", color = null, title = "Exit rules on your real trades: gain vs what happened (Rs)", desc = "Each closed trade replayed on its 1-minute candles under another exit rule. Above 0 = that rule would have made more than what really happened.", pos = [0, 49, 6, 6] }
+      intra_models_real = { ds = "shadow_models_real", type = "bar", x = "rule", xt = "categorical", y = "vs_actual_rs", color = null, title = "Shadow models on your real trades: gain vs what happened (Rs)", desc = "Each real trade scored by models trained only on earlier days. Above 0 = the model's decision would have made more.", pos = [6, 49, 6, 6] }
+      intra_backtest    = { ds = "model_backtest_latest", type = "bar", x = "rule", xt = "categorical", y = "vs_current_r", color = null, title = "Backtest, all setups on ~200 stocks: each rule vs current rules (R)", desc = "Latest walk-forward run (each day judged by models trained only on earlier days). R = one unit of risk, about Rs 400. Above 0 = better than the current rules.", pos = [0, 55, 6, 6] }
+      intra_bt_trend    = { ds = "model_backtest_trend", type = "line", x = "run_date", xt = "temporal", y = "vs_current_r", color = "rule", title = "Is each model's edge holding up? (R vs current rules, by run day)", desc = "One point per daily run. A line that stays above 0 run after run is a model worth reviewing for go-live.", pos = [6, 55, 6, 6] }
+      intra_orb         = { ds = "orb_summary", type = "bar", x = "variant", xt = "categorical", y = "would_have_made_rs", color = null, title = "Opening-range test on paper (Rs)", desc = "The top stocks in play each day, traded on paper with a 5- or 15-minute opening range, a 2R target or held to 15:10.", pos = [0, 61, 6, 5] }
+      swing_curve       = { ds = "swing_returns", type = "line", x = "snapshot_date", xt = "temporal", y = "return_pct", color = "strategy", title = "Swing: real pool vs shadow strategies vs NIFTYBEES (return %)", desc = "The real swing pool holds NIFTYBEES; the shadow pools trade stocks on paper (news breakouts, technical scanner). Each line starts at 0 on its own first day.", pos = [0, 6, 12, 7] }
+      lt_curve          = { ds = "longterm_returns", type = "line", x = "snapshot_date", xt = "temporal", y = "return_pct", color = "strategy", title = "Long-term: real pool vs shadow vs NIFTYBEES (return %)", desc = "The real pool waits in cash until its go/no-go review; the shadow pool buys the weekly quality picks on paper.", pos = [0, 6, 12, 7] }
+      rating_bars       = { ds = "rating_chart", type = "bar", x = "rating", xt = "categorical", y = "avg_rs", color = "decisions", title = "Average result per proposal, by your rating (Rs)", desc = "Taken = the real net result; skipped = what it would have made. If 👍 bars are above 👎 bars, your instinct is adding something.", pos = [0, 9, 12, 6] }
+      quality_scatter   = { ds = "quality_scatter", type = "scatter", x = "roce_pct", xt = "quantitative", y = "pe", color = "tests", title = "Quality vs price: return on capital (%) against P/E, coloured by tests passed (excl. banks)", desc = "Each dot is a company (banks left out). Further right = more profitable; lower = cheaper. Bottom right is the sweet spot.", pos = [0, 23, 12, 7] }
       } : k => {
       widget = {
         name = k
@@ -385,11 +587,22 @@ locals {
   table_widget = {
     for k, t in {
       holdings          = { ds = "holdings", title = "Current holdings (all pools)", desc = "Everything held right now, largest first. Weight = share of the whole portfolio; P&L includes buying costs.", pos = [0, 25, 12, 6] }
-      quality_top       = { ds = "longterm_picks", title = "Long-term pool: this week's 10 picks (max 2 per industry) and the next 20", desc = "Eligible Nifty 200 companies: quality score 0.6 or more, profitable, no two-quarter profit fall. Score = 100 x quality + growth bonus - price penalty. Target weight = share of the Rs 1 lakh pool; 10% stays in cash. Shadow mode: nothing is bought yet.", pos = [0, 13, 12, 10] }
+      quality_top       = { ds = "longterm_picks", title = "Long-term pool: this week's 10 picks (max 2 per industry) and the next 20", desc = "Eligible Nifty 200 companies: quality score 0.6 or more, profitable, no two-quarter profit fall. Score = 100 x quality + growth bonus - price penalty. Target weight = share of the Rs 1 lakh pool; 10% stays in cash. Shadow mode: nothing is bought yet.", pos = [0, 30, 12, 10] }
       summary_overview  = { ds = "summary_overview", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 2, 12, 4] }
       summary_portfolio = { ds = "summary_portfolio", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 2, 12, 4] }
       summary_intraday  = { ds = "summary_intraday", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 2, 12, 4] }
-      summary_quality   = { ds = "summary_quality", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 2, 12, 4] }
+      summary_quality   = { ds = "summary_quality", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 19, 12, 4] }
+      port_scoreboard   = { ds = "strategy_scoreboard", title = "Scoreboard: every strategy vs NIFTYBEES over the same days", desc = "Real pools and shadow pools (paper). Return since each one started; NIFTYBEES over exactly the same days; the difference.", pos = [0, 38, 12, 6] }
+      intra_bt_table    = { ds = "model_backtest_latest", title = "Backtest details (latest run)", desc = "All rules on the same setups. Trades = setups taken (the filter skips some). Worst day = the worst single day's total.", pos = [0, 66, 12, 7] }
+      intra_shadow_list = { ds = "shadow_trades_recent", title = "Your trades under other rules (last 14 days)", desc = "Every real trade, what really happened, and what each rule or model would have made instead.", pos = [6, 61, 6, 5] }
+      swing_board       = { ds = "swing_scoreboard", title = "Swing scoreboard", desc = "Return since each started vs NIFTYBEES over the same days.", pos = [0, 2, 12, 4] }
+      swing_hold        = { ds = "swing_holdings", title = "What each swing strategy holds now", desc = "Real pool and shadow pools (paper).", pos = [0, 13, 12, 6] }
+      swing_scan        = { ds = "scanner_today", title = "Today's technical scanner (Nifty 200): strict picks and near-misses", desc = "What the scanner shadow pool buys from (next day, only at the scanner's level). Indicative levels, never a guaranteed return.", pos = [0, 19, 12, 7] }
+      swing_signals     = { ds = "scanner_record", title = "How each scanner signal did afterwards (vs NIFTYBEES)", desc = "Average return 5, 10 and 20 trading days after each signal over ~6 months, and how often it beat NIFTYBEES. Past results only.", pos = [0, 26, 12, 7] }
+      lt_board          = { ds = "longterm_scoreboard", title = "Long-term scoreboard", desc = "Return since each started vs NIFTYBEES over the same days.", pos = [0, 2, 12, 4] }
+      lt_hold           = { ds = "longterm_holdings", title = "What each long-term strategy holds now", desc = "Real pool and shadow pool (paper).", pos = [0, 13, 12, 6] }
+      rating_table      = { ds = "rating_summary", title = "Your 👍/👎 vs what really happened", desc = "For your own learning: ratings never train the trader. Right calls = a 👍 that made money or a 👎 that lost (taken: real result; skipped: what it would have made).", pos = [0, 2, 12, 7] }
+      rating_list       = { ds = "rating_trades", title = "Every rated proposal (newest first)", desc = "Your rating, what the trader did, and the outcome.", pos = [0, 15, 12, 9] }
       details_unusual   = { ds = "unusual_latest", title = "Unusual volume, latest session (top 15)", desc = "Full numbers behind the Overview chart.", pos = [0, 2, 12, 6] }
       details_global    = { ds = "global_latest", title = "Global markets: latest reading", desc = "FRED series and US-listed country ETFs.", pos = [0, 8, 12, 8] }
       details_ivg       = { ds = "india_vs_global", title = "India's next open vs global moves", desc = "Correlation over all sessions; same direction = how often the gap matched the global move.", pos = [0, 16, 12, 7] }
@@ -422,84 +635,6 @@ locals {
     ]
 
     pages = [{
-      name          = "overview"
-      displayName   = "Overview"
-      pageType      = "PAGE_TYPE_CANVAS"
-      layoutVersion = "GRID_V1"
-      layout = concat([
-        {
-          widget = {
-            name                 = "title"
-            multilineTextboxSpec = { lines = ["## Stocks lakehouse: India x US", "Daily NSE, US (Massive) and global (FRED) data. Proxies: NIFTYBEES (Nifty 50) and SPY (S&P 500). Historical tendencies, not advice."] }
-          }
-          position = { x = 0, y = 0, width = 12, height = 2 }
-        },
-        {
-          widget = {
-            name = "breadth_chart"
-            queries = [{
-              name = "main_query"
-              query = {
-                datasetName   = "breadth"
-                disaggregated = false
-                fields = [
-                  { name = "trade_date", expression = "`trade_date`" },
-                  { name = "market", expression = "`market`" },
-                  { name = "avg(pct_above_ma20)", expression = "AVG(`pct_above_ma20`)" },
-                ]
-              }
-            }]
-            spec = {
-              version    = 3
-              widgetType = "line"
-              encodings = {
-                x     = { fieldName = "trade_date", scale = { type = "temporal" }, displayName = "Date" }
-                y     = { fieldName = "avg(pct_above_ma20)", scale = { type = "quantitative" }, displayName = "% of stocks above 20-day average" }
-                color = { fieldName = "market", scale = { type = "categorical" }, displayName = "Market" }
-              }
-              frame = { showTitle = true, title = "Market breadth: % of stocks above their 20-day average", showDescription = true, description = "Above 60% = most stocks are rising (broad strength); below 40% = most are falling." }
-            }
-          }
-          position = { x = 0, y = 6, width = 6, height = 6 }
-        },
-        {
-          widget = {
-            name = "us_vs_india_scatter"
-            queries = [{
-              name  = "main_query"
-              query = { datasetName = "us_vs_india", disaggregated = true, fields = local.raw_fields.us_vs_india }
-            }]
-            spec = {
-              version    = 3
-              widgetType = "scatter"
-              encodings = {
-                x     = { fieldName = "us_return_pct", scale = { type = "quantitative" }, displayName = "US session return % (SPY)" }
-                y     = { fieldName = "india_gap_pct", scale = { type = "quantitative" }, displayName = "Next India open gap % (NIFTYBEES)" }
-                color = { fieldName = "us_move", scale = { type = "categorical" }, displayName = "US move" }
-              }
-              frame = { showTitle = true, title = "Does India's open follow the US close?", showDescription = true, description = "Each dot is one day: the US move (across) and India's opening gap next morning (up). Dots along a rising line mean India tends to follow the US." }
-            }
-          }
-          position = { x = 6, y = 6, width = 6, height = 6 }
-        },
-        {
-          widget = {
-            name = "us_vs_india_summary_table"
-            queries = [{
-              name  = "main_query"
-              query = { datasetName = "us_vs_india_summary", disaggregated = true, fields = local.raw_fields.us_vs_india_summary }
-            }]
-            spec = {
-              version    = 2
-              widgetType = "table"
-              encodings  = { columns = local.table_columns.us_vs_india_summary }
-              frame      = { showTitle = true, title = "How India trades after US down / flat / up days", showDescription = true, description = "The averages behind the dots above, grouped by the size of the US move." }
-            }
-          }
-          position = { x = 0, y = 18, width = 12, height = 4 }
-        },
-      ], [local.table_widget.summary_overview, local.chart.ov_unusual, local.chart.ov_global, local.chart.ov_corr, local.chart.ov_adr])
-      }, {
       name          = "portfolio"
       displayName   = "Portfolio"
       pageType      = "PAGE_TYPE_CANVAS"
@@ -508,14 +643,14 @@ locals {
         [{
           widget = {
             name                 = "portfolio_title"
-            multilineTextboxSpec = { lines = ["## Portfolio (dummy money, Rs 2 lakh)", "All three pools from bumblebee26/paper-trader: intraday (trading), swing (held in NIFTYBEES while its rules are on hold) and long-term. Updated daily at 15:45 IST. Not advice."] }
+            multilineTextboxSpec = { lines = ["## Portfolio (dummy money, Rs 2 lakh)", "All three pools from bumblebee26/paper-trader: intraday (trading), swing (held in NIFTYBEES while its rules are on hold) and long-term. Bottom: every real and shadow strategy side by side. Updated daily at 15:45 IST. Not advice."] }
           }
           position = { x = 0, y = 0, width = 12, height = 2 }
         }],
         [local.table_widget.summary_portfolio],
         local.counter_widgets.portfolio_kpis,
         [local.chart.port_vs_nifty, local.chart.port_alloc_pool, local.chart.port_drawdown, local.chart.port_alloc_sector,
-        local.chart.port_pools, local.table_widget.holdings],
+        local.chart.port_pools, local.table_widget.holdings, local.chart.port_strategies, local.table_widget.port_scoreboard],
       )
       }, {
       name          = "paper_trading"
@@ -614,25 +749,151 @@ locals {
             }
             position = { x = 0, y = 40, width = 12, height = 8 }
           },
+          {
+            widget = {
+              name                 = "intraday_shadow_title"
+              multilineTextboxSpec = { lines = ["### Shadow tests (paper only: nothing here changes a real trade)", "Exit rules and the shadow models (volatility stop, trade filter, early cut, let winners run) on your real trades and on every scanner setup across ~200 stocks. Reviewed with you before anything goes live (before December)."] }
+            }
+            position = { x = 0, y = 48, width = 12, height = 1 }
+          },
         ],
+        [local.chart.intra_exit_rules, local.chart.intra_models_real, local.chart.intra_backtest, local.chart.intra_bt_trend,
+        local.chart.intra_orb, local.table_widget.intra_shadow_list, local.table_widget.intra_bt_table],
       )
       }, {
-      name          = "company_quality"
-      displayName   = "Company quality"
+      name          = "swing"
+      displayName   = "Swing"
+      pageType      = "PAGE_TYPE_CANVAS"
+      layoutVersion = "GRID_V1"
+      layout = [
+        {
+          widget = {
+            name                 = "swing_title"
+            multilineTextboxSpec = { lines = ["## Swing pool: real vs shadow strategies (dummy money)", "Real pool: Rs 60,000 held in NIFTYBEES while new rules are tested. Shadow pools (paper, same costs): news breakouts (from 16 Nov) and the technical scanner's strict picks (from 17 Nov). Not advice."] }
+          }
+          position = { x = 0, y = 0, width = 12, height = 2 }
+        },
+        local.table_widget.swing_board,
+        local.chart.swing_curve,
+        local.table_widget.swing_hold,
+        local.table_widget.swing_scan,
+        local.table_widget.swing_signals,
+      ]
+      }, {
+      name          = "long_term"
+      displayName   = "Long term"
       pageType      = "PAGE_TYPE_CANVAS"
       layoutVersion = "GRID_V1"
       layout = [
         {
           widget = {
             name                 = "quality_title"
-            multilineTextboxSpec = { lines = ["## Company quality (long-term pool candidates)", "About 250 large NSE companies, refreshed weekly (Saturday). Tests: return on capital above 15% (banks: return on assets above 1.2%), debt below half of equity, operating cash flow positive in most years, revenue and profit growing over 10% a year, P/E in the cheaper half. Not advice."] }
+            multilineTextboxSpec = { lines = ["## Long-term pool: real vs shadow (dummy money)", "Real pool: Rs 1 lakh in cash until its go/no-go review (18 Dec). Shadow pool (paper): buys the weekly quality picks. Below: company quality, refreshed every Saturday. Tests: return on capital above 15% (banks: return on assets above 1.2%), debt below half of equity, operating cash flow positive in most years, revenue and profit growing over 10% a year, P/E in the cheaper half. Not advice."] }
           }
           position = { x = 0, y = 0, width = 12, height = 2 }
         },
-        local.chart.quality_scatter,
+        local.table_widget.lt_board,
+        local.chart.lt_curve,
+        local.table_widget.lt_hold,
         local.table_widget.summary_quality,
+        local.chart.quality_scatter,
         local.table_widget.quality_top,
       ]
+      }, {
+      name          = "ratings"
+      displayName   = "Your ratings"
+      pageType      = "PAGE_TYPE_CANVAS"
+      layoutVersion = "GRID_V1"
+      layout = [
+        {
+          widget = {
+            name                 = "ratings_title"
+            multilineTextboxSpec = { lines = ["## Your 👍/👎: how your calls really did", "For you to learn from: ratings are recorded on Telegram but never train the trader (from 17 Nov). Outcome = the real net result if the trade was taken, what it would have made if skipped."] }
+          }
+          position = { x = 0, y = 0, width = 12, height = 2 }
+        },
+        local.table_widget.rating_table,
+        local.chart.rating_bars,
+        local.table_widget.rating_list,
+      ]
+      }, {
+      name          = "overview"
+      displayName   = "Overview"
+      pageType      = "PAGE_TYPE_CANVAS"
+      layoutVersion = "GRID_V1"
+      layout = concat([
+        {
+          widget = {
+            name                 = "title"
+            multilineTextboxSpec = { lines = ["## Stocks lakehouse: India x US", "Daily NSE, US (Massive) and global (FRED) data. Proxies: NIFTYBEES (Nifty 50) and SPY (S&P 500). Historical tendencies, not advice."] }
+          }
+          position = { x = 0, y = 0, width = 12, height = 2 }
+        },
+        {
+          widget = {
+            name = "breadth_chart"
+            queries = [{
+              name = "main_query"
+              query = {
+                datasetName   = "breadth"
+                disaggregated = false
+                fields = [
+                  { name = "trade_date", expression = "`trade_date`" },
+                  { name = "market", expression = "`market`" },
+                  { name = "avg(pct_above_ma20)", expression = "AVG(`pct_above_ma20`)" },
+                ]
+              }
+            }]
+            spec = {
+              version    = 3
+              widgetType = "line"
+              encodings = {
+                x     = { fieldName = "trade_date", scale = { type = "temporal" }, displayName = "Date" }
+                y     = { fieldName = "avg(pct_above_ma20)", scale = { type = "quantitative" }, displayName = "% of stocks above 20-day average" }
+                color = { fieldName = "market", scale = { type = "categorical" }, displayName = "Market" }
+              }
+              frame = { showTitle = true, title = "Market breadth: % of stocks above their 20-day average", showDescription = true, description = "Above 60% = most stocks are rising (broad strength); below 40% = most are falling." }
+            }
+          }
+          position = { x = 0, y = 6, width = 6, height = 6 }
+        },
+        {
+          widget = {
+            name = "us_vs_india_scatter"
+            queries = [{
+              name  = "main_query"
+              query = { datasetName = "us_vs_india", disaggregated = true, fields = local.raw_fields.us_vs_india }
+            }]
+            spec = {
+              version    = 3
+              widgetType = "scatter"
+              encodings = {
+                x     = { fieldName = "us_return_pct", scale = { type = "quantitative" }, displayName = "US session return % (SPY)" }
+                y     = { fieldName = "india_gap_pct", scale = { type = "quantitative" }, displayName = "Next India open gap % (NIFTYBEES)" }
+                color = { fieldName = "us_move", scale = { type = "categorical" }, displayName = "US move" }
+              }
+              frame = { showTitle = true, title = "Does India's open follow the US close?", showDescription = true, description = "Each dot is one day: the US move (across) and India's opening gap next morning (up). Dots along a rising line mean India tends to follow the US." }
+            }
+          }
+          position = { x = 6, y = 6, width = 6, height = 6 }
+        },
+        {
+          widget = {
+            name = "us_vs_india_summary_table"
+            queries = [{
+              name  = "main_query"
+              query = { datasetName = "us_vs_india_summary", disaggregated = true, fields = local.raw_fields.us_vs_india_summary }
+            }]
+            spec = {
+              version    = 2
+              widgetType = "table"
+              encodings  = { columns = local.table_columns.us_vs_india_summary }
+              frame      = { showTitle = true, title = "How India trades after US down / flat / up days", showDescription = true, description = "The averages behind the dots above, grouped by the size of the US move." }
+            }
+          }
+          position = { x = 0, y = 18, width = 12, height = 4 }
+        },
+      ], [local.table_widget.summary_overview, local.chart.ov_unusual, local.chart.ov_global, local.chart.ov_corr, local.chart.ov_adr])
       }, {
       name          = "details"
       displayName   = "Details (full tables)"
