@@ -64,7 +64,7 @@ Each new file is read once. Every bronze table has these lineage columns: `_sour
 | `silver.nse_delivery` | symbol × series × day | `deliv_qty`, `deliv_per` (share of traded quantity taken as delivery) | keys present |
 | `silver.fno_symbols` | symbol | NSE's latest F&O stock list: `symbol`, `underlying`, `as_of` | — |
 | `silver.shadow_holdings` | day × shadow pool × symbol | What each shadow pool holds: `qty`, `avg_cost`, `last_price`, `value`, `pnl`, `opened` | keys present |
-| `silver.shadow_pools` | day × shadow pool | `pool` (swing_shadow, swing_tech_shadow, swing_mom_shadow, long_term_shadow, long_term_mom_shadow), `capital`, `cash`, `holdings_value`, `equity` (newest file per day; never in the portfolio totals) | keys and equity present |
+| `silver.shadow_pools` | day × shadow pool | `pool` (swing_shadow, swing_tech_shadow, swing_mom_shadow, swing_mom_conc_shadow, long_term_shadow, long_term_mom_shadow, long_term_mom_conc_shadow), `capital`, `cash`, `holdings_value`, `equity` (newest file per day; never in the portfolio totals) | keys and equity present |
 | `silver.portfolio_holdings` | day × pool × symbol | `sector`, `qty`, `avg_cost`, `last_price`, `value`, `pnl`, `opened` | keys present |
 | `silver.fundamentals` | company × metric × period | `symbol`, `metric`, `period_type`, `period_end`, `value`, `currency`, `fetched_at`. Newest weekly fetch wins (restatements replace old figures). | keys and value present |
 | `silver.country_etfs` | ticker | Reference list of the 12 country ETFs: `symbol`, `name`, `region` (from `COUNTRY_ETFS` in `silver.py`) | — |
