@@ -19,11 +19,33 @@ CTAS = re.compile(r"^\s*CREATE\s+OR\s+REPLACE\s+TABLE\s+\S+\s*(?:COMMENT\s+'[^']
 NOT_FOUND = ("TABLE_OR_VIEW_NOT_FOUND",)
 
 
+ONE_LINE_SQL = re.compile(r'^\s*(\w+_sql)\s*=\s*"(.*)"\s*$', re.M)
+LOCAL_REF = re.compile(r'\$\{local\.(\w+)\}')
+REPLACE_REF = re.compile(r'\$\{replace\(local\.(\w+),\s*"([^"]*)",\s*"([^"]*)"\)\}')
+
+
+def render(sql, helpers):
+    """Expand the Terraform interpolations the datasets use: ${local.X} and ${replace(local.X, "a", "b")}, where X
+    is a shared SQL piece (a local whose name ends in _sql)."""
+    for _ in range(6):
+        new = REPLACE_REF.sub(lambda m: helpers[m.group(1)].replace(m.group(2), m.group(3)), sql)
+        new = LOCAL_REF.sub(lambda m: helpers[m.group(1)], new)
+        if new == sql:
+            break
+        sql = new
+    return sql
+
+
 def statements():
     out = []
     tf = open(os.path.join(ROOT, "infra", "databricks", "dashboard.tf")).read()
-    for name, sql in HEREDOC.findall(tf):
-        out.append((f"dashboard dataset {name}", sql.strip()))
+    found = HEREDOC.findall(tf)
+    helpers = {name: sql.strip() for name, sql in found if name.endswith("_sql")}
+    helpers.update({name: sql.replace('\\"', '"') for name, sql in ONE_LINE_SQL.findall(tf)})
+    for name, sql in found:
+        if name.endswith("_sql"):          # a shared piece, not a dataset of its own
+            continue
+        out.append((f"dashboard dataset {name}", render(sql.strip(), helpers)))
     sql_dir = os.path.join(ROOT, "sql")
     for fname in sorted(os.listdir(sql_dir)) if os.path.isdir(sql_dir) else []:
         if not fname.endswith(".sql"):

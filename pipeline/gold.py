@@ -707,12 +707,14 @@ def trading_decisions():
 #   LEFT JOIN latest user_feedback fb ...;
 #   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.track_record AS
 #   SELECT 'setup' AS dimension, setup AS value, count(*) AS trades, sum(won) AS wins, ... FROM outcomes
-#   GROUP BY setup UNION ALL ... (hour, mood, yes_band, reviewer, mode, decision, feedback, source, sector, side,
+#   GROUP BY setup UNION ALL ... (hour, mood, yes_band, reviewer, mode, decision, source, sector, side,
 #   scanner, all);
+# The user's 👍/👎 is kept in proposal_outcomes for their own review (gold.rating_review, the dashboard's "Your
+# ratings" page) but is never a track_record dimension: ratings don't train the trader (from 17 Nov).
 TRACK_DAYS = 90
 TRACK_DIMENSIONS = [("all", None), ("setup", "setup"), ("hour", "hour"), ("mood", "mood"), ("yes_band", "yes_band"),
                     ("reviewer", "reviewer_verdict"), ("mode", "mode"), ("decision", "decision"),
-                    ("feedback", "feedback"), ("source", "source"), ("sector", "sector"), ("side", "side"),
+                    ("source", "source"), ("sector", "sector"), ("side", "side"),
                     ("scanner", "scanner")]
 
 # Sector of each watchlist stock, as paper-trader names them (trader/sectors.py), for proposals made before the
@@ -854,7 +856,7 @@ def proposal_outcomes():
 @dp.materialized_view(
     name="stocks.gold.track_record",
     comment=f"How proposals turned out over the last {TRACK_DAYS} days, by dimension (setup, hour, mood, yes_band, "
-            "reviewer, mode, decision, feedback, source, sector, side (BUY/SELL), all): proposals with an outcome, wins, win rate, average and total "
+            "reviewer, mode, decision, source, sector, side (BUY/SELL), scanner, all; never the user's ratings): proposals with an outcome, wins, win rate, average and total "
             "outcome in rupees. paper-trader shows it in proposals and gives it to Claude each session.",
     table_properties={"quality": "gold"},
 )
@@ -880,6 +882,41 @@ def track_record():
     for part in parts[1:]:
         out = out.unionByName(part)
     return out.withColumn("win_rate_pct", F.round(F.col("wins") / F.col("trades") * 100, 1))
+
+
+# SQL equivalent (abridged):
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.rating_review AS
+#   SELECT coalesce(feedback, 'not rated') AS rating, decision_group, count(*) AS proposals, sum(won) AS wins,
+#          avg(won) * 100 AS win_rate_pct, sum(outcome_rs) AS total_outcome_rs, avg(outcome_rs) AS avg_outcome_rs,
+#          avg(outcome_r) AS avg_outcome_r,
+#          sum(CASE WHEN feedback = 'like' AND won = 1 OR feedback = 'dislike' AND won = 0 THEN 1 END) AS right_calls
+#   FROM stocks.gold.proposal_outcomes WHERE outcome_rs IS NOT NULL
+#   GROUP BY 1, 2 (decision_group: taken / skipped / all) ...;
+@dp.materialized_view(
+    name="stocks.gold.rating_review",
+    comment="Your 👍/👎 against what really happened, for your own learning (ratings never train the trader): per "
+            "rating (like, dislike, not rated) and decision group (taken, skipped, all): proposals with an outcome, "
+            "wins, win rate, total and average result in rupees and R, and right_calls (a 👍 that made money or a 👎 "
+            "that lost) with right_pct. Outcome = the real net P&L if taken, what it would have made if skipped.",
+    table_properties={"quality": "gold"},
+)
+def rating_review():
+    po = (spark.read.table("stocks.gold.proposal_outcomes")  # noqa: F821
+          .filter(F.col("outcome_rs").isNotNull() & (F.col("source") != "custom"))
+          .withColumn("rating", F.coalesce(F.col("feedback"), F.lit("not rated")))
+          .withColumn("decision_group", F.when(F.col("decision") == "taken", "taken").otherwise("skipped"))
+          .withColumn("right", F.when(((F.col("rating") == "like") & (F.col("won") == 1))
+                                      | ((F.col("rating") == "dislike") & (F.col("won") == 0)), 1)
+                      .when(F.col("rating").isin("like", "dislike"), 0)))
+    both = po.unionByName(po.withColumn("decision_group", F.lit("all")))
+    return (both.groupBy("rating", "decision_group")
+            .agg(F.count("*").alias("proposals"), F.sum("won").alias("wins"),
+                 F.round(F.sum("outcome_rs"), 2).alias("total_outcome_rs"),
+                 F.round(F.avg("outcome_rs"), 2).alias("avg_outcome_rs"),
+                 F.round(F.avg("outcome_r"), 2).alias("avg_outcome_r"),
+                 F.sum("right").alias("right_calls"))
+            .withColumn("win_rate_pct", F.round(F.col("wins") / F.col("proposals") * 100, 1))
+            .withColumn("right_pct", F.round(F.col("right_calls") / F.col("proposals") * 100, 1)))
 
 
 # ---------------------------------------------------------------------------
@@ -1303,6 +1340,120 @@ def custom_trades():
                     F.col("fill_price").alias("price"), F.lit(None).cast("double").alias("exit_price"), "pnl_rs",
                     "fees_rs", F.when(F.col("side") == "BUY", "bought").otherwise("sold").alias("status"), "event_ts"))
     return intraday.unionByName(pool)
+
+
+# ---------------------------------------------------------------------------
+# Shadow results for the dashboard: what other rules and the shadow models would have done (paper only)
+# ---------------------------------------------------------------------------
+SHADOW_RULE_WORDS = {
+    "current": "current rules", "breakeven": "stop to entry at +1R", "half_and_run": "sell half at +1R",
+    "trailing": "trailing stop", "time_stop": "60-minute time stop", "no_stop": "no stop",
+    "wide_1_5": "stop 1.5x wider, same Rs risk", "wide_2": "stop 2x wider, same Rs risk",
+    "close_stop": "stop on a 5-min close", "filter": "model: trade filter", "vol_stop": "model: volatility stop",
+    "early_cut": "model: early cut", "let_run": "model: let winners run", "combined": "models combined",
+    "orb5_2r": "5-min range, 2R target", "orb5_eod": "5-min range, held to 15:10",
+    "orb15_2r": "15-min range, 2R target", "orb15_eod": "15-min range, held to 15:10",
+}
+
+
+def _rule_label():
+    m = F.create_map(*[F.lit(x) for kv in SHADOW_RULE_WORDS.items() for x in kv])
+    return F.coalesce(m[F.col("rule")], F.col("rule"))
+
+
+def _note_pairs(df, sep):
+    """Explode a 'k=v<sep>k=v' note into (rule, value) rows; empty values are dropped."""
+    return (df.withColumn("kv", F.explode(F.split("note", sep)))
+            .withColumn("rule", F.split("kv", "=").getItem(0))
+            .withColumn("value", F.expr("try_cast(split(kv, '=')[1] AS DOUBLE)"))
+            .filter(F.col("value").isNotNull() & (F.col("rule") != "")))
+
+
+# SQL equivalent (abridged):
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.shadow_rules_trades AS
+#   SELECT trade_date, proposal_id, symbol, setup, side, 'exit rules' AS test, rule, value AS would_have_made_rs,
+#          pnl_rs AS actual_rs FROM trade_events LATERAL VIEW explode(split(note, ';')) ... WHERE event = 'exit_variants'
+#   UNION ALL ... event = 'model_shadow' (test 'models'; p_win and filter_takes kept as columns);
+@dp.materialized_view(
+    name="stocks.gold.shadow_rules_trades",
+    comment="Your real intraday trades replayed under other rules (paper only): test 'exit rules' (stop variants, "
+            "trailing, breakeven, half and run, time stop; from the day report) and test 'models' (the shadow "
+            "models' decisions, from the 16:10 model job). One row per trade x rule: what it would have made (Rs) "
+            "next to what it really made.",
+    table_properties={"quality": "gold"},
+)
+def shadow_rules_trades():
+    ev = spark.read.table("stocks.silver.trade_events")  # noqa: F821
+    base = ["trade_date", "proposal_id", "symbol", "setup", "side", F.col("pnl_rs").alias("actual_rs")]
+    exits_ = (_note_pairs(ev.filter("event = 'exit_variants'"), ";")
+              .select(*base, F.lit("exit rules").alias("test"), "rule", F.col("value").alias("would_have_made_rs")))
+    m = ev.filter("event = 'model_shadow'")
+    models = (_note_pairs(m, ";").filter(~F.col("rule").isin("p_win", "filter_takes"))
+              .select(*base, F.lit("models").alias("test"), "rule", F.col("value").alias("would_have_made_rs")))
+    return (exits_.unionByName(models).withColumn("rule_label", _rule_label())
+            .withColumn("vs_actual_rs", F.round(F.col("would_have_made_rs") - F.col("actual_rs"), 2)))
+
+
+# SQL equivalent:
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.shadow_rules_summary AS
+#   SELECT test, rule, rule_label, count(*) AS trades, sum(would_have_made_rs), sum(actual_rs), ...
+#   FROM stocks.gold.shadow_rules_trades GROUP BY test, rule, rule_label;
+@dp.materialized_view(
+    name="stocks.gold.shadow_rules_summary",
+    comment="Totals of gold.shadow_rules_trades per test and rule: trades, what the rule would have made (Rs), what "
+            "really happened (Rs), the difference, and how often the rule beat the real result.",
+    table_properties={"quality": "gold"},
+)
+def shadow_rules_summary():
+    t = spark.read.table("stocks.gold.shadow_rules_trades")  # noqa: F821
+    return (t.groupBy("test", "rule", "rule_label")
+            .agg(F.count("*").alias("trades"), F.min("trade_date").alias("first_day"), F.max("trade_date").alias("last_day"),
+                 F.round(F.sum("would_have_made_rs"), 0).alias("would_have_made_rs"),
+                 F.round(F.sum("actual_rs"), 0).alias("actual_rs"),
+                 F.round(F.sum("vs_actual_rs"), 0).alias("vs_actual_rs"),
+                 F.round(F.avg(F.when(F.col("vs_actual_rs") > 0, 100).otherwise(0)), 0).alias("beat_actual_pct")))
+
+
+# SQL equivalent:
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.orb_test AS
+#   SELECT trade_date, symbol, rule, value AS would_have_made_rs
+#   FROM trade_events LATERAL VIEW explode(split(note, ';')) ... WHERE event = 'orb_shadow';
+@dp.materialized_view(
+    name="stocks.gold.orb_test",
+    comment="The opening-range test on paper (top stocks in play each day): 5- vs 15-minute ranges, with a 2R "
+            "target or held to 15:10. One row per stock x day x variant, in rupees at the real trade size.",
+    table_properties={"quality": "gold"},
+)
+def orb_test():
+    ev = spark.read.table("stocks.silver.trade_events").filter("event = 'orb_shadow'")  # noqa: F821
+    return (_note_pairs(ev, ";").select("trade_date", "symbol", "rule", F.col("value").alias("would_have_made_rs"))
+            .withColumn("rule_label", _rule_label()))
+
+
+# SQL equivalent:
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.model_backtest AS
+#   SELECT trade_date AS run_date, setup AS rule, <note fields as columns> FROM trade_events
+#   WHERE event = 'model_backtest';
+@dp.materialized_view(
+    name="stocks.gold.model_backtest",
+    comment="The shadow models' daily walk-forward backtest (every scanner setup on every tradable stock, each day "
+            "judged only by models trained on earlier days), one row per run day x rule: signals, trades, total and "
+            "average result in R (1R ~ Rs 400), win %, share of days up, worst day; is_latest marks the newest run.",
+    table_properties={"quality": "gold"},
+)
+def model_backtest():
+    ev = spark.read.table("stocks.silver.trade_events").filter("event = 'model_backtest'")  # noqa: F821
+    wide = (ev.withColumn("m", F.expr("str_to_map(note, ';', '=')"))
+            .select(F.col("trade_date").alias("run_date"), F.col("setup").alias("rule"),
+                    *[F.expr(f"try_cast(m['{k}'] AS DOUBLE)").alias(k) for k in
+                      ("signals", "traded", "total_r", "avg_r", "win_pct", "days", "days_up_pct", "worst_day_r")])
+            .withColumn("rule_label", _rule_label()))
+    latest = wide.agg(F.max("run_date").alias("run_date")).withColumn("is_latest", F.lit(True))
+    base = wide.filter("rule = 'current'").select("run_date", F.col("total_r").alias("current_total_r"))
+    return (wide.join(latest, "run_date", "left").join(base, "run_date", "left")
+            .withColumn("is_latest", F.coalesce("is_latest", F.lit(False)))
+            .withColumn("vs_current_r", F.round(F.col("total_r") - F.col("current_total_r"), 1))
+            .drop("current_total_r"))
 
 
 # ---------------------------------------------------------------------------

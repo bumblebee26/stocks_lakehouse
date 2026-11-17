@@ -20,7 +20,7 @@ covers the base view above, the full [architecture](docs/ARCHITECTURE_DIAGRAMS.m
 |---|---|---|
 | Daily raw data (NSE, US, global) | S3 `landing/` + Databricks volume | Every trading day |
 | Bronze, silver and gold tables | Unity Catalog `stocks.*` | Refreshed when new files land |
-| Dashboard "Stocks lakehouse: India x US" (pages Overview, Portfolio, Intraday trading, Company quality, Details; each with an "In plain words" summary written by Databricks AI) | Databricks workspace | Always current; summaries rebuilt after every refresh |
+| Dashboard "Stocks lakehouse: India x US" (pages Portfolio, Intraday trading (with shadow tests), Swing (real vs shadow), Long term (real vs shadow, company quality), Your ratings, Overview, Details; each with an "In plain words" summary written by Databricks AI) | Databricks workspace | Always current; summaries rebuilt after every refresh |
 | Pre-market brief | Your Telegram | 08:45 IST, Mon–Fri |
 | Paper-trading analysis ([paper-trader](https://github.com/bumblebee26/paper-trader)) | `stocks.gold.trad*` tables + dashboard page "Intraday trading" (KPI tiles: net P&L, win rate, profit factor, expectancy, win/loss ratio; equity curve, daily P&L, drawdown, by setup and hour) | After the 15:45 IST export |
 | Dummy portfolio and holdings | `stocks.gold.portfolio_daily`, `stocks.gold.holdings_latest` + dashboard page "Portfolio" (value, return vs NIFTYBEES, fall from peak, allocation by pool and sector, holdings) | After the 15:45 IST export |
