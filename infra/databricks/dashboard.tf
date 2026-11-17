@@ -323,6 +323,39 @@ locals {
       ORDER BY vs_actual_rs DESC
     SQL
 
+    # Real vs shadow in one chart: cumulative Rs by day on the same real trades, since the ledger reset (18 Nov)
+    intra_vs_exit_rules = <<-SQL
+      WITH t AS (
+             SELECT trade_date, proposal_id, rule_label, would_have_made_rs, actual_rs FROM stocks.gold.shadow_rules_trades
+             WHERE test = 'exit rules' AND rule <> 'current'
+               AND trade_date >= (SELECT min(trade_date) FROM stocks.gold.trading_daily) -- since the ledger reset
+           ),
+           d AS (
+             SELECT trade_date, rule_label AS rule, sum(would_have_made_rs) AS day_rs FROM t GROUP BY trade_date, rule_label
+             UNION ALL
+             SELECT trade_date, 'Real (what happened)' AS rule, sum(actual_rs) AS day_rs
+             FROM (SELECT DISTINCT trade_date, proposal_id, actual_rs FROM t) GROUP BY trade_date
+           )
+      SELECT trade_date, rule, round(sum(day_rs) OVER (PARTITION BY rule ORDER BY trade_date), 0) AS total_rs
+      FROM d ORDER BY trade_date, rule
+    SQL
+
+    intra_vs_models = <<-SQL
+      WITH t AS (
+             SELECT trade_date, proposal_id, rule_label, would_have_made_rs, actual_rs FROM stocks.gold.shadow_rules_trades
+             WHERE test = 'models' AND rule <> 'current'
+               AND trade_date >= (SELECT min(trade_date) FROM stocks.gold.trading_daily) -- since the ledger reset
+           ),
+           d AS (
+             SELECT trade_date, rule_label AS rule, sum(would_have_made_rs) AS day_rs FROM t GROUP BY trade_date, rule_label
+             UNION ALL
+             SELECT trade_date, 'Real (what happened)' AS rule, sum(actual_rs) AS day_rs
+             FROM (SELECT DISTINCT trade_date, proposal_id, actual_rs FROM t) GROUP BY trade_date
+           )
+      SELECT trade_date, rule, round(sum(day_rs) OVER (PARTITION BY rule ORDER BY trade_date), 0) AS total_rs
+      FROM d ORDER BY trade_date, rule
+    SQL
+
     backtest_latest = <<-SQL
       SELECT rule_label AS rule, CAST(traded AS INT) AS trades, total_r, vs_current_r, avg_r, win_pct, days_up_pct,
              worst_day_r, CAST(days AS INT) AS days, run_date
@@ -497,6 +530,8 @@ locals {
       scanner_record       = ["signal", "days_after", "signals", "avg_return_pct", "vs_niftybees_pct", "beat_niftybees_pct"]
       shadow_exit_rules    = ["rule", "trades", "would_have_made_rs", "actual_rs", "vs_actual_rs", "beat_actual_pct"]
       shadow_models_real   = ["rule", "trades", "would_have_made_rs", "actual_rs", "vs_actual_rs", "beat_actual_pct"]
+      intra_vs_exit_rules  = ["trade_date", "rule", "total_rs"]
+      intra_vs_models      = ["trade_date", "rule", "total_rs"]
       backtest_latest      = ["rule", "trades", "total_r", "vs_current_r", "avg_r", "win_pct", "days_up_pct", "worst_day_r", "days", "run_date"]
       backtest_trend       = ["run_date", "rule", "vs_current_r"]
       orb_summary          = ["variant", "trades", "would_have_made_rs", "win_rate_pct"]
@@ -568,13 +603,15 @@ locals {
       intra_setup       = { ds = "intraday_setup_chart", type = "bar", x = "setup", xt = "categorical", y = "net_pnl_rs", color = null, title = "P&L by setup (Rs)", desc = "Which kinds of trade made or lost money.", pos = [4, 15, 4, 5] }
       intra_hour        = { ds = "intraday_hour_chart", type = "bar", x = "entry_hour", xt = "categorical", y = "net_pnl_rs", color = null, title = "P&L by entry hour, IST (Rs)", desc = "Which entry times made or lost money (IST).", pos = [8, 15, 4, 5] }
       port_strategies   = { ds = "strategy_returns", type = "line", x = "snapshot_date", xt = "temporal", y = "return_pct", color = "strategy", title = "Every strategy: return since it started (%), real and shadow", desc = "Real pools hold real dummy money; shadow pools test other rules on paper with the same costs. Each line starts at 0 on its own first day.", pos = [0, 31, 12, 7] }
-      intra_exit_rules  = { ds = "shadow_exit_rules", type = "bar", x = "rule", xt = "categorical", y = "vs_actual_rs", color = null, title = "Exit rules on your real trades: gain vs what happened (Rs)", desc = "Each closed trade replayed on its 1-minute candles under another exit rule. Above 0 = that rule would have made more than what really happened.", pos = [0, 49, 6, 6] }
-      intra_models_real = { ds = "shadow_models_real", type = "bar", x = "rule", xt = "categorical", y = "vs_actual_rs", color = null, title = "Shadow models on your real trades: gain vs what happened (Rs)", desc = "Each real trade scored by models trained only on earlier days. Above 0 = the model's decision would have made more.", pos = [6, 49, 6, 6] }
-      intra_backtest    = { ds = "backtest_latest", type = "bar", x = "rule", xt = "categorical", y = "vs_current_r", color = null, title = "Backtest, all setups on ~200 stocks: each rule vs current rules (R)", desc = "Latest walk-forward run (each day judged by models trained only on earlier days). R = one unit of risk, about Rs 400. Above 0 = better than the current rules.", pos = [0, 55, 6, 6] }
-      intra_bt_trend    = { ds = "backtest_trend", type = "line", x = "run_date", xt = "temporal", y = "vs_current_r", color = "rule", title = "Is each model's edge holding up? (R vs current rules, by run day)", desc = "One point per daily run. A line that stays above 0 run after run is a model worth reviewing for go-live.", pos = [6, 55, 6, 6] }
-      intra_orb         = { ds = "orb_summary", type = "bar", x = "variant", xt = "categorical", y = "would_have_made_rs", color = null, title = "Opening-range test on paper (Rs)", desc = "The top stocks in play each day, traded on paper with a 5- or 15-minute opening range, a 2R target or held to 15:10.", pos = [0, 61, 6, 5] }
-      swing_curve       = { ds = "swing_returns", type = "line", x = "snapshot_date", xt = "temporal", y = "return_pct", color = "strategy", title = "Swing: real pool vs shadow strategies vs NIFTYBEES (return %)", desc = "The real swing pool holds NIFTYBEES; the shadow pools trade stocks on paper (news breakouts, technical scanner). Each line starts at 0 on its own first day.", pos = [0, 6, 12, 7] }
-      lt_curve          = { ds = "longterm_returns", type = "line", x = "snapshot_date", xt = "temporal", y = "return_pct", color = "strategy", title = "Long-term: real pool vs shadow vs NIFTYBEES (return %)", desc = "The real pool waits in cash until its go/no-go review; the shadow pool buys the weekly quality picks on paper.", pos = [0, 6, 12, 7] }
+      intra_exit_curve  = { ds = "intra_vs_exit_rules", type = "line", x = "trade_date", xt = "temporal", y = "total_rs", color = "rule", title = "Real vs other exit rules: total since 18 Nov (Rs)", desc = "Your real result (what happened) and each exit rule on the same real trades, added up day by day. A rule's line above the real line = it would have made more.", pos = [0, 49, 6, 6] }
+      intra_model_curve = { ds = "intra_vs_models", type = "line", x = "trade_date", xt = "temporal", y = "total_rs", color = "rule", title = "Real vs the shadow models: total since 18 Nov (Rs)", desc = "Your real result and each model's decision on the same real trades, added up day by day (models trained only on earlier days). Above the real line = the model would have made more.", pos = [6, 49, 6, 6] }
+      intra_exit_rules  = { ds = "shadow_exit_rules", type = "bar", x = "rule", xt = "categorical", y = "vs_actual_rs", color = null, title = "Exit rules on your real trades: gain vs what happened (Rs)", desc = "Each closed trade replayed on its 1-minute candles under another exit rule. Above 0 = that rule would have made more than what really happened.", pos = [0, 55, 6, 6] }
+      intra_models_real = { ds = "shadow_models_real", type = "bar", x = "rule", xt = "categorical", y = "vs_actual_rs", color = null, title = "Shadow models on your real trades: gain vs what happened (Rs)", desc = "Each real trade scored by models trained only on earlier days. Above 0 = the model's decision would have made more.", pos = [6, 55, 6, 6] }
+      intra_backtest    = { ds = "backtest_latest", type = "bar", x = "rule", xt = "categorical", y = "vs_current_r", color = null, title = "Backtest, all setups on ~200 stocks: each rule vs current rules (R)", desc = "Latest walk-forward run (each day judged by models trained only on earlier days). R = one unit of risk, about Rs 400. Above 0 = better than the current rules.", pos = [0, 61, 6, 6] }
+      intra_bt_trend    = { ds = "backtest_trend", type = "line", x = "run_date", xt = "temporal", y = "vs_current_r", color = "rule", title = "Is each model's edge holding up? (R vs current rules, by run day)", desc = "One point per daily run. A line that stays above 0 run after run is a model worth reviewing for go-live.", pos = [6, 61, 6, 6] }
+      intra_orb         = { ds = "orb_summary", type = "bar", x = "variant", xt = "categorical", y = "would_have_made_rs", color = null, title = "Opening-range test on paper (Rs)", desc = "The top stocks in play each day, traded on paper with a 5- or 15-minute opening range, a 2R target or held to 15:10.", pos = [0, 67, 6, 5] }
+      swing_curve       = { ds = "swing_returns", type = "line", x = "snapshot_date", xt = "temporal", y = "return_pct", color = "strategy", title = "Swing: real pool vs shadow strategies vs NIFTYBEES (return %)", desc = "The real swing pool holds NIFTYBEES; the shadow pools trade stocks on paper: news breakouts, technical scanner, momentum + news (6 stocks) and its concentrated copy (top 3). Each line starts at 0 on its own first day.", pos = [0, 6, 12, 7] }
+      lt_curve          = { ds = "longterm_returns", type = "line", x = "snapshot_date", xt = "temporal", y = "return_pct", color = "strategy", title = "Long-term: real pool vs shadows vs NIFTYBEES (return %)", desc = "The real pool waits in cash until its go/no-go review; the shadows buy on paper: the weekly quality picks, momentum (top 15) and its concentrated copy (top 5).", pos = [0, 6, 12, 7] }
       rating_bars       = { ds = "rating_chart", type = "bar", x = "rating", xt = "categorical", y = "avg_rs", color = "decisions", title = "Average result per proposal, by your rating (Rs)", desc = "Taken = the real net result; skipped = what it would have made. If 👍 bars are above 👎 bars, your instinct is adding something.", pos = [0, 9, 12, 6] }
       quality_scatter   = { ds = "quality_scatter", type = "scatter", x = "roce_pct", xt = "quantitative", y = "pe", color = "tests", title = "Quality vs price: return on capital (%) against P/E, coloured by tests passed (excl. banks)", desc = "Each dot is a company (banks left out). Further right = more profitable; lower = cheaper. Bottom right is the sweet spot.", pos = [0, 23, 12, 7] }
       } : k => {
@@ -613,8 +650,8 @@ locals {
       summary_intraday  = { ds = "summary_intraday", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 2, 12, 4] }
       summary_quality   = { ds = "summary_quality", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 19, 12, 4] }
       port_scoreboard   = { ds = "strategy_scoreboard", title = "Scoreboard: every strategy vs NIFTYBEES over the same days", desc = "Real pools and shadow pools (paper). Return since each one started; NIFTYBEES over exactly the same days; the difference.", pos = [0, 38, 12, 6] }
-      intra_bt_table    = { ds = "backtest_latest", title = "Backtest details (latest run)", desc = "All rules on the same setups. Trades = setups taken (the filter skips some). Worst day = the worst single day's total.", pos = [0, 66, 12, 7] }
-      intra_shadow_list = { ds = "shadow_trades_recent", title = "Your trades under other rules (last 14 days)", desc = "Every real trade, what really happened, and what each rule or model would have made instead.", pos = [6, 61, 6, 5] }
+      intra_bt_table    = { ds = "backtest_latest", title = "Backtest details (latest run)", desc = "All rules on the same setups. Trades = setups taken (the filter skips some). Worst day = the worst single day's total.", pos = [0, 72, 12, 7] }
+      intra_shadow_list = { ds = "shadow_trades_recent", title = "Your trades under other rules (last 14 days)", desc = "Every real trade, what really happened, and what each rule or model would have made instead.", pos = [6, 67, 6, 5] }
       swing_board       = { ds = "swing_scoreboard", title = "Swing scoreboard", desc = "Return since each started vs NIFTYBEES over the same days.", pos = [0, 2, 12, 4] }
       swing_hold        = { ds = "swing_holdings", title = "What each swing strategy holds now", desc = "Real pool and shadow pools (paper).", pos = [0, 13, 12, 6] }
       swing_scan        = { ds = "scanner_today", title = "Today's technical scanner (Nifty 200): strict picks and near-misses", desc = "What the scanner shadow pool buys from (next day, only at the scanner's level). Indicative levels, never a guaranteed return.", pos = [0, 19, 12, 7] }
@@ -773,13 +810,14 @@ locals {
           {
             widget = {
               name                 = "intraday_shadow_title"
-              multilineTextboxSpec = { lines = ["### Shadow tests (paper only: nothing here changes a real trade)", "Exit rules and the shadow models (volatility stop, trade filter, early cut, let winners run) on your real trades and on every scanner setup across ~200 stocks. Reviewed with you before anything goes live (before December)."] }
+              multilineTextboxSpec = { lines = ["### Shadow tests (paper only: nothing here changes a real trade)", "Exit rules and the shadow models (volatility stop, trade filter, early cut, let winners run) on your real trades (first two charts: real and shadow lines together) and on every scanner setup across ~200 stocks. Reviewed with you before anything goes live (before December)."] }
             }
             position = { x = 0, y = 48, width = 12, height = 1 }
           },
         ],
-        [local.chart.intra_exit_rules, local.chart.intra_models_real, local.chart.intra_backtest, local.chart.intra_bt_trend,
-        local.chart.intra_orb, local.table_widget.intra_shadow_list, local.table_widget.intra_bt_table],
+        [local.chart.intra_exit_curve, local.chart.intra_model_curve, local.chart.intra_exit_rules, local.chart.intra_models_real,
+        local.chart.intra_backtest, local.chart.intra_bt_trend, local.chart.intra_orb, local.table_widget.intra_shadow_list,
+        local.table_widget.intra_bt_table],
       )
       }, {
       name          = "swing"
@@ -790,7 +828,7 @@ locals {
         {
           widget = {
             name                 = "swing_title"
-            multilineTextboxSpec = { lines = ["## Swing pool: real vs shadow strategies (dummy money)", "Real pool: Rs 60,000 held in NIFTYBEES while new rules are tested. Shadow pools (paper, same costs): news breakouts (from 16 Nov), the technical scanner's strict picks (from 17 Nov) and momentum + news (from 18 Nov, 2% risk per trade). Not advice."] }
+            multilineTextboxSpec = { lines = ["## Swing pool: real vs shadow strategies (dummy money)", "Real pool: Rs 60,000 held in NIFTYBEES while new rules are tested. Shadow pools (paper, same costs): news breakouts (from 16 Nov), the technical scanner's strict picks (from 17 Nov) momentum + news (from 18 Nov, 6 stocks, 2% risk per trade) and its concentrated copy (top 3, up to a third each, 3% risk). Not advice."] }
           }
           position = { x = 0, y = 0, width = 12, height = 2 }
         },
@@ -810,7 +848,7 @@ locals {
         {
           widget = {
             name                 = "quality_title"
-            multilineTextboxSpec = { lines = ["## Long-term pool: real vs shadow (dummy money)", "Real pool: Rs 1 lakh in cash until its go/no-go review (18 Dec). Shadow pools (paper): the weekly quality picks, and momentum (top 15 of the Nifty 200, rebalanced monthly, from 21 Nov). Below: company quality, refreshed every Saturday. Tests: return on capital above 15% (banks: return on assets above 1.2%), debt below half of equity, operating cash flow positive in most years, revenue and profit growing over 10% a year, P/E in the cheaper half. Not advice."] }
+            multilineTextboxSpec = { lines = ["## Long-term pool: real vs shadow (dummy money)", "Real pool: Rs 1 lakh in cash until its go/no-go review (18 Dec). Shadow pools (paper): the weekly quality picks, momentum (top 15 of the Nifty 200, rebalanced monthly, from 21 Nov) and its concentrated copy (top 5). Below: company quality, refreshed every Saturday. Tests: return on capital above 15% (banks: return on assets above 1.2%), debt below half of equity, operating cash flow positive in most years, revenue and profit growing over 10% a year, P/E in the cheaper half. Not advice."] }
           }
           position = { x = 0, y = 0, width = 12, height = 2 }
         },
