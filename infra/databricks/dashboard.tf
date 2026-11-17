@@ -816,7 +816,7 @@ locals {
           },
         ],
         [local.chart.intra_exit_curve, local.chart.intra_model_curve, local.chart.intra_exit_rules, local.chart.intra_models_real,
-        local.chart.intra_backtest, local.chart.intra_bt_trend, local.chart.intra_orb, local.table_widget.intra_shadow_list,
+          local.chart.intra_backtest, local.chart.intra_bt_trend, local.chart.intra_orb, local.table_widget.intra_shadow_list,
         local.table_widget.intra_bt_table],
       )
       }, {
