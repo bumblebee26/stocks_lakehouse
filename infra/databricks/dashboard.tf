@@ -992,7 +992,7 @@ locals {
 }
 
 resource "databricks_dashboard" "stocks" {
-  display_name         = "Paper Trader · Trading Desk"
+  display_name         = "NSE Paper Trading Desk"
   parent_path          = "${data.databricks_current_user.me.home}/stocks_lakehouse"
   warehouse_id         = data.databricks_sql_warehouse.main.id
   serialized_dashboard = jsonencode(local.dashboard)
