@@ -130,7 +130,7 @@ give resistance, support and T1; ATR gives the rest (stop 1.5 ATR under the entr
 within 3 ATR; T1 2R when there is no resistance; T2 3R, at least T1 + 1R). Prices are adjusted for splits,
 bonuses and rights from NSE's own previous close (an ex-date shows the adjusted previous close; factor =
 previous close ÷ our last close, applied when more than 3% off 1). The maths is pandas, per stock, in
-`pipeline/gold.py` between the `technicals` markers; `tests/test_technicals.py` tests that block directly.
+`pipeline/research/gold.py` between the `technicals` markers; `tests/test_technicals.py` tests that block directly.
 
 ### Definitions
 

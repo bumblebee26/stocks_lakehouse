@@ -207,6 +207,7 @@ locals {
                    / nullif(-avg(CASE WHEN net_pnl_rs <= 0 THEN net_pnl_rs END), 0), 2) AS win_loss_ratio
       FROM stocks.gold.trades
       WHERE net_pnl_rs IS NOT NULL
+        AND trade_date >= (SELECT min(trade_date) FROM stocks.gold.trading_daily) -- since the ledger reset
     SQL
 
     intraday_curve = <<-SQL
@@ -382,6 +383,7 @@ locals {
              round(net_pnl_rs, 0) AS net_pnl_rs, round(r_multiple, 2) AS r_multiple,
              round(holding_minutes, 0) AS holding_minutes
       FROM stocks.gold.trades
+      WHERE trade_date >= (SELECT min(trade_date) FROM stocks.gold.trading_daily) -- since the ledger reset
       ORDER BY entry_time DESC
       LIMIT 50
     SQL
@@ -941,7 +943,7 @@ resource "databricks_dashboard" "stocks" {
   serialized_dashboard = jsonencode(local.dashboard)
   embed_credentials    = true
 
-  depends_on = [databricks_pipeline.medallion]
+  depends_on = [databricks_pipeline.stocks]
 }
 
 output "dashboard_url" {

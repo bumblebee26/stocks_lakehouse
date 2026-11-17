@@ -1,11 +1,26 @@
-"""BRONZE: raw files from the landing volume, ingested incrementally with Auto Loader.
+"""MARKET pipeline (stocks-market): market data in, cleaned, and the light market summaries. Runs after the NSE evening
+file (job stocks-market-close, then the research pipeline) and at 11:30 IST Mon-Sat (job stocks-market-morning: US
+prices, FRED, the F&O list, Saturday fundamentals).
+
+BRONZE: raw files from the landing volume, ingested incrementally with Auto Loader.
 
 Each new file in /Volumes/stocks/bronze/landing/<source>/date=YYYY-MM-DD/ is read
-exactly once. Columns are kept as delivered (NSE as strings), plus lineage:
+exactly once. Columns are kept as delivered, plus lineage:
   _source_file, _file_modified_at, _ingested_at, trade_date (parsed from the path)
 
 Schema changes from a source never break the stream: unexpected columns go into
 _rescued_data instead (schemaEvolutionMode = rescue).
+
+  stocks.bronze.nse_bhavcopy_raw             NSE equities bhavcopy
+  stocks.bronze.massive_grouped_raw          Massive grouped daily (all US stocks)
+  stocks.bronze.fred_observations_raw        FRED series
+  stocks.bronze.news_raw                     company news snapshots (news volume)
+  stocks.bronze.fundamentals_raw             company financials (Saturday)
+  stocks.bronze.index_members_raw            Nifty 200 lists
+  stocks.bronze.nse_delivery_raw             NSE delivery file
+  stocks.bronze.nse_fo_raw                   NSE F&O stock list
+Tables of the research and trading pipelines are never defined here; the three pipelines never run at
+the same time (Free Edition allows one active pipeline).
 """
 
 try:  # Lakeflow Declarative Pipelines (current API)
@@ -18,8 +33,8 @@ except ImportError:  # older runtimes: Delta Live Tables API, same decorators
 from pyspark.sql import functions as F
 
 LANDING = spark.conf.get("stocks.landing_path", "/Volumes/stocks/bronze/landing")  # noqa: F821
-NEWS = spark.conf.get("stocks.news_path", "/Volumes/stocks/bronze/news")  # noqa: F821
 
+NEWS = spark.conf.get("stocks.news_path", "/Volumes/stocks/bronze/news")  # noqa: F821
 
 def with_lineage(df):
     """Add lineage columns from Auto Loader's hidden _metadata column."""
@@ -32,7 +47,6 @@ def with_lineage(df):
             F.to_date(F.regexp_extract(F.col("_metadata.file_path"), r"date=(\d{4}-\d{2}-\d{2})", 1)),
         )
     )
-
 
 # ---------------------------------------------------------------------------
 # NSE equities bhavcopy (UDiFF CSV; the Lambda unzips it before pushing)
@@ -73,7 +87,6 @@ def nse_bhavcopy_raw():
         .load(f"{LANDING}/nse/")
     )
 
-
 # ---------------------------------------------------------------------------
 # Massive grouped daily (one JSON document per US trading day)
 # ---------------------------------------------------------------------------
@@ -102,7 +115,6 @@ def nse_bhavcopy_raw():
 # Bronze stores the JSON as delivered; silver renames "t" before parsing.
 MASSIVE_SCHEMA_HINTS = "results STRING"
 
-
 @dp.table(
     name="stocks.bronze.massive_grouped_raw",
     comment="Raw Massive grouped-daily responses, one row per file (results = JSON text, all US tickers).",
@@ -120,7 +132,6 @@ def massive_grouped_raw():
         .option("cloudFiles.partitionColumns", "")
         .load(f"{LANDING}/massive/")
     )
-
 
 # ---------------------------------------------------------------------------
 # FRED global markets (newline-delimited JSON, one observation per line)
@@ -152,7 +163,6 @@ FRED_SCHEMA = (
     "region STRING, asset_class STRING, unit STRING"
 )
 
-
 @dp.table(
     name="stocks.bronze.fred_observations_raw",
     comment="Raw FRED observations: global indices, FX, VIX, oil, rates. One row per series per date per file.",
@@ -168,55 +178,6 @@ def fred_observations_raw():
         .schema(FRED_SCHEMA)
         .load(f"{LANDING}/fred/")
     )
-
-
-# ---------------------------------------------------------------------------
-# Paper trades (bumblebee26/paper-trader): the day's journal as JSON lines
-# ---------------------------------------------------------------------------
-# Pushed once a day at 15:45 IST by the stocks-trader-guardian Lambda to
-#   /Volumes/stocks/bronze/landing/trades/date=YYYY-MM-DD/events.jsonl
-# One line per event (proposed, filled, exited, rejected, ...), a unique event_id on each,
-# and a final ledger_snapshot line (balance and realized P&L at export time).
-# A re-export overwrites the same file; silver keeps the newest copy of each event_id.
-#
-# SQL equivalent:
-#   CREATE OR REFRESH STREAMING TABLE stocks.bronze.trades_raw
-#   COMMENT 'Raw paper-trader journal events (dummy money), one row per event per file'
-#   TBLPROPERTIES ('quality' = 'bronze')
-#   AS SELECT *, _metadata.file_path AS _source_file, ... (same lineage columns as above)
-#   FROM STREAM read_files(
-#     '/Volumes/stocks/bronze/landing/trades/',
-#     format            => 'json',
-#     pathGlobFilter    => '*.jsonl',
-#     schema            => '<TRADES_SCHEMA below>',
-#     rescuedDataColumn => '_rescued_data',
-#     partitionColumns  => ''
-#   );
-TRADES_SCHEMA = (
-    "event_id STRING, proposal_id STRING, timestamp_ist STRING, event STRING, symbol STRING, "
-    "setup STRING, side STRING, entry DOUBLE, stop DOUBLE, target DOUBLE, qty DOUBLE, "
-    "risk_rs DOUBLE, rr DOUBLE, reasons STRING, user_reply STRING, fill_price DOUBLE, "
-    "exit_price DOUBLE, exit_reason STRING, pnl_rs DOUBLE, fees_rs DOUBLE, note STRING, "
-    "balance DOUBLE, starting_capital DOUBLE, realized_today DOUBLE"
-)
-
-
-@dp.table(
-    name="stocks.bronze.trades_raw",
-    comment="Raw paper-trader journal events (dummy money), one row per event per file.",
-    table_properties={"quality": "bronze"},
-)
-def trades_raw():
-    return with_lineage(
-        spark.readStream.format("cloudFiles")  # noqa: F821
-        .option("cloudFiles.format", "json")
-        .option("pathGlobFilter", "*.jsonl")
-        .option("rescuedDataColumn", "_rescued_data")
-        .option("cloudFiles.partitionColumns", "")
-        .schema(TRADES_SCHEMA)
-        .load(f"{LANDING}/trades/")
-    )
-
 
 # ---------------------------------------------------------------------------
 # Company news: NSE RSS feeds, fetched every 30 minutes by the stocks-fetch-news Lambda
@@ -237,7 +198,6 @@ NEWS_SCHEMA = (
     "description STRING, link STRING, published_ist STRING, published_raw STRING, fetched_at_ist STRING"
 )
 
-
 @dp.table(
     name="stocks.bronze.news_raw",
     comment="Raw NSE company news items (announcements, results, board meetings, corporate actions), "
@@ -255,7 +215,6 @@ def news_raw():
         .load(f"{NEWS}/")
     )
 
-
 # ---------------------------------------------------------------------------
 # Company fundamentals: weekly, from paper-trader's "Company fundamentals" workflow
 # ---------------------------------------------------------------------------
@@ -271,7 +230,6 @@ FUNDAMENTALS_SCHEMA = (
     "symbol STRING, source_symbol STRING, metric STRING, period_type STRING, period_end STRING, "
     "value DOUBLE, currency STRING, source STRING, fetched_at_ist STRING"
 )
-
 
 @dp.table(
     name="stocks.bronze.fundamentals_raw",
@@ -289,41 +247,6 @@ def fundamentals_raw():
         .load(f"{LANDING}/fundamentals/")
     )
 
-
-# ---------------------------------------------------------------------------
-# Paper-trader portfolio: pools and holdings, pushed daily at 15:45 IST with the journal
-# ---------------------------------------------------------------------------
-# record_type 'pool': one row per pool (intraday, swing, long_term) with capital, cash, equity.
-# record_type 'holding': one row per holding with quantity, average cost, last price, value, P&L.
-#
-# SQL equivalent:
-#   CREATE OR REFRESH STREAMING TABLE stocks.bronze.portfolio_raw AS
-#   SELECT *, <lineage columns> FROM STREAM read_files('/Volumes/stocks/bronze/landing/portfolio/',
-#     format => 'json', pathGlobFilter => '*.jsonl', schema => '<PORTFOLIO_SCHEMA below>');
-PORTFOLIO_SCHEMA = (
-    "record_type STRING, snapshot_date STRING, pool STRING, capital DOUBLE, cash DOUBLE, holdings_value DOUBLE, "
-    "equity DOUBLE, symbol STRING, sector STRING, qty DOUBLE, avg_cost DOUBLE, last_price DOUBLE, value DOUBLE, "
-    "pnl DOUBLE, opened STRING"
-)
-
-
-@dp.table(
-    name="stocks.bronze.portfolio_raw",
-    comment="Raw paper-trader portfolio snapshots (dummy money): pools and holdings, one row per record per daily file.",
-    table_properties={"quality": "bronze"},
-)
-def portfolio_raw():
-    return with_lineage(
-        spark.readStream.format("cloudFiles")  # noqa: F821
-        .option("cloudFiles.format", "json")
-        .option("pathGlobFilter", "*.jsonl")
-        .option("rescuedDataColumn", "_rescued_data")
-        .option("cloudFiles.partitionColumns", "")
-        .schema(PORTFOLIO_SCHEMA)
-        .load(f"{LANDING}/portfolio/")
-    )
-
-
 # ---------------------------------------------------------------------------
 # Index members: NSE's Nifty 200 list with each company's industry (weekly, with the fundamentals)
 # ---------------------------------------------------------------------------
@@ -332,7 +255,6 @@ def portfolio_raw():
 #   SELECT *, <lineage columns> FROM STREAM read_files('/Volumes/stocks/bronze/landing/index_members/',
 #     format => 'json', pathGlobFilter => '*.jsonl', schema => '<INDEX_MEMBERS_SCHEMA below>');
 INDEX_MEMBERS_SCHEMA = "symbol STRING, company STRING, industry STRING, isin STRING, index_name STRING, as_of STRING"
-
 
 @dp.table(
     name="stocks.bronze.index_members_raw",
@@ -350,7 +272,6 @@ def index_members_raw():
         .load(f"{LANDING}/index_members/")
     )
 
-
 # ---------------------------------------------------------------------------
 # NSE delivery figures (from sec_bhavdata_full, cleaned by the NSE Lambda) and the F&O stock list
 # ---------------------------------------------------------------------------
@@ -361,8 +282,8 @@ def index_members_raw():
 #     deliv_per DOUBLE');
 #   (stocks.bronze.nse_fo_raw: the same from landing/nse_fo/, schema 'symbol STRING, underlying STRING, as_of STRING')
 DELIVERY_SCHEMA = "symbol STRING, series STRING, deliv_qty DOUBLE, deliv_per DOUBLE"
-FNO_SCHEMA = "symbol STRING, underlying STRING, as_of STRING"
 
+FNO_SCHEMA = "symbol STRING, underlying STRING, as_of STRING"
 
 @dp.table(
     name="stocks.bronze.nse_delivery_raw",
@@ -379,7 +300,6 @@ def nse_delivery_raw():
         .schema(DELIVERY_SCHEMA)
         .load(f"{LANDING}/nse_delivery/")
     )
-
 
 @dp.table(
     name="stocks.bronze.nse_fo_raw",

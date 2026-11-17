@@ -201,9 +201,9 @@ terraform apply
 
 Check the plan: it must **not** destroy or replace `databricks_catalog.stocks`. This creates the
 `bronze`/`silver`/`gold` schemas, the `landing` volume and its source folders, the Lambda's Databricks token
-(written to SSM), the pipeline, the refresh job, the dashboard, and the warehouse-ID parameter.
+(written to SSM), the three pipelines and their jobs, the dashboard, and the warehouse-ID parameter.
 
-The outputs include `pipeline_url` and `dashboard_url`.
+The outputs include `pipeline_urls` (market, research, trading), `job_ids` and `dashboard_url`.
 
 ---
 
@@ -281,11 +281,12 @@ If any files reached S3 but not the volume, copy them across. This skips files a
 aws lambda invoke --function-name stocks-sync-volume --region ap-southeast-2 --invocation-type Event --cli-binary-format raw-in-base64-out --payload "{}" sync.json
 ```
 
-### D4. Run the pipeline the first time
+### D4. Run the pipelines the first time
 
-In Databricks: **Jobs & Pipelines** → pipeline **stocks-medallion** → dropdown next to **Start** →
-**Full refresh all**. Watch bronze, silver and gold turn green. After this, the **stocks-refresh** job runs
-it automatically whenever new files land.
+GitHub → **Actions** → **Run Databricks jobs** → **Run workflow** with the default
+`stocks-market-weekend stocks-trading` (market → research → summaries, then trading → summaries; one pipeline
+runs at a time on Free Edition). Or in Databricks: **Jobs & Pipelines** → `stocks-market-weekend` → **Run now**,
+then `stocks-trading` once it has finished. After this the jobs run on their own (see OPERATIONS.md).
 
 Check it in the **SQL Editor**:
 

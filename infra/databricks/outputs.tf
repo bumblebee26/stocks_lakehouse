@@ -27,16 +27,20 @@ output "pusher_token_expiry_days" {
   value = var.pusher_token_lifetime_days
 }
 
-output "pipeline_id" {
-  value = databricks_pipeline.medallion.id
+output "pipeline_ids" {
+  value = { for k, p in databricks_pipeline.stocks : k => p.id }
 }
 
-output "pipeline_url" {
-  value = "${trimsuffix(var.databricks_workspace_url, "/")}/pipelines/${databricks_pipeline.medallion.id}"
+output "pipeline_urls" {
+  value = { for k, p in databricks_pipeline.stocks : k => "${trimsuffix(var.databricks_workspace_url, "/")}/pipelines/${p.id}" }
 }
 
-output "refresh_job_id" {
-  value = databricks_job.refresh.id
+output "job_ids" {
+  value = {
+    market_close   = databricks_job.market_close.id
+    market_weekend = databricks_job.market_weekend.id
+    trading        = databricks_job.trading.id
+  }
 }
 
 output "job_trigger" {

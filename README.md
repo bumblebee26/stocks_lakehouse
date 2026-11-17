@@ -39,7 +39,9 @@ market breadth, unusual volume, Indian ADR premium vs USD/INR, and a global mark
 | 11:00 Tue–Sat | Massive: previous US session (all US stocks; the free plan releases it ~10:30 IST), catching up missed days. History only |
 | 08:00 Mon | NSE F&O stock list |
 | 06:00 Tue–Sat | FRED: global indices, FX, VIX, oil, rates (rolling 21-day window) |
-| after each file | Databricks job refreshes the pipeline (file-arrival trigger), then rebuilds the dashboard summaries |
+| ~19:35 Mon–Fri | Databricks job `stocks-market-close` (when the NSE file lands): pipelines `stocks-market` then `stocks-research`, then the dashboard summaries |
+| ~15:50, ~23:35 Mon–Fri | Databricks job `stocks-trading` (when paper-trader's export lands): pipeline `stocks-trading`, then the dashboard summaries |
+| 08:00, 12:00 Sat | Databricks job `stocks-market-weekend`: market and research (fundamentals, Nifty 200 list, Friday's US file) |
 | every minute 09:00–15:59, every 30 min otherwise (08:00–19:30) Mon–Fri | Company news: NSE (announcements, results, board meetings, corporate actions) every run; Business Standard markets, RBI and SEBI press releases at most every 4–5 minutes; BSE announcements built but off (`bse_news_enabled`) |
 | 08:45 Mon–Fri | Pre-market brief and the technical scanner to Telegram (India first; US figures live from Yahoo) |
 | 15:45 Mon–Fri | paper-trader pushes the day's trade journal to `landing/trades/` and a portfolio snapshot to `landing/portfolio/` |
@@ -51,8 +53,11 @@ market breadth, unusual volume, Indian ADR premium vs USD/INR, and a global mark
 
 ```
 fetchers/          Lambda code: nse (+ delivery), nse_fo, massive, fred, news, sync, premarket, yahoo (+ shared helpers). Python stdlib + boto3 only.
-pipeline/          Lakeflow pipeline in Python (bronze.py, silver.py, gold.py), SQL equivalents in comments
-sql/               dashboard_summary.sql: "In plain words" page summaries, run by the refresh job after the pipeline
+pipeline/          Lakeflow pipelines in Python, SQL equivalents in comments:
+  market/          bronze.py, silver.py, gold.py: market data in, cleaned, light summaries (33 tables)
+  research/        gold.py: technical scanner, momentum ranks, signal record, data freshness (5 tables, pandas)
+  trading/         bronze.py, silver.py, gold.py: paper-trader journal, portfolio, shadows (23 tables)
+sql/               dashboard_summary.sql: "In plain words" page summaries, run by each job after its pipelines
 infra/
   bootstrap/       S3 bucket for Terraform state (run once, locally)
   modules/         secure_bucket: private, encrypted, versioned, HTTPS-only S3

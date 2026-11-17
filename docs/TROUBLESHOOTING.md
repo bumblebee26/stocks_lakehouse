@@ -120,12 +120,28 @@ inferred.
 **Fix (in the repo):** FRED bronze has an explicit schema, and Terraform writes a `_README.txt` into every
 source folder so the path always exists.
 
-### The refresh job doesn't start when files land
+### `stocks-market-close` or `stocks-trading` doesn't start when files land
 
-**Cause:** The trigger waits until no new files have arrived for 5 minutes (so a backfill causes one run, not
-hundreds), and runs at most every 15 minutes. File-arrival triggers may also be unavailable on some plans.
-**Fix:** Wait, or click **Run now**. If the trigger never fires, set `job_trigger = "schedule"` (06:00 IST
-Tue–Sat) and deploy.
+**Cause:** The trigger waits until no new files have arrived in its folder (`landing/nse/` or `landing/trades/`)
+for 5 minutes (so a backfill causes one run, not hundreds), and runs at most every 15 minutes. Files in other
+folders (Massive, FRED, F&O list) don't start a job; the next market run reads them. File-arrival triggers may
+also be unavailable on some plans.
+**Fix:** Wait, or click **Run now**. If the trigger never fires, set `job_trigger = "schedule"` (20:15, and
+15:55/23:55 IST Mon–Fri) and deploy.
+
+### A pipeline task fails with `QUOTA_EXCEEDED` (or "active pipeline" limit)
+
+**Cause:** Free Edition runs one pipeline at a time and another job's pipeline was still running (e.g. a manual
+run, or a long full refresh).
+**Fix:** Nothing: the task retries every 15 minutes, up to 4 times. If it still failed, run the job again once
+the other one has finished. Don't start pipelines by hand while a job is running.
+
+### A pipeline fails with "table is already managed by pipeline …"
+
+**Cause:** A table moved to another pipeline (as in the 21 Nov split) but a copy owned by the old pipeline is
+still there.
+**Fix:** In the SQL editor `DROP MATERIALIZED VIEW stocks.<schema>.<table>` (or `DROP TABLE` for a bronze
+streaming table), then run the job again; the new pipeline rebuilds it from the volume.
 
 ## Data sources
 
@@ -174,34 +190,36 @@ Check in order:
 **Cause:** New tables only exist after the pipeline has run with the new code. Merging deploys the code; the
 tables appear on the next pipeline run (triggered by the next file, or **Run now**). It also happens if that run
 failed.
-**Fix:** Run the `stocks-refresh` job (or the pipeline) and check every table is green. The brief no longer fails
+**Fix:** Run the job that owns the table (`stocks-market-close` for market and research tables, `stocks-trading`
+for trading ones) and check every table is green. The brief no longer fails
 outright: a missing table only drops its section, and the message says "⚠️ Unavailable today: ...".
 
 ### Message says "⚠️ ... hasn't arrived ... left out" or "⚠️ Not available this morning: ..."
 
 A source doesn't have the day it should have (NSE prices, NSE delivery % or the scanner), or a live Yahoo
 figure (India VIX, S&P 500, Nasdaq, Brent, USD/INR) couldn't be read. That part is left out on purpose; an older
-day is never used in its place. For NSE data, check the `stocks-fetch-nse` log and the `stocks-refresh` job runs;
+day is never used in its place. For NSE data, check the `stocks-fetch-nse` log and the `stocks-market-close` runs;
 `stocks.gold.data_freshness` shows the day each source has.
 
 ### Scanner message says "⚠️ The scan for ... hasn't run" or "Scanner unavailable today"
 
-`stocks.gold.technical_screen` is behind or failed. Check that the 19:30 NSE file arrived and the pipeline run
-after it was green. If no stock passes all six filters, the message says so: that is a normal day, not an
+`stocks.gold.technical_screen` is behind or failed. Check that the 19:30 NSE file arrived and the `stocks-market-close` run
+after it was green (its `research` task builds the scanner). If no stock passes all six filters, the message says so: that is a normal day, not an
 error.
 
 ## Paper trading tables
 
 ### The Intraday trading, Portfolio or Company quality page shows `TABLE_OR_VIEW_NOT_FOUND`
 **Cause:** The pipeline hasn't run since the tables were deployed.
-**Fix:** Run the `stocks-refresh` job once (Jobs & Pipelines → stocks-refresh → Run now). The trading and
+**Fix:** Run `stocks-trading` once (Jobs & Pipelines → stocks-trading → Run now), and `stocks-market-close` for the
+company tables. The trading and
 portfolio tables stay empty until the first 15:45 export from paper-trader; the company tables until the first
 Saturday fundamentals run.
 
 ### An "In plain words" box is empty or shows plain facts instead of AI text
 **Cause:** The job's `dashboard_summary` task failed or hasn't run yet, or `ai_summarize` failed (the dashboard
 then falls back to the facts). A sentence whose data is missing is left out on purpose.
-**Fix:** Open the last `stocks-refresh` run and check the `dashboard_summary` task. To rebuild now, run the job
+**Fix:** Open the last run of any of the three jobs and check its `dashboard_summary` task. To rebuild now, run the job
 again; `SELECT * FROM stocks.gold.dashboard_summary` shows the facts, the AI text and when it was generated.
 
 ### No trades for a day that had trading
@@ -231,7 +249,7 @@ shows "news unavailable". If it lasts, check the feed URLs in `fetchers/news.py`
 **Cause:** `scripts/check_sql.py` ran the query with `EXPLAIN` on the SQL warehouse and it has a syntax error,
 an unknown column or an unknown function.
 **Fix:** Fix the SQL in `infra/databricks/dashboard.tf` or `sql/`, push to `dev`. `WARN ... TABLE_OR_VIEW_NOT_FOUND`
-is fine when the same change creates that table (the pipeline builds it after the merge).
+is fine when the same change creates that table (its pipeline builds it after the merge).
 
 ### `git push` rejected (`fetch first` / non-fast-forward)
 

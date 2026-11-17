@@ -1,4 +1,4 @@
-"""Tests for the technical scanner's pandas block in pipeline/gold.py (loaded on its own, no Spark needed)."""
+"""Tests for the technical scanner's pandas block in pipeline/research/gold.py (loaded on its own, no Spark needed)."""
 
 import os
 import re
@@ -7,10 +7,10 @@ import unittest
 import numpy as np
 import pandas as pd
 
-SRC = open(os.path.join(os.path.dirname(__file__), "..", "pipeline", "gold.py"), encoding="utf-8").read()
+SRC = open(os.path.join(os.path.dirname(__file__), "..", "pipeline", "research", "gold.py"), encoding="utf-8").read()
 BLOCK = re.search(r"# --- technicals \(pure pandas\) ---\n(.*?)# --- end technicals ---", SRC, re.S).group(1)
 T = {}
-exec(compile(BLOCK, "gold.py:technicals", "exec"), T)  # noqa: S102 - our own source
+exec(compile(BLOCK, "research/gold.py:technicals", "exec"), T)  # noqa: S102 - our own source
 
 
 def bars(closes, volume=1000.0, prev=None):

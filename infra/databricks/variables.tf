@@ -58,7 +58,7 @@ variable "pipeline_development_mode" {
 }
 
 variable "job_trigger" {
-  description = "How the refresh job starts: \"file_arrival\" (when new files land in the volume) or \"schedule\" (06:00 IST Tue-Sat)."
+  description = "How the market-close and trading jobs start: \"file_arrival\" (when their files land in the volume) or \"schedule\" (fixed times: 20:15, and 15:55/23:55 IST Mon-Fri)."
   type        = string
   default     = "file_arrival"
 
@@ -102,4 +102,15 @@ variable "sql_warehouse_name" {
   description = "SQL warehouse used by the dashboard and the pre-market brief (Free Edition ships one)."
   type        = string
   default     = "Serverless Starter Warehouse"
+}
+
+variable "ledger_start" {
+  description = "First day of the paper-trading ledger (it was reset on 17 Nov 2026). Money tables and dashboard pages start here; the track record, ratings and rule tests keep all history."
+  type        = string
+  default     = "2026-11-18"
+
+  validation {
+    condition     = can(regex("^\\d{4}-\\d{2}-\\d{2}$", var.ledger_start))
+    error_message = "ledger_start must be a date like 2026-11-18."
+  }
 }
