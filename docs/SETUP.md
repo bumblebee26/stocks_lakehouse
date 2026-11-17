@@ -317,7 +317,7 @@ Apply. Once CI/CD is set up (Part F), make this change through a pull request in
 
 ### E1. Dashboard
 
-Open the `dashboard_url` from C4's outputs, or **Dashboards → Stocks lakehouse: India x US**. It's defined in
+Open the `dashboard_url` from C4's outputs, or **Dashboards → NSE Paper Trading Desk**. It's defined in
 `infra/databricks/dashboard.tf`; edits made in the UI are overwritten on the next apply.
 
 ### E2. Telegram settings
