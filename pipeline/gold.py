@@ -25,6 +25,7 @@ Paper trading (dummy money, from bumblebee26/paper-trader via stocks.silver.trad
   stocks.gold.intraday_universe            Nifty 200 stocks the trader may trade intraday (liquidity guardrails), flagged on news/moves
   stocks.gold.swing_signals                results/news breakouts the swing pool tests in shadow mode
   stocks.gold.shadow_pools_daily           shadow pools (swing, long-term) per day vs NIFTYBEES since each one started
+  stocks.gold.momentum_ranks               Nifty 200 momentum ranks for the momentum shadow pools (swing and long term)
 
 Market proxies (no index data in these sources): NIFTYBEES (Nifty 50 ETF on NSE)
 and SPY (S&P 500 ETF). Change them with pipeline configuration keys
@@ -1777,3 +1778,102 @@ def data_freshness():
     for p in parts[1:]:
         out = out.unionByName(p)
     return out.select("source", "latest_date").withColumn("checked_at", F.current_timestamp())
+
+
+# ---------------------------------------------------------------------------
+# Momentum (Nifty 200): the ranks behind the momentum shadow pools (swing and long term, paper only)
+# ---------------------------------------------------------------------------
+# From gold.technical_indicators (split/bonus-adjusted closes), on the latest NSE day:
+#   returns over 1, 3, 6 and 12 months (21, 63, 126, 252 sessions), yearly volatility (stdev of daily returns x
+#   sqrt(252)), distance from the 52-week high, ATR(14), RSI(14), uptrend (close > 50-day > 200-day average).
+#   long term  lt_score = average of the z-scores (across the Nifty 200) of 6- and 12-month return / volatility,
+#              the method behind NSE's Momentum 30 index; lt_rank among stocks with a year of history whose
+#              fundamentals aren't known to be bad (a loss, or debt above 1.5x equity outside banks).
+#   swing      swing_score = 40 x percentile of the 1-month return + 30 x percentile of the 3-month return
+#              + 15 within 5% of the 52-week high (8 within 10%) + 15 for a fresh positive filing (results, order,
+#              merger/acquisition, dividend/bonus/buyback, last 5 days) + 10 for a strict technical-scanner pick
+#              - 25 for a fresh regulatory or pledge filing. swing_eligible = uptrend, 1-month return above 0 and
+#              RSI under 80 (momentum is allowed to be stretched; only blow-offs are left out).
+MOM_POSITIVE_NEWS = ["results", "order", "mna", "dividend_split_bonus"]
+MOM_NEGATIVE_NEWS = ["regulatory", "pledge"]
+
+
+# SQL equivalent (abridged):
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.momentum_ranks AS
+#   WITH r AS (SELECT *, close / lag(close, 21) OVER w - 1 AS ret_1m, ..., stddev(close / lag(close) OVER w - 1)
+#              OVER (w ROWS 251 PRECEDING) * sqrt(252) AS vol_1y, max(high) OVER (w ROWS 251 PRECEDING) AS high_52w
+#              FROM stocks.gold.technical_indicators WINDOW w AS (PARTITION BY symbol ORDER BY trade_date))
+#   SELECT ..., (z(ret_6m / vol_1y) + z(ret_12m / vol_1y)) / 2 AS lt_score, rank() ... AS lt_rank, ... swing_rank
+#   FROM r WHERE trade_date = (SELECT max(trade_date) FROM r) ...;
+@dp.materialized_view(
+    name="stocks.gold.momentum_ranks",
+    comment="Nifty 200 momentum on the latest NSE day, for the momentum shadow pools (paper only): 1/3/6/12-month "
+            "returns, yearly volatility, distance from the 52-week high, ATR, RSI, uptrend, fresh positive and "
+            "negative filings, scanner status, basic quality; lt_score/lt_rank (volatility-adjusted 6- and 12-month "
+            "momentum, the Momentum 30 method) and swing_score/swing_rank (1- and 3-month strength, near the high, "
+            "news). Past strength only; never a guaranteed return.",
+    table_properties={"quality": "gold"},
+)
+def momentum_ranks():
+    t = (spark.read.table("stocks.gold.technical_indicators")  # noqa: F821
+         .filter(F.col("symbol") != TECH_INDEX_PROXY))
+    w = Window.partitionBy("symbol").orderBy("trade_date")
+    year = w.rowsBetween(-251, 0)
+    r = (t.withColumn("n", F.row_number().over(w))
+         .withColumn("daily_ret", F.col("close") / F.lag("close").over(w) - 1)
+         .withColumn("vol_1y_pct", F.stddev("daily_ret").over(year) * F.sqrt(F.lit(252.0)) * 100)
+         .withColumn("high_52w", F.max("high").over(year)))
+    for name, n in (("ret_1m_pct", 21), ("ret_3m_pct", 63), ("ret_6m_pct", 126), ("ret_12m_pct", 252)):
+        r = r.withColumn(name, (F.col("close") / F.lag("close", n).over(w) - 1) * 100)
+    latest = r.agg(F.max("trade_date").alias("trade_date"))
+    d = r.join(latest, "trade_date")
+
+    news = _company_news().filter(F.col("news_date") >= F.date_sub(F.current_date(), 7))
+    newest = Window.partitionBy("symbol").orderBy(F.col("news_ts").desc())
+    pos = (news.filter(F.col("category").isin(MOM_POSITIVE_NEWS))
+           .withColumn("rn", F.row_number().over(newest))
+           .groupBy("symbol").agg(F.count("*").alias("news_pos_5d"),
+                                  F.max(F.when(F.col("rn") == 1, F.concat_ws(": ", "category", "title"))).alias("latest_good_news")))
+    neg = (news.filter(F.col("category").isin(MOM_NEGATIVE_NEWS)).groupBy("symbol")
+           .agg(F.count("*").alias("news_neg_5d")))
+    fund = (spark.read.table("stocks.gold.company_fundamentals")  # noqa: F821
+            .select("symbol", F.when((F.col("net_income_cr") <= 0)
+                                     | (~F.col("is_financial") & (F.col("debt_to_equity") > 1.5)), False)
+                    .when(F.col("net_income_cr").isNotNull(), True).alias("quality_ok")))
+    members = spark.read.table("stocks.silver.index_members").select("symbol", "company", "industry")  # noqa: F821
+
+    d = (d.join(members, "symbol").join(pos, "symbol", "left").join(neg, "symbol", "left").join(fund, "symbol", "left")
+         .withColumn("news_pos_5d", F.coalesce("news_pos_5d", F.lit(0)))
+         .withColumn("news_neg_5d", F.coalesce("news_neg_5d", F.lit(0)))
+         .withColumn("pct_of_52w_high", F.col("close") / F.col("high_52w") * 100)
+         .withColumn("uptrend", (F.col("close") > F.col("sma50")) & (F.col("sma50") > F.col("sma200")))
+         .withColumn("lt_eligible", (F.col("n") >= 253) & F.col("vol_1y_pct").isNotNull()
+                     & (F.col("vol_1y_pct") > 0) & (F.coalesce("quality_ok", F.lit(True))))
+         .withColumn("m6", F.col("ret_6m_pct") / F.col("vol_1y_pct"))
+         .withColumn("m12", F.col("ret_12m_pct") / F.col("vol_1y_pct")))
+    allw = Window.partitionBy(F.lit(1))
+    elig = Window.partitionBy("lt_eligible")
+    d = (d.withColumn("z6", (F.col("m6") - F.avg("m6").over(elig)) / F.stddev("m6").over(elig))
+         .withColumn("z12", (F.col("m12") - F.avg("m12").over(elig)) / F.stddev("m12").over(elig))
+         .withColumn("lt_score", F.when(F.col("lt_eligible"), (F.col("z6") + F.col("z12")) / 2))
+         .withColumn("p1", F.percent_rank().over(allw.orderBy("ret_1m_pct")))
+         .withColumn("p3", F.percent_rank().over(allw.orderBy("ret_3m_pct")))
+         .withColumn("swing_eligible", F.coalesce(F.col("uptrend") & (F.col("ret_1m_pct") > 0)
+                                                  & (F.col("rsi14") < 80), F.lit(False)))
+         .withColumn("swing_score",
+                     40 * F.col("p1") + 30 * F.col("p3")
+                     + F.when(F.col("pct_of_52w_high") >= 95, 15).when(F.col("pct_of_52w_high") >= 90, 8).otherwise(0)
+                     + F.when(F.col("news_pos_5d") > 0, 15).otherwise(0)
+                     + F.when(F.col("strict"), 10).otherwise(0)
+                     - F.when(F.col("news_neg_5d") > 0, 25).otherwise(0)))
+    lt_rank = Window.partitionBy("lt_eligible").orderBy(F.col("lt_score").desc_nulls_last())
+    sw_rank = Window.partitionBy("swing_eligible").orderBy(F.col("swing_score").desc())
+    return (d.withColumn("lt_rank", F.when(F.col("lt_eligible"), F.row_number().over(lt_rank)))
+            .withColumn("swing_rank", F.when(F.col("swing_eligible"), F.row_number().over(sw_rank)))
+            .select("trade_date", "symbol", "company", "industry", F.round("close", 2).alias("close"),
+                    *[F.round(c, 2).alias(c) for c in ("ret_1m_pct", "ret_3m_pct", "ret_6m_pct", "ret_12m_pct",
+                                                        "vol_1y_pct", "pct_of_52w_high")],
+                    F.round("atr14", 2).alias("atr14"), F.round("rsi14", 1).alias("rsi14"), "uptrend",
+                    F.col("strict").alias("scanner_strict"), "news_pos_5d", "news_neg_5d", "latest_good_news",
+                    "quality_ok", "lt_eligible", F.round("lt_score", 3).alias("lt_score"), "lt_rank",
+                    "swing_eligible", F.round("swing_score", 1).alias("swing_score"), "swing_rank"))
