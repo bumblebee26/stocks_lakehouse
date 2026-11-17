@@ -48,11 +48,15 @@ def run(name):
     deadline = time.time() + TIMEOUT_MINUTES * 60
     while time.time() < deadline:
         r = call("GET", f"/api/2.1/jobs/runs/get?run_id={run_id}")
+        latest = {}   # the API lists every attempt of a retried task; show only each task's latest attempt
         for t in r.get("tasks", []):
+            if t.get("attempt_number", 0) >= latest.get(t["task_key"], {}).get("attempt_number", 0):
+                latest[t["task_key"]] = t
+        for key, t in latest.items():
             now = f"{_state(t.get('state'))}" + (f" (attempt {t['attempt_number'] + 1})" if t.get("attempt_number") else "")
-            if seen.get(t["task_key"]) != now:
-                seen[t["task_key"]] = now
-                print(f"  {t['task_key']}: {now}", flush=True)
+            if seen.get(key) != now:
+                seen[key] = now
+                print(f"  {key}: {now}", flush=True)
         state = r.get("state", {})
         if state.get("life_cycle_state") in DONE:
             ok = state.get("result_state") == "SUCCESS"
