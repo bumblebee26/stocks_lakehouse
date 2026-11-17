@@ -8,10 +8,10 @@ config:
 flowchart TB
     subgraph EXT["External data sources"]
         direction LR
-        NSE["<b>NSE archives</b><br/>UDiFF bhavcopy (.csv.zip)"]
+        NSE["<b>NSE archives</b><br/>UDiFF bhavcopy (.csv.zip)<br/>delivery file · F&amp;O list"]
         MAS["<b>Massive API</b><br/>grouped daily, all US tickers"]
         FREDAPI["<b>FRED API</b><br/>14 global series"]
-        NSERSS["<b>NSE RSS feeds</b><br/>announcements · results · board meetings"]
+        NSERSS["<b>News RSS feeds</b><br/>NSE filings · Business Standard · RBI · SEBI"]
     end
 
     subgraph AWS["AWS account · free plan · ap-southeast-2 (Sydney)"]
@@ -20,6 +20,7 @@ flowchart TB
         subgraph LAMBDAS["Lambda functions (Python 3.13, arm64)"]
             direction LR
             FNSE["stocks-fetch-nse"]
+            FFO["stocks-fetch-nse_fo"]
             FMAS["stocks-fetch-massive"]
             FFRED["stocks-fetch-fred"]
             FNEWS["stocks-fetch-news"]
@@ -41,16 +42,16 @@ flowchart TB
         JOB["<b>Job: stocks-refresh</b><br/>file-arrival trigger<br/>pipeline, then dashboard summaries"]
         subgraph PIPE["Lakeflow pipeline: stocks-medallion (serverless)"]
             direction LR
-            BR["<b>Bronze</b><br/>8 streaming tables<br/>Auto Loader"]
-            SI["<b>Silver</b><br/>12 materialized views<br/>typed · de-duplicated · DQ"]
-            GO["<b>Gold</b><br/>20 materialized views<br/>markets · news · trading · portfolio · long-term"]
+            BR["<b>Bronze</b><br/>10 streaming tables<br/>Auto Loader"]
+            SI["<b>Silver</b><br/>17 materialized views<br/>typed · de-duplicated · DQ"]
+            GO["<b>Gold</b><br/>27 materialized views<br/>markets · scanner · news · trading · portfolio · long-term"]
             BR --> SI --> GO
         end
         WH["<b>SQL warehouse</b>"]
         DASH["<b>Dashboard</b><br/>Stocks lakehouse: India × US"]
     end
 
-    TG["<b>Telegram</b><br/>pre-market brief"]
+    TG["<b>Telegram</b><br/>pre-market brief + technical scanner"]
     SESS["<b>paper-trader session</b><br/>GitHub Actions · Claude Code"]
     FUND["<b>paper-trader fundamentals</b><br/>GitHub Actions · Sat 07:15"]
 
@@ -62,13 +63,13 @@ flowchart TB
         GH --> GHA --> TFS
     end
 
-    SCH -- "1 · invoke" --> FNSE & FMAS & FFRED & FNEWS
-    NSE -- "2 · download" --> FNSE
+    SCH -- "1 · invoke" --> FNSE & FFO & FMAS & FFRED & FNEWS
+    NSE -- "2 · download" --> FNSE & FFO
     MAS -- "2 · download" --> FMAS
     FREDAPI -- "2 · download" --> FFRED
     NSERSS -- "2 · download" --> FNEWS
-    FNSE & FMAS & FFRED & FNEWS -- "3 · raw file" --> S3
-    FNSE & FMAS & FFRED -- "4 · push (Files API)" --> VOL
+    FNSE & FFO & FMAS & FFRED & FNEWS -- "3 · raw file" --> S3
+    FNSE & FFO & FMAS & FFRED -- "4 · push (Files API)" --> VOL
     FNEWS -- "4 · push (Files API)" --> NVOL
     NVOL -. "read at the next refresh" .-> PIPE
     SYNC -. "reads" .-> S3
@@ -97,7 +98,7 @@ flowchart TB
     classDef out fill:#ecfdf5,stroke:#10b981,color:#022c22
     classDef ctrl fill:#f1f5f9,stroke:#475569,color:#0f172a
     class NSE,MAS,FREDAPI,NSERSS ext
-    class SCH,FNSE,FMAS,FFRED,FNEWS,SYNC,PM aws
+    class SCH,FNSE,FFO,FMAS,FFRED,FNEWS,SYNC,PM aws
     class S3,SSM store
     class VOL,NVOL,JOB,WH dbx
     class BR bronze
