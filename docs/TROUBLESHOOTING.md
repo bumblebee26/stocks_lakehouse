@@ -177,9 +177,18 @@ failed.
 **Fix:** Run the `stocks-refresh` job (or the pipeline) and check every table is green. The brief no longer fails
 outright: a missing table only drops its section, and the message says "⚠️ Unavailable today: ...".
 
-### Message says "⚠️ Latest US data is from ..."
+### Message says "⚠️ ... hasn't arrived ... left out" or "⚠️ Not available this morning: ..."
 
-The pipeline is behind. Check the Massive fetcher log and the `stocks-refresh` job runs.
+A source doesn't have the day it should have (NSE prices, NSE delivery % or the scanner), or a live Yahoo
+figure (India VIX, S&P 500, Nasdaq, Brent, USD/INR) couldn't be read. That part is left out on purpose; an older
+day is never used in its place. For NSE data, check the `stocks-fetch-nse` log and the `stocks-refresh` job runs;
+`stocks.gold.data_freshness` shows the day each source has.
+
+### Scanner message says "⚠️ The scan for ... hasn't run" or "Scanner unavailable today"
+
+`stocks.gold.technical_screen` is behind or failed. Check that the 19:30 NSE file arrived and the pipeline run
+after it was green. If no stock passes all six filters, the message says so: that is a normal day, not an
+error.
 
 ## Paper trading tables
 

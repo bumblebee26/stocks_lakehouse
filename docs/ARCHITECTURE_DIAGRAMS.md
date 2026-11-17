@@ -25,10 +25,10 @@ The whole system is four stages, read left to right:
 
 | Stage | What happens | Runs on |
 |---|---|---|
-| **① Sources** | Three public data sources. **NSE** publishes one file per trading day with every Indian equity, and RSS feeds of company news (fetched every minute in market hours, every 30 minutes otherwise). **Massive** returns one file per US trading day with every US stock and ETF (including the country ETFs used for world markets). **FRED** provides 14 global series: equity indices, exchange rates, VIX, oil and US rates. | Third parties |
+| **① Sources** | Three public data sources, plus news feeds. **NSE** publishes one file per trading day with every Indian equity (and a delivery file beside it), a weekly list of stocks with futures and options (F&O), and RSS feeds of company news (fetched every minute in market hours, every 30 minutes otherwise; Business Standard markets, RBI and SEBI are read every few minutes too). **Massive** returns one file per US trading day with every US stock and ETF (including the country ETFs used for world markets). **FRED** provides 14 global series: equity indices, exchange rates, VIX, oil and US rates. | Third parties |
 | **② Ingest** | **EventBridge** triggers a **Lambda fetcher** per source on a schedule (daily; news every minute in market hours, every 30 minutes otherwise). Each fetcher downloads the day's data, saves the untouched file in **S3** as a permanent raw archive, and **pushes** the same file into Databricks. | AWS |
 | **③ Lakehouse** | Files land in a Unity Catalog **volume**. The medallion pipeline turns them into tables: **bronze** (raw, as delivered), **silver** (cleaned, typed, de-duplicated, India and US unified into one schema), **gold** (insights). | Databricks |
-| **④ Consume** | A **dashboard** shows the gold tables. A **Telegram brief** at 08:45 IST, before the Indian market opens, summarises the US session, world markets, rates/FX/oil and India's setup. | Databricks, AWS, Telegram |
+| **④ Consume** | A **dashboard** shows the gold tables. At 08:45 IST, before the Indian market opens, two **Telegram messages**: the brief, India first (India VIX and the risk it implies, the Nifty 50's trend, world markets only as support), and the **technical scanner**'s picks from the Nifty 200. | Databricks, AWS, Telegram |
 
 The key design choice is the **push** arrow between ② and ③: AWS sends files to Databricks, instead of
 Databricks reading S3. The AWS free plan blocks outside accounts (including Databricks) from reading the
@@ -44,8 +44,8 @@ bucket, but outbound calls from Lambda are allowed.
 
 | Area | Components | Notes |
 |---|---|---|
-| **External data sources** | NSE archives, NSE RSS feeds, Massive API, FRED API | NSE needs browser-like headers; Massive and FRED need free API keys. |
-| **AWS account** (free plan, `ap-southeast-2` Sydney) | EventBridge Scheduler, 6 Lambda functions, S3 landing bucket, SSM Parameter Store | The free plan only allows the project's region (plus `us-east-1` / `us-west-2`), so everything runs in Sydney. |
+| **External data sources** | NSE archives (bhavcopy, delivery file, F&O list), news RSS feeds (NSE, Business Standard, RBI, SEBI), Massive API, FRED API | NSE needs browser-like headers; Massive and FRED need free API keys. |
+| **AWS account** (free plan, `ap-southeast-2` Sydney) | EventBridge Scheduler, 7 Lambda functions, S3 landing bucket, SSM Parameter Store | The free plan only allows the project's region (plus `us-east-1` / `us-west-2`), so everything runs in Sydney. |
 | **Databricks Free Edition** (Unity Catalog `stocks`) | Landing volume, news volume, refresh job, Lakeflow pipeline (bronze → silver → gold), SQL warehouse, dashboard | Serverless only. One pipeline, one job. |
 | **Telegram** | Your chat with the bot | Receives the brief (and the paper trader's messages, same bot). |
 | **paper-trader** (purple) | `stocks-trader-guardian` Lambda in the same account; the trading session and the weekly fundamentals job in GitHub Actions | Not managed by this repo. Shown where it touches the lakehouse: flows 10 to 13. |
@@ -55,12 +55,13 @@ bucket, but outbound calls from Lambda are allowed.
 
 | Function | Trigger | Does |
 |---|---|---|
-| `stocks-fetch-nse` | 19:30 IST Mon–Fri | Today's NSE bhavcopy. Keeps the `.zip` in S3, pushes an unzipped `.csv` to the volume (Spark can't read zip). |
+| `stocks-fetch-nse` | 19:30 IST Mon–Fri | Today's NSE bhavcopy. Keeps the `.zip` in S3, pushes an unzipped `.csv` to the volume (Spark can't read zip). Also fetches NSE's delivery file (delivery % per stock) to `landing/nse_delivery/`. |
+| `stocks-fetch-nse_fo` | 08:00 IST Mon | NSE's F&O stock list (`fo_mktlots.csv`) to `landing/nse_fo/`; the scanner marks which picks have futures and options. |
 | `stocks-fetch-massive` | 11:00 IST Tue–Sat | The previous US session for all US tickers (the free plan releases it ~10:30 IST); each run also fetches any of the last 3 weekdays still missing. |
 | `stocks-fetch-fred` | 06:00 IST Tue–Sat | The last 21 days for 14 series (late and revised values get corrected). |
-| `stocks-fetch-news` | Every minute 09:00–15:59, every 30 min otherwise (08:00–19:30) IST Mon–Fri | NSE's announcement, results, board-meeting and corporate-action feeds to the **news volume**: `latest.jsonl` every run, `snap_HHMM.jsonl` (+ S3 copy under `landing/news/`) at :00/:30 and when new items appear. Kept out of the landing volume so it doesn't trigger a pipeline refresh. |
+| `stocks-fetch-news` | Every minute 09:00–15:59, every 30 min otherwise (08:00–19:30) IST Mon–Fri | NSE's announcement, results, board-meeting and corporate-action feeds (plus Business Standard markets, RBI and SEBI at most every 4–5 minutes; BSE built but off) to the **news volume**: `latest.jsonl` every run, `snap_HHMM.jsonl` (+ S3 copy under `landing/news/`) at :00/:30 and when new items appear. Kept out of the landing volume so it doesn't trigger a pipeline refresh. |
 | `stocks-sync-volume` | Manual | Copies S3 files that are missing from the volume, after a backfill or a failed push. |
-| `stocks-premarket-brief` | 08:45 IST Mon–Fri | Queries gold tables and sends the Telegram message. |
+| `stocks-premarket-brief` | 08:45 IST Mon–Fri | Queries gold tables, reads a few live figures from Yahoo, and sends two Telegram messages: the brief and the technical scanner. |
 
 Long backfills **continue themselves**: when a fetcher nears Lambda's 15-minute limit it re-invokes itself
 with the remaining dates, so one command can load years.
@@ -76,10 +77,10 @@ with the remaining dates, so one command can load years.
 | **5** | Volume → Job | A new file triggers the `stocks-refresh` job (after 5 minutes without new files, at most every 15 minutes). |
 | **6** | Job → Pipeline | The pipeline refreshes: Auto Loader reads only new files into bronze; silver and gold recompute. A second task then runs `sql/dashboard_summary.sql` for the dashboard's "In plain words" summaries. |
 | **7** | Scheduler → brief | At 08:45 IST the brief Lambda starts. |
-| **8** | Brief → SQL warehouse | It runs about 8 queries on gold tables through the SQL Statement API. If one fails, that section is skipped and the message says so. |
-| **9** | Brief → Telegram | The formatted message (takeaways, tables) is sent through the Telegram Bot API. |
+| **8** | Brief → SQL warehouse | It runs 4 queries on gold tables (data freshness, what usually follows a US shock, unusual volume, the technical scanner) through the SQL Statement API, and reads India VIX, the Nifty 50 and a few world figures live from Yahoo. If one fails, that section is skipped and the message says so; a source missing the day it should have is left out, never replaced by an older day. |
+| **9** | Brief → Telegram | Two messages are sent through the Telegram Bot API: the brief (takeaways, tables) and the technical scanner (strict picks with indicative levels and a Swing buy button for paper-trader). |
 | **10** | Guardian → Volume | At 15:45 IST paper-trader's guardian Lambda pushes the day's trade journal to `landing/trades/date=YYYY-MM-DD/events.jsonl` and a portfolio snapshot to `landing/portfolio/date=YYYY-MM-DD/portfolio.jsonl` with the same Files API and pusher token. Steps 5–6 then build the trading and portfolio tables. At 23:30 it re-sends the last 4 days' journals, so 👍/👎 ratings given in the evening reach `track_record` overnight. |
-| **11** | Session → SQL warehouse | Around 09:10 IST the trading session reads the same gold tables as the brief (US move, VIX, India's usual gap, unusual volume, ADRs) to set the day's risk and focus list. |
+| **11** | Session → SQL warehouse | Around 09:10 IST the trading session reads the same gold tables as the brief (data freshness, the technical scanner, unusual volume, ADRs) plus live India VIX and the Nifty 50's trend to set the day's risk and focus list. |
 | **12** | News volume → session | For each proposal and `/news`, the trading session reads `latest.jsonl` (today and the last day) directly through the Files API; no SQL, no pipeline run. |
 | **13** | Fundamentals job → Volume | Saturdays 07:15 IST paper-trader's *Company fundamentals* workflow pushes company financials to `landing/fundamentals/` and NSE's Nifty 200 list to `landing/index_members/`. |
 
@@ -109,6 +110,7 @@ Read left to right. Every box is a table in the `stocks` catalog (except the lan
 **Bronze**: one streaming table per source, fed by Auto Loader. Each file is read exactly once, and
 columns are kept as delivered, plus lineage columns (`_source_file`, `_ingested_at`, `trade_date`).
 - `nse_bhavcopy_raw`: NSE rows as strings.
+- `nse_delivery_raw`, `nse_fo_raw`: NSE's delivery figures per stock per day, and the weekly F&O stock list.
 - `massive_grouped_raw`: one row per US day, with `results` kept as JSON text (its `T`/`t` fields clash in
   case-insensitive Delta).
 - `fred_observations_raw`: one row per series per date, with an explicit schema so it works even before the
@@ -130,7 +132,8 @@ columns are kept as delivered, plus lineage columns (`_source_file`, `_ingested_
   refresh incrementally.
 - `trade_events` types the paper-trader events and keeps the newest copy of each `event_id`.
 - `portfolio_pools` and `portfolio_holdings` split the newest portfolio file of each day into pools and holdings;
-  `shadow_pools` keeps the paper-only pools (swing and long-term shadow), never part of the portfolio totals.
+  `shadow_pools` keeps the paper-only pools (the two swing shadows and the long-term shadow), never part of the portfolio totals.
+- `nse_delivery` is the delivery % per NSE stock per day; `fno_symbols` is the latest F&O stock list.
 - `fundamentals` keeps the newest fetch of each company × metric × period; `index_members` is the latest
   Nifty 200 list.
 - `news` keeps the earliest snapshot of each item and sorts it into categories (results, board meeting, rating...):
@@ -150,7 +153,7 @@ columns are kept as delivered, plus lineage columns (`_source_file`, `_ingested_
 | `trading_daily` | trades + trade_events | Each day's activity and P&L, reconciled against the trader's ledger |
 | `trading_by_setup`, `trading_by_hour` | trades | Which setups and hours make money? |
 | `trading_decisions` | trades + trade_events | Did the YES/NO choices help? |
-| `proposal_outcomes` → `track_record` | trade_events + trades | How did every proposal turn out (taken or skipped), by setup, hour, mood, sector, direction (BUY/SELL), suggestion band, reviewer, mode, news or watchlist and your 👍/👎? paper-trader reads `track_record` every session: the feedback loop. Your own (custom) trades count only under `source`. |
+| `proposal_outcomes` → `track_record` | trade_events + trades | How did every proposal turn out (taken or skipped), by setup, hour, mood, sector, direction (BUY/SELL), scanner (strict, near-miss or none), suggestion band, reviewer, mode, news or watchlist and your 👍/👎? paper-trader reads `track_record` every session: the feedback loop. Your own (custom) trades count only under `source`. |
 | `custom_trades` | trades + trade_events | What did my own Telegram trades (`/buy`, `/short`, `/swing`, `/longterm`) do? |
 | `portfolio_daily` | portfolio_pools + nse_eq_daily (NIFTYBEES) | How are all dummy pools doing, against just holding NIFTYBEES? |
 | `holdings_latest` | portfolio_holdings + portfolio_pools | What's held now, and what weight does each holding have? |
@@ -159,6 +162,10 @@ columns are kept as delivered, plus lineage columns (`_source_file`, `_ingested_
 | **`intraday_universe`** | daily_bars + index_members + news | Which Nifty 200 stocks may paper-trader trade intraday, and which have fresh news or big moves today? Read every morning (news radar, Groww buttons). |
 | `swing_signals` | daily_bars + index_members + news | Which news breakouts does the swing shadow pool buy? Read by paper-trader at 15:50. |
 | `shadow_pools_daily` | shadow_pools + nse_eq_daily (NIFTYBEES) | Are the rules tested on paper beating NIFTYBEES? |
+| **`technical_indicators`** | nse_eq_daily + index_members | The technical scanner's daily maths for each Nifty 200 stock (split/bonus-adjusted averages, RSI, MACD, ADX, volume, levels). Strict picks are read by paper-trader's scanner shadow at 15:50. |
+| **`technical_screen`** | technical_indicators + index_members + nse_delivery + fno_symbols | Which Nifty 200 stocks pass all six filters today (strict picks) or nearly do (near-misses)? Read by the 08:45 brief and paper-trader (`/screen`, 09:45 check). |
+| `signal_performance` | technical_indicators | How did each scanner signal do 5, 10 and 20 days later? |
+| `data_freshness` | nse_eq_daily, nse_delivery, us_daily, fred_daily, news, fno_symbols, index_members, technical_indicators | Which day does each source have? The brief and paper-trader leave out a source missing the day it should have. |
 
 Two more gold tables are not in the pipeline: `dashboard_summary_facts` and `dashboard_summary`, rebuilt by
 `sql/dashboard_summary.sql` after each refresh for the dashboard's "In plain words" boxes.
@@ -206,9 +213,10 @@ plan, Sydney), one Databricks workspace, one Telegram bot and the same CI/CD pat
 
 | When (IST) | Direction | What |
 |---|---|---|
-| ~09:10 | lakehouse → trader | The trading session reads gold tables over SQL to set the day's risk (from VIX), bias (India's usual gap after similar US days) and focus list (unusual volume, ADR moves). |
+| ~09:10 | lakehouse → trader | The trading session reads gold tables over SQL and a few live Yahoo figures to set the day's risk (from India VIX), bias (the Nifty 50's trend) and focus list (technical scanner picks, unusual volume, ADR moves); `data_freshness` says which sources to leave out. |
+| 09:45 | lakehouse → trader | The guardian reads `technical_screen` to check the morning's strict picks against the first half hour. |
 | During sessions | lakehouse → trader | The session reads the news volume's `latest.jsonl` for each proposal and `/news`; `/analyze` reads `company_fundamentals` and `longterm_candidates` over SQL (also from the responder Lambda outside sessions). |
-| 15:50 | lakehouse → trader | The guardian reads `swing_signals` for the swing shadow test. |
+| 15:50 | lakehouse → trader | The guardian reads `swing_signals` and the strict picks in `technical_indicators` for the two swing shadow tests. |
 | 15:45 | trader → lakehouse | The guardian Lambda pushes the day's journal to `landing/trades/` and a portfolio snapshot to `landing/portfolio/`; the pipeline builds the `trad*` and portfolio gold tables and the dashboard's Intraday trading and Portfolio pages. |
 | 23:30 | trader → lakehouse | The guardian re-sends the last 4 days' journals, so evening 👍/👎 ratings reach `track_record`. |
 | Sat 07:15 | trader → lakehouse | The *Company fundamentals* workflow pushes financials to `landing/fundamentals/` and the Nifty 200 list to `landing/index_members/`; the pipeline builds `company_fundamentals` and `longterm_candidates` (Company quality page). |
