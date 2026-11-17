@@ -689,7 +689,7 @@ def trading_decisions():
 
 
 # ---------------------------------------------------------------------------
-# The feedback loop: every proposal with its scores, decision, outcome and the user's rating, and the
+# The feedback loop: every proposal with its scores, decision and outcome (real results only), and the
 # track record paper-trader reads each session (trader/track.py) so decisions learn from results.
 # ---------------------------------------------------------------------------
 # A proposal's outcome is its real net P&L when it was traded, or what it would have made when it was
@@ -702,17 +702,16 @@ def trading_decisions():
 #          CAST(regexp_extract(p.note, 'suggested \\w+ (\\d+)%', 1) AS INT) AS suggested_yes_pct, ...,
 #          CASE WHEN filled THEN 'taken' WHEN auto_no THEN 'skipped_auto' WHEN rejected THEN 'skipped_by_you'
 #               WHEN expired THEN 'expired' WHEN not_filled THEN 'not_filled' END AS decision,
-#          coalesce(t.net_pnl_rs, po.pnl_rs) AS outcome_rs, fb.user_reply AS feedback
+#          coalesce(t.net_pnl_rs, po.pnl_rs) AS outcome_rs
 #   FROM proposed p LEFT JOIN decisions ... LEFT JOIN stocks.gold.trades t ... LEFT JOIN passed_outcome po ...
-#   LEFT JOIN latest user_feedback fb ...;
 #   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.track_record AS
 #   SELECT 'setup' AS dimension, setup AS value, count(*) AS trades, sum(won) AS wins, ... FROM outcomes
-#   GROUP BY setup UNION ALL ... (hour, mood, yes_band, reviewer, mode, decision, feedback, source, sector, side,
+#   GROUP BY setup UNION ALL ... (hour, mood, yes_band, reviewer, mode, decision, source, sector, side,
 #   scanner, all);
 TRACK_DAYS = 90
 TRACK_DIMENSIONS = [("all", None), ("setup", "setup"), ("hour", "hour"), ("mood", "mood"), ("yes_band", "yes_band"),
                     ("reviewer", "reviewer_verdict"), ("mode", "mode"), ("decision", "decision"),
-                    ("feedback", "feedback"), ("source", "source"), ("sector", "sector"), ("side", "side"),
+                    ("source", "source"), ("sector", "sector"), ("side", "side"),
                     ("scanner", "scanner")]
 
 # Sector of each watchlist stock, as paper-trader names them (trader/sectors.py), for proposals made before the
@@ -790,7 +789,7 @@ def _note_value(pattern, cast=None):
     name="stocks.gold.proposal_outcomes",
     comment="One row per paper-trader proposal: its scores (suggestion, live checks, agent, reviewer), market mood, "
             "mode (auto/human), decision (taken, skipped_by_you, skipped_auto, expired, not_filled), outcome in "
-            "rupees (real if taken, what it would have made if skipped) and the user's 👍/👎 feedback.",
+            "rupees (real if taken, what it would have made if skipped). Ratings retired 17 Nov.",
     table_properties={"quality": "gold"},
 )
 def proposal_outcomes():
@@ -830,19 +829,14 @@ def proposal_outcomes():
     )
     taken = (spark.read.table("stocks.gold.trades")  # noqa: F821
              .filter("status = 'closed'").select("proposal_id", F.col("net_pnl_rs").alias("taken_net_pnl_rs")))
-    fb_window = Window.partitionBy("proposal_id").orderBy(F.col("event_ts").desc())
-    feedback = (ev.filter("event = 'user_feedback'")
-                .withColumn("rn", F.row_number().over(fb_window)).filter("rn = 1")
-                .select("proposal_id",
-                        # 'none' = the user took their 👍/👎 reaction away: not rated
-                        F.when(F.col("user_reply") == "none", None).otherwise(F.col("user_reply")).alias("feedback")))
+    # The user's 👍/👎 ratings were retired on 17 Nov (only real outcomes teach the system): user_feedback events
+    # are no longer joined, so old ratings don't count anywhere.
     decision = (F.when(F.col("filled") == 1, "taken").when(F.col("auto_no") == 1, "skipped_auto")
                 .when(F.col("rejected") == 1, "skipped_by_you").when(F.col("expired") == 1, "expired")
                 .when(F.col("not_filled") == 1, "not_filled").otherwise("undecided"))
     outcome = F.when(F.col("filled") == 1, F.col("taken_net_pnl_rs")).otherwise(F.col("would_have_made_rs"))
     return (
         proposed.join(decided, "proposal_id", "left").join(taken, "proposal_id", "left")
-        .join(feedback, "proposal_id", "left")
         .withColumn("decision", decision)
         .withColumn("outcome_rs", outcome)
         .withColumn("won", F.when(F.col("outcome_rs").isNotNull(), (F.col("outcome_rs") > 0).cast("int")))
@@ -854,7 +848,7 @@ def proposal_outcomes():
 @dp.materialized_view(
     name="stocks.gold.track_record",
     comment=f"How proposals turned out over the last {TRACK_DAYS} days, by dimension (setup, hour, mood, yes_band, "
-            "reviewer, mode, decision, feedback, source, sector, side (BUY/SELL), all): proposals with an outcome, wins, win rate, average and total "
+            "reviewer, mode, decision, source, sector, side (BUY/SELL), scanner, all): proposals with an outcome, wins, win rate, average and total "
             "outcome in rupees. paper-trader shows it in proposals and gives it to Claude each session.",
     table_properties={"quality": "gold"},
 )
