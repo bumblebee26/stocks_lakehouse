@@ -277,11 +277,11 @@ locals {
     SQL
 
     swing_holdings = <<-SQL
-      ${replace(local.strategy_holdings_sql, "__POOLS__", "'swing', 'swing_shadow', 'swing_tech_shadow', 'swing_mom_shadow'")}
+      ${replace(local.strategy_holdings_sql, "__POOLS__", "'swing', 'swing_shadow', 'swing_tech_shadow', 'swing_mom_shadow', 'swing_mom_conc_shadow'")}
     SQL
 
     longterm_holdings = <<-SQL
-      ${replace(local.strategy_holdings_sql, "__POOLS__", "'long_term', 'long_term_shadow', 'long_term_mom_shadow'")}
+      ${replace(local.strategy_holdings_sql, "__POOLS__", "'long_term', 'long_term_shadow', 'long_term_mom_shadow', 'long_term_mom_conc_shadow'")}
     SQL
 
     scanner_today = <<-SQL
@@ -397,7 +397,9 @@ locals {
               WHEN 'swing_shadow' THEN 'Swing shadow: news breakouts' WHEN 'swing_tech_shadow' THEN 'Swing shadow: technical scanner'
               WHEN 'long_term_shadow' THEN 'Long-term shadow: quality picks'
               WHEN 'swing_mom_shadow' THEN 'Swing shadow: momentum + news'
-              WHEN 'long_term_mom_shadow' THEN 'Long-term shadow: momentum (top 15)' ELSE pool END
+              WHEN 'long_term_mom_shadow' THEN 'Long-term shadow: momentum (top 15)'
+              WHEN 'swing_mom_conc_shadow' THEN 'Swing shadow: momentum, concentrated (top 3)'
+              WHEN 'long_term_mom_conc_shadow' THEN 'Long-term shadow: momentum, concentrated (top 5)' ELSE pool END
   SQL
   strategy_group_sql = "CASE WHEN pool LIKE 'swing%' THEN 'Swing' WHEN pool LIKE 'long_term%' THEN 'Long-term' ELSE 'Intraday' END"
 
