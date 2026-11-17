@@ -105,7 +105,14 @@ More detail: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ![Data lineage: landing files to bronze, silver and gold tables](diagrams/03_lineage.png)
 
-Read left to right. Every box is a table in the `stocks` catalog (except the landing files).
+Read left to right. Every box is a table in the `stocks` catalog (except the landing files). The tables are
+built by three pipelines: **`stocks-market`** (every bronze source except the paper-trader journal and portfolio,
+the market silver tables, and the market, news-radar and long-term gold tables), **`stocks-research`** (the five
+pandas tables: `technical_indicators`, `technical_screen`, `signal_performance`, `data_freshness`,
+`momentum_ranks`) and **`stocks-trading`** (`trades_raw`, `portfolio_raw` and everything built on them). The
+trading pipeline's money tables (portfolio, shadow pools, daily P&L, results per setup and hour, decisions,
+custom trades) start at `ledger_start` (18 Nov 2026, after the ledger reset); the track record, ratings and rule
+tests keep all history.
 
 **Bronze**: one streaming table per source, fed by Auto Loader. Each file is read exactly once, and
 columns are kept as delivered, plus lineage columns (`_source_file`, `_ingested_at`, `trade_date`).
@@ -118,7 +125,8 @@ columns are kept as delivered, plus lineage columns (`_source_file`, `_ingested_
 - `trades_raw`: one row per paper-trader journal event (dummy money), explicit schema.
 - `portfolio_raw`, `fundamentals_raw`, `index_members_raw`: paper-trader's daily portfolio snapshot, weekly
   company financials and the Nifty 200 list, explicit schemas.
-- `news_raw`: one row per news item per 30-minute snapshot, read from the news volume.
+- `news_raw`: one row per news item per snapshot (taken at :00 and :30 and when new items appear), read from
+  the news volume.
 
 **Silver**: cleaned and unified.
 - `nse_eq_daily` and `us_daily` type the data, drop bad rows (data-quality expectations: positive prices,
@@ -132,7 +140,9 @@ columns are kept as delivered, plus lineage columns (`_source_file`, `_ingested_
   refresh incrementally.
 - `trade_events` types the paper-trader events and keeps the newest copy of each `event_id`.
 - `portfolio_pools` and `portfolio_holdings` split the newest portfolio file of each day into pools and holdings;
-  `shadow_pools` keeps the paper-only pools (the two swing shadows and the long-term shadow), never part of the portfolio totals.
+  `shadow_pools` and `shadow_holdings` keep the seven paper-only pools and what they hold (swing: news breakouts,
+  technical scanner, momentum + news and its concentrated copy; long-term: quality picks, momentum top 15 and its
+  concentrated top 5), never part of the portfolio totals.
 - `nse_delivery` is the delivery % per NSE stock per day; `fno_symbols` is the latest F&O stock list.
 - `fundamentals` keeps the newest fetch of each company × metric × period; `index_members` is the latest
   Nifty 200 list.
@@ -153,7 +163,8 @@ columns are kept as delivered, plus lineage columns (`_source_file`, `_ingested_
 | `trading_daily` | trades + trade_events | Each day's activity and P&L, reconciled against the trader's ledger |
 | `trading_by_setup`, `trading_by_hour` | trades | Which setups and hours make money? |
 | `trading_decisions` | trades + trade_events | Did the YES/NO choices help? |
-| `proposal_outcomes` → `track_record` | trade_events + trades | How did every proposal turn out (taken or skipped), by setup, hour, mood, sector, direction (BUY/SELL), scanner (strict, near-miss or none), suggestion band, reviewer, mode, news or watchlist and your 👍/👎? paper-trader reads `track_record` every session: the feedback loop. Your own (custom) trades count only under `source`. |
+| `proposal_outcomes` → `track_record` | trade_events + trades | How did every proposal turn out (taken or skipped), by setup, hour, mood, sector, direction (BUY/SELL), scanner (strict, near-miss or none), suggestion band, reviewer, mode, news or watchlist? Real outcomes only: your 👍/👎 never trains the trader (from 17 Nov). paper-trader reads `track_record` every session: the feedback loop. Your own (custom) trades count only under `source`. |
+| `rating_review` | proposal_outcomes | How did the trades you liked or disliked really do? For your own review ("Your ratings" page). |
 | `custom_trades` | trades + trade_events | What did my own Telegram trades (`/buy`, `/short`, `/swing`, `/longterm`) do? |
 | `portfolio_daily` | portfolio_pools + nse_eq_daily (NIFTYBEES) | How are all dummy pools doing, against just holding NIFTYBEES? |
 | `holdings_latest` | portfolio_holdings + portfolio_pools | What's held now, and what weight does each holding have? |
@@ -162,9 +173,13 @@ columns are kept as delivered, plus lineage columns (`_source_file`, `_ingested_
 | **`intraday_universe`** | daily_bars + index_members + news | Which Nifty 200 stocks may paper-trader trade intraday, and which have fresh news or big moves today? Read every morning (news radar, Groww buttons). |
 | `swing_signals` | daily_bars + index_members + news | Which news breakouts does the swing shadow pool buy? Read by paper-trader at 15:50. |
 | `shadow_pools_daily` | shadow_pools + nse_eq_daily (NIFTYBEES) | Are the rules tested on paper beating NIFTYBEES? |
+| `shadow_rules_trades` → `shadow_rules_summary` | trade_events | What would each real intraday trade have made under other exit rules and the shadow models? |
+| `orb_test` | trade_events | How did the opening-range test do on paper? |
+| `model_backtest` | trade_events | How did each shadow model do in its daily walk-forward backtest over every scanner setup? |
 | **`technical_indicators`** | nse_eq_daily + index_members | The technical scanner's daily maths for each Nifty 200 stock (split/bonus-adjusted averages, RSI, MACD, ADX, volume, levels). Strict picks are read by paper-trader's scanner shadow at 15:50. |
 | **`technical_screen`** | technical_indicators + index_members + nse_delivery + fno_symbols | Which Nifty 200 stocks pass all six filters today (strict picks) or nearly do (near-misses)? Read by the 08:45 brief and paper-trader (`/screen`, 09:45 check). |
 | `signal_performance` | technical_indicators | How did each scanner signal do 5, 10 and 20 days later? |
+| **`momentum_ranks`** | technical_indicators + company_fundamentals + index_members + news | Which Nifty 200 stocks have the strongest momentum (swing rank from 1- and 3-month strength and fresh news; long-term rank from volatility-adjusted 6- and 12-month returns)? Read by paper-trader's momentum shadows (15:50 daily, Saturdays 10:15). |
 | `data_freshness` | nse_eq_daily, nse_delivery, us_daily, fred_daily, news, fno_symbols, index_members, technical_indicators | Which day does each source have? The brief and paper-trader leave out a source missing the day it should have. |
 
 Two more gold tables are not in the pipeline: `dashboard_summary_facts` and `dashboard_summary`, rebuilt by
@@ -216,10 +231,11 @@ plan, Sydney), one Databricks workspace, one Telegram bot and the same CI/CD pat
 | ~09:10 | lakehouse → trader | The trading session reads gold tables over SQL and a few live Yahoo figures to set the day's risk (from India VIX), bias (the Nifty 50's trend) and focus list (technical scanner picks, unusual volume, ADR moves); `data_freshness` says which sources to leave out. |
 | 09:45 | lakehouse → trader | The guardian reads `technical_screen` to check the morning's strict picks against the first half hour. |
 | During sessions | lakehouse → trader | The session reads the news volume's `latest.jsonl` for each proposal and `/news`; `/analyze` reads `company_fundamentals` and `longterm_candidates` over SQL (also from the responder Lambda outside sessions). |
-| 15:50 | lakehouse → trader | The guardian reads `swing_signals` and the strict picks in `technical_indicators` for the two swing shadow tests. |
+| 15:50 | lakehouse → trader | The guardian reads `swing_signals`, the strict picks in `technical_indicators` and the top of `momentum_ranks` for the swing shadow tests. |
+| 16:10 | lakehouse → trader | The shadow-models job reads the tradable list in `intraday_universe`. |
 | 15:45 | trader → lakehouse | The guardian Lambda pushes the day's journal to `landing/trades/` and a portfolio snapshot to `landing/portfolio/`; `stocks-trading` builds the `trad*` and portfolio gold tables and the dashboard's Intraday trading and Portfolio pages. |
-| 23:30 | trader → lakehouse | The guardian re-sends the last 4 days' journals, so evening 👍/👎 ratings reach `track_record`. |
-| Sat 07:15 | trader → lakehouse | The *Company fundamentals* workflow pushes financials to `landing/fundamentals/` and the Nifty 200 list to `landing/index_members/`; `stocks-market-weekend` (08:00) builds `company_fundamentals`, `longterm_candidates` and `momentum_ranks` before the 10:15 long-term shadow. |
+| 23:30 | trader → lakehouse | The guardian re-sends the last 4 days' journals, so evening 👍/👎 ratings (`rating_review`) and the 16:10 shadow-model results (`model_backtest`, `shadow_rules_*`) arrive overnight. |
+| Sat 07:15 | trader → lakehouse | The *Company fundamentals* workflow pushes financials to `landing/fundamentals/` and the Nifty 200 list to `landing/index_members/`; `stocks-market-weekend` (08:00) builds `company_fundamentals`, `longterm_candidates` and `momentum_ranks` before the 10:15 long-term shadow (quality picks and the momentum shadows). |
 
 Shared resources: the Terraform state bucket (trader key `paper-trader/aws/…`), the CI users
 `stocks-gha-plan` / `stocks-gha-apply` (trader resources are named `stocks-trader-*` so the apply user may

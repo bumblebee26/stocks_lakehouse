@@ -53,6 +53,7 @@ flowchart LR
         S15["shadow_pools<br/><i>paper-only pools</i>"]
         S16["nse_delivery<br/><i>delivery %</i>"]
         S17["fno_symbols<br/><i>latest F&amp;O list</i>"]
+        S18["shadow_holdings<br/><i>what the paper pools hold</i>"]
     end
 
     subgraph G["🥇 Gold · materialized views"]
@@ -84,6 +85,12 @@ flowchart LR
         G25["<b>technical_screen</b><br/><i>today's picks, read by brief + paper-trader</i>"]
         G26["signal_performance"]
         G27["data_freshness<br/><i>which day each source has</i>"]
+        G28["rating_review<br/><i>your 👍/👎 vs outcomes</i>"]
+        G29["shadow_rules_trades"]
+        G30["shadow_rules_summary"]
+        G31["orb_test"]
+        G32["model_backtest"]
+        G33["<b>momentum_ranks</b><br/><i>read by paper-trader</i>"]
     end
 
     LN --> B1 --> S1 --> S3
@@ -142,6 +149,15 @@ flowchart LR
     S17 --> G25
     G24 --> G26
     S1 & S16 & S12 & G24 -- "latest day" --> G27
+    B5 --> S18
+    G18 --> G28
+    S7 --> G29 --> G30
+    S7 --> G31
+    S7 --> G32
+    G24 --> G33
+    G16 --> G33
+    S11 --> G33
+    S12 --> G33
 
     classDef land fill:#fff7ed,stroke:#f59e0b,color:#451a03
     classDef bronze fill:#f5e6d3,stroke:#b45309,color:#451a03
@@ -149,5 +165,5 @@ flowchart LR
     classDef gold fill:#fef9c3,stroke:#ca8a04,color:#422006
     class LN,LD,LO,LM,LF,LT,LP,LU,LI,LW land
     class B1,B2,B3,B4,B5,B6,B7,B8,B9,B10 bronze
-    class S1,S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12,S13,S14,S15,S16,S17 silver
-    class G1,G2,G3,G4,G5,G6,G7,G8,G9,G10,G11,G12,G13,G14,G15,G16,G17,G18,G19,G20,G21,G22,G23,G24,G25,G26,G27 gold
+    class S1,S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12,S13,S14,S15,S16,S17,S18 silver
+    class G1,G2,G3,G4,G5,G6,G7,G8,G9,G10,G11,G12,G13,G14,G15,G16,G17,G18,G19,G20,G21,G22,G23,G24,G25,G26,G27,G28,G29,G30,G31,G32,G33 gold
