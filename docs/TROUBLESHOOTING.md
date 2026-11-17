@@ -138,10 +138,13 @@ the other one has finished. Don't start pipelines by hand while a job is running
 
 ### A pipeline fails with "table is already managed by pipeline …"
 
-**Cause:** A table moved to another pipeline (as in the 21 Nov split) but a copy owned by the old pipeline is
+**Cause:** A table moved to another pipeline (as in the 17 Nov split) but a copy owned by the old pipeline is
 still there.
-**Fix:** In the SQL editor `DROP MATERIALIZED VIEW stocks.<schema>.<table>` (or `DROP TABLE` for a bronze
-streaming table), then run the job again; the new pipeline rebuilds it from the volume.
+Deleting a pipeline doesn't free its tables at once: they stay tied to it for a restoration period.
+**Fix (keeps the data):** move the table to the pipeline that now defines it, then run that job again:
+`ALTER MATERIALIZED VIEW stocks.<schema>.<table> SET TBLPROPERTIES ('pipelines.pipelineId' = '<new pipeline id>')`
+(`ALTER STREAMING TABLE` for a bronze table; pipeline IDs are in the `pipeline_ids` Terraform output). The 17 Nov
+split moved all 61 tables this way. **Or** `DROP` the table and let the new pipeline rebuild it from the volume.
 
 ## Data sources
 
