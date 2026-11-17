@@ -313,14 +313,14 @@ locals {
       ORDER BY vs_actual_rs DESC
     SQL
 
-    model_backtest_latest = <<-SQL
+    backtest_latest = <<-SQL
       SELECT rule_label AS rule, CAST(traded AS INT) AS trades, total_r, vs_current_r, avg_r, win_pct, days_up_pct,
              worst_day_r, CAST(days AS INT) AS days, run_date
       FROM stocks.gold.model_backtest WHERE is_latest
       ORDER BY total_r DESC
     SQL
 
-    model_backtest_trend = <<-SQL
+    backtest_trend = <<-SQL
       SELECT run_date, rule_label AS rule, vs_current_r FROM stocks.gold.model_backtest
       WHERE rule IN ('filter', 'vol_stop', 'early_cut', 'let_run', 'combined', 'wide_2')
     SQL
@@ -398,17 +398,21 @@ locals {
     WITH d AS (${local.strategy_daily_sql}),
          nb AS (SELECT trade_date, close FROM stocks.silver.nse_eq_daily WHERE symbol = 'NIFTYBEES' AND series = 'EQ'),
          span AS (SELECT pool, kind, min(snapshot_date) AS start_date, max(snapshot_date) AS last_date FROM d GROUP BY pool, kind),
-         last AS (SELECT d.* FROM d JOIN span s ON d.pool = s.pool AND d.snapshot_date = s.last_date)
+         latest AS (SELECT d.pool, d.equity, d.capital FROM d JOIN span s ON d.pool = s.pool AND d.snapshot_date = s.last_date),
+         nb_span AS (
+           SELECT s.pool,
+                  max_by(CASE WHEN nb.trade_date <= s.start_date THEN nb.close END,
+                         CASE WHEN nb.trade_date <= s.start_date THEN nb.trade_date END) AS nb_start,
+                  max_by(nb.close, nb.trade_date) AS nb_last
+           FROM span s JOIN nb ON nb.trade_date <= s.last_date
+           GROUP BY s.pool)
     SELECT ${replace(local.strategy_group_sql, "pool", "s.pool")} AS grp,
            ${replace(local.strategy_label_sql, "pool", "s.pool")} AS strategy,
            s.kind, s.start_date, s.last_date, round(l.equity, 0) AS value_rs,
            round((l.equity / l.capital - 1) * 100, 2) AS return_pct,
-           round(((SELECT max_by(close, trade_date) FROM nb WHERE trade_date <= s.last_date)
-                / (SELECT max_by(close, trade_date) FROM nb WHERE trade_date <= s.start_date) - 1) * 100, 2) AS niftybees_pct,
-           round((l.equity / l.capital - 1) * 100
-                 - ((SELECT max_by(close, trade_date) FROM nb WHERE trade_date <= s.last_date)
-                    / (SELECT max_by(close, trade_date) FROM nb WHERE trade_date <= s.start_date) - 1) * 100, 2) AS vs_niftybees_pct
-    FROM span s JOIN last l ON l.pool = s.pool
+           round((n.nb_last / n.nb_start - 1) * 100, 2) AS niftybees_pct,
+           round((l.equity / l.capital - 1) * 100 - (n.nb_last / n.nb_start - 1) * 100, 2) AS vs_niftybees_pct
+    FROM span s JOIN latest l ON l.pool = s.pool LEFT JOIN nb_span n ON n.pool = s.pool
   SQL
 
   strategy_returns_sql = <<-SQL
@@ -477,8 +481,8 @@ locals {
       scanner_record       = ["signal", "days_after", "signals", "avg_return_pct", "vs_niftybees_pct", "beat_niftybees_pct"]
       shadow_exit_rules    = ["rule", "trades", "would_have_made_rs", "actual_rs", "vs_actual_rs", "beat_actual_pct"]
       shadow_models_real   = ["rule", "trades", "would_have_made_rs", "actual_rs", "vs_actual_rs", "beat_actual_pct"]
-      model_backtest_latest = ["rule", "trades", "total_r", "vs_current_r", "avg_r", "win_pct", "days_up_pct", "worst_day_r", "days", "run_date"]
-      model_backtest_trend = ["run_date", "rule", "vs_current_r"]
+      backtest_latest      = ["rule", "trades", "total_r", "vs_current_r", "avg_r", "win_pct", "days_up_pct", "worst_day_r", "days", "run_date"]
+      backtest_trend       = ["run_date", "rule", "vs_current_r"]
       orb_summary          = ["variant", "trades", "would_have_made_rs", "win_rate_pct"]
       shadow_trades_recent = ["trade_date", "symbol", "side", "setup", "test", "rule", "actual_rs", "would_have_made_rs", "vs_actual_rs"]
       rating_summary       = ["rating", "decisions", "proposals", "wins", "win_rate_pct", "total_rs", "avg_rs", "avg_r", "right_calls", "right_pct"]
@@ -550,8 +554,8 @@ locals {
       port_strategies   = { ds = "strategy_returns", type = "line", x = "snapshot_date", xt = "temporal", y = "return_pct", color = "strategy", title = "Every strategy: return since it started (%), real and shadow", desc = "Real pools hold real dummy money; shadow pools test other rules on paper with the same costs. Each line starts at 0 on its own first day.", pos = [0, 31, 12, 7] }
       intra_exit_rules  = { ds = "shadow_exit_rules", type = "bar", x = "rule", xt = "categorical", y = "vs_actual_rs", color = null, title = "Exit rules on your real trades: gain vs what happened (Rs)", desc = "Each closed trade replayed on its 1-minute candles under another exit rule. Above 0 = that rule would have made more than what really happened.", pos = [0, 49, 6, 6] }
       intra_models_real = { ds = "shadow_models_real", type = "bar", x = "rule", xt = "categorical", y = "vs_actual_rs", color = null, title = "Shadow models on your real trades: gain vs what happened (Rs)", desc = "Each real trade scored by models trained only on earlier days. Above 0 = the model's decision would have made more.", pos = [6, 49, 6, 6] }
-      intra_backtest    = { ds = "model_backtest_latest", type = "bar", x = "rule", xt = "categorical", y = "vs_current_r", color = null, title = "Backtest, all setups on ~200 stocks: each rule vs current rules (R)", desc = "Latest walk-forward run (each day judged by models trained only on earlier days). R = one unit of risk, about Rs 400. Above 0 = better than the current rules.", pos = [0, 55, 6, 6] }
-      intra_bt_trend    = { ds = "model_backtest_trend", type = "line", x = "run_date", xt = "temporal", y = "vs_current_r", color = "rule", title = "Is each model's edge holding up? (R vs current rules, by run day)", desc = "One point per daily run. A line that stays above 0 run after run is a model worth reviewing for go-live.", pos = [6, 55, 6, 6] }
+      intra_backtest    = { ds = "backtest_latest", type = "bar", x = "rule", xt = "categorical", y = "vs_current_r", color = null, title = "Backtest, all setups on ~200 stocks: each rule vs current rules (R)", desc = "Latest walk-forward run (each day judged by models trained only on earlier days). R = one unit of risk, about Rs 400. Above 0 = better than the current rules.", pos = [0, 55, 6, 6] }
+      intra_bt_trend    = { ds = "backtest_trend", type = "line", x = "run_date", xt = "temporal", y = "vs_current_r", color = "rule", title = "Is each model's edge holding up? (R vs current rules, by run day)", desc = "One point per daily run. A line that stays above 0 run after run is a model worth reviewing for go-live.", pos = [6, 55, 6, 6] }
       intra_orb         = { ds = "orb_summary", type = "bar", x = "variant", xt = "categorical", y = "would_have_made_rs", color = null, title = "Opening-range test on paper (Rs)", desc = "The top stocks in play each day, traded on paper with a 5- or 15-minute opening range, a 2R target or held to 15:10.", pos = [0, 61, 6, 5] }
       swing_curve       = { ds = "swing_returns", type = "line", x = "snapshot_date", xt = "temporal", y = "return_pct", color = "strategy", title = "Swing: real pool vs shadow strategies vs NIFTYBEES (return %)", desc = "The real swing pool holds NIFTYBEES; the shadow pools trade stocks on paper (news breakouts, technical scanner). Each line starts at 0 on its own first day.", pos = [0, 6, 12, 7] }
       lt_curve          = { ds = "longterm_returns", type = "line", x = "snapshot_date", xt = "temporal", y = "return_pct", color = "strategy", title = "Long-term: real pool vs shadow vs NIFTYBEES (return %)", desc = "The real pool waits in cash until its go/no-go review; the shadow pool buys the weekly quality picks on paper.", pos = [0, 6, 12, 7] }
@@ -593,7 +597,7 @@ locals {
       summary_intraday  = { ds = "summary_intraday", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 2, 12, 4] }
       summary_quality   = { ds = "summary_quality", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 19, 12, 4] }
       port_scoreboard   = { ds = "strategy_scoreboard", title = "Scoreboard: every strategy vs NIFTYBEES over the same days", desc = "Real pools and shadow pools (paper). Return since each one started; NIFTYBEES over exactly the same days; the difference.", pos = [0, 38, 12, 6] }
-      intra_bt_table    = { ds = "model_backtest_latest", title = "Backtest details (latest run)", desc = "All rules on the same setups. Trades = setups taken (the filter skips some). Worst day = the worst single day's total.", pos = [0, 66, 12, 7] }
+      intra_bt_table    = { ds = "backtest_latest", title = "Backtest details (latest run)", desc = "All rules on the same setups. Trades = setups taken (the filter skips some). Worst day = the worst single day's total.", pos = [0, 66, 12, 7] }
       intra_shadow_list = { ds = "shadow_trades_recent", title = "Your trades under other rules (last 14 days)", desc = "Every real trade, what really happened, and what each rule or model would have made instead.", pos = [6, 61, 6, 5] }
       swing_board       = { ds = "swing_scoreboard", title = "Swing scoreboard", desc = "Return since each started vs NIFTYBEES over the same days.", pos = [0, 2, 12, 4] }
       swing_hold        = { ds = "swing_holdings", title = "What each swing strategy holds now", desc = "Real pool and shadow pools (paper).", pos = [0, 13, 12, 6] }
