@@ -26,8 +26,13 @@ covers the base view above, the full [architecture](docs/ARCHITECTURE_DIAGRAMS.m
 | Dummy portfolio and holdings | `stocks.gold.portfolio_daily`, `stocks.gold.holdings_latest` + dashboard page "Portfolio" (value, return vs NIFTYBEES, fall from peak, allocation by pool and sector, holdings) | After the 15:45 IST export |
 | Your own trades from Telegram ([paper-trader](https://github.com/bumblebee26/paper-trader)) | `stocks.gold.custom_trades` (intraday and pool trades you placed, marked custom) | After each export |
 | Technical scanner (Nifty 200) | `stocks.gold.technical_screen` (today's strict picks, near-misses, levels), `stocks.gold.technical_indicators` (daily history), `stocks.gold.signal_performance` (how each signal did 5/10/20 days later vs NIFTYBEES), `stocks.gold.data_freshness` | After each NSE day |
-| News radar and swing shadow ([paper-trader](https://github.com/bumblebee26/paper-trader)) | `stocks.gold.intraday_universe` (Nifty 200 names the trader may trade, flagged on news/moves), `stocks.gold.swing_signals` (news breakouts), `stocks.gold.shadow_pools_daily` (shadow pools vs NIFTYBEES) | After each NSE day / daily |
-| Company quality and long-term picks | `stocks.gold.company_fundamentals`, `stocks.gold.longterm_candidates` (this week's 10 picks from the Nifty 200, max 2 per industry, with target weights and reasons) + dashboard page "Company quality" | Saturdays |
+| News radar and shadow pools ([paper-trader](https://github.com/bumblebee26/paper-trader)) | `stocks.gold.intraday_universe` (Nifty 200 names the trader may trade, flagged on news/moves), `stocks.gold.swing_signals` (news breakouts), `stocks.gold.momentum_ranks` (swing and long-term momentum ranks for the momentum shadow pools), `stocks.gold.shadow_pools_daily` (every shadow pool vs NIFTYBEES) + dashboard pages "Swing" and "Long term" | After each NSE day / daily |
+| Tests on paper and your ratings ([paper-trader](https://github.com/bumblebee26/paper-trader)) | `stocks.gold.shadow_rules_trades`, `shadow_rules_summary` (exit rules and shadow models on your real trades), `orb_test`, `model_backtest`, `rating_review` (your 👍/👎 vs what happened) + dashboard pages "Intraday trading" and "Your ratings" | After each export |
+| Company quality and long-term picks | `stocks.gold.company_fundamentals`, `stocks.gold.longterm_candidates` (this week's 10 picks from the Nifty 200, max 2 per industry, with target weights and reasons) + dashboard page "Long term" | Saturdays |
+
+The paper-trading ledger was reset on 17 Nov 2026: the money tables and pages (portfolio, shadow pools, daily
+P&L, results per setup and hour, decisions, custom trades) start on 18 Nov (`ledger_start`); the track record,
+ratings and rule tests keep all history.
 
 Gold insights include: how India opens after big US moves, which global markets line up with India's open,
 market breadth, unusual volume, Indian ADR premium vs USD/INR, and a global markets snapshot.
@@ -46,7 +51,7 @@ market breadth, unusual volume, Indian ADR premium vs USD/INR, and a global mark
 | 08:45 Mon–Fri | Pre-market brief and the technical scanner to Telegram (India first; US figures live from Yahoo) |
 | 15:45 Mon–Fri | paper-trader pushes the day's trade journal to `landing/trades/` and a portfolio snapshot to `landing/portfolio/` |
 | 19:30 Mon–Fri | NSE: today's equities bhavcopy and delivery file |
-| 23:30 Mon–Fri | paper-trader re-sends the last 4 days' journals, so evening 👍/👎 ratings reach `gold.track_record` |
+| 23:30 Mon–Fri | paper-trader re-sends the last 4 days' journals, so evening 👍/👎 ratings (`gold.rating_review`) and the 16:10 shadow-model results (`gold.model_backtest`, `gold.shadow_rules_*`) arrive overnight |
 | 07:15 Sat | paper-trader pushes company financials to `landing/fundamentals/` and NSE's Nifty 200 list to `landing/index_members/` |
 
 ## Repository layout
@@ -62,11 +67,12 @@ infra/
   bootstrap/       S3 bucket for Terraform state (run once, locally)
   modules/         secure_bucket: private, encrypted, versioned, HTTPS-only S3
   aws/             Landing bucket, Lambdas, schedules, IAM, SSM parameters, CI users
-  databricks/      Catalog, schemas, volume, token, pipeline, job, dashboard
+  databricks/      Catalog, schemas, volumes, token, three pipelines, three jobs, dashboard
 tests/             Unit tests (no cloud access needed)
 scripts/           check_pipeline.py (pipeline wiring check, used by CI), check_sql.py (dashboard and summary SQL
-                   checked with EXPLAIN in the plan job), render_diagrams .sh/.cmd (re-render docs/diagrams)
-.github/           CI (tests, fmt, validate), security checks, CD (plan on PR, apply on merge)
+                   checked with EXPLAIN in the plan job), run_job.py (run Databricks jobs in order and wait),
+                   render_diagrams .sh/.cmd (re-render docs/diagrams)
+.github/           CI (tests, fmt, validate), security checks, CD (plan on PR, apply on merge), Run Databricks jobs (manual)
 docs/              Full documentation (below); docs/diagrams/ holds the diagram sources and images
 ```
 
@@ -101,7 +107,7 @@ or emergencies.
 |---|---|---|---|
 | NSE UDiFF bhavcopy | All NSE cash-market securities | From 8 Jul 2024 (format change) | Free |
 | Massive grouped daily | All US stocks and ETFs | Rolling 2 years on the free Basic plan | Free (API key) |
-| NSE RSS feeds | Company announcements, financial results, board meetings, corporate actions | What the feeds carry at each 30-minute fetch | Free |
+| NSE RSS feeds | Company announcements, financial results, board meetings, corporate actions | What the feeds carry at each fetch (every minute in market hours, every 30 minutes otherwise) | Free |
 | Yahoo Finance fundamentals (fetched by paper-trader) | Annual and quarterly financials for NSE's Nifty 200 list (plus the trader's watchlist) | 4 fiscal years and recent quarters | Free |
 | FRED | 14 series: S&P 500, Dow, Nasdaq, Nikkei 225, VIX, USD/INR, USD/JPY, EUR/USD, GBP/USD, USD/CNY, dollar index, Brent, WTI, US 10Y | Decades | Free (API key) |
 

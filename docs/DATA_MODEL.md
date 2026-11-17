@@ -108,7 +108,7 @@ For NSE, `series = 'EQ'` is the main board. Gold uses `EQ` only.
 | `gold.technical_screen` | Nifty 200 stock, latest NSE day | Today's scanner: which stocks pass all six filters? | everything above plus `list_type` (strict, near-miss, none), `rank`, `deliv_per`, `fno`, `company`, `industry`, `nifty200_as_of`, `fno_as_of`, `regime_*` (NIFTYBEES close, RSI, averages, ADX) |
 | `gold.signal_performance` | signal × horizon | Has each scanner signal worked? | `signal` (strict, near_miss, above_mas, macd_cross_up, breakout, pullback), `horizon_days` (5, 10, 20), `signals`, `avg_return_pct`, `avg_excess_pct` (vs NIFTYBEES), `beat_niftybees_pct` |
 | `gold.data_freshness` | source | Which day does each source have? Readers leave out a source that is missing the day it should have | `source` (nse_prices, nse_delivery, us_prices, fred_global, company_news, fno_list, nifty200_list, technical_scanner), `latest_date`, `checked_at` |
-| `gold.shadow_pools_daily` | shadow pool × day | Are the rules tested on paper beating NIFTYBEES? | `pool` (swing_shadow, long_term_shadow), `equity`, `return_pct`, `nifty_return_pct` (NIFTYBEES since the pool's first day here), `vs_nifty_pct` |
+| `gold.shadow_pools_daily` | shadow pool × day | Are the rules tested on paper beating NIFTYBEES? | `pool` (swing_shadow, swing_tech_shadow, swing_mom_shadow, swing_mom_conc_shadow, long_term_shadow, long_term_mom_shadow, long_term_mom_conc_shadow), `equity`, `return_pct`, `nifty_return_pct` (NIFTYBEES since the pool's first day here), `vs_nifty_pct` |
 | `gold.shadow_rules_trades` | real trade × rule | What each of your real intraday trades would have made under other rules: `test` (exit rules: stop variants, trailing, breakeven, half and run, time stop; models: filter, vol_stop, early_cut, let_run, combined), `rule`, `rule_label`, `actual_rs`, `would_have_made_rs`, `vs_actual_rs` |
 | `gold.shadow_rules_summary` | test × rule | Totals of the above: `trades`, `would_have_made_rs`, `actual_rs`, `vs_actual_rs`, `beat_actual_pct`, `first_day`, `last_day` |
 | `gold.orb_test` | stock × day × variant | The opening-range test on paper: `rule` (orb5_2r, orb5_eod, orb15_2r, orb15_eod), `would_have_made_rs` |
@@ -177,4 +177,7 @@ previous close ÷ our last close, applied when more than 3% off 1). The maths is
 
 Pipeline settings (Terraform variables → pipeline configuration): `stocks.india_proxy` (NIFTYBEES),
 `stocks.us_proxy` (SPY), `stocks.big_move_pct` (1.0), `stocks.volume_spike_ratio` (3.0),
-`stocks.min_avg_volume` (50000).
+`stocks.min_avg_volume` (50000), `stocks.ledger_start` (2026-11-18: the paper-trading money tables
+`portfolio_*`, `shadow_*` pools, `trading_daily`, `trading_by_setup`, `trading_by_hour`, `trading_decisions` and
+`custom_trades` start here, after the 17 Nov ledger reset; `trades`, `proposal_outcomes`, `track_record`,
+`rating_review` and the rule tests keep all history).

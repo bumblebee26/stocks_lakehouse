@@ -212,7 +212,7 @@ error.
 
 ## Paper trading tables
 
-### The Intraday trading, Portfolio or Company quality page shows `TABLE_OR_VIEW_NOT_FOUND`
+### The Intraday trading, Portfolio, Swing or Long term page shows `TABLE_OR_VIEW_NOT_FOUND`
 **Cause:** The pipeline hasn't run since the tables were deployed.
 **Fix:** Run `stocks-trading` once (Jobs & Pipelines → stocks-trading → Run now), and `stocks-market-close` for the
 company tables. The trading and
