@@ -92,10 +92,27 @@ resource "databricks_pipeline" "stocks" {
 # ---------------------------------------------------------------------------
 # Jobs
 # ---------------------------------------------------------------------------
+# Tasks are in alphabetical order of task_key: the provider reads them back sorted, so any other order shows a change
+# to every task on each plan.
 resource "databricks_job" "market_close" {
   name                = "${var.name_prefix}-market-close"
   description         = "After the NSE evening file: market pipeline, then research, then the dashboard summaries. Managed by Terraform."
   max_concurrent_runs = 1
+
+  task {
+    task_key = "dashboard_summary"
+    depends_on {
+      task_key = "research"
+    }
+
+    sql_task {
+      warehouse_id = data.databricks_sql_warehouse.main.id
+      file {
+        path   = databricks_workspace_file.dashboard_summary.workspace_path
+        source = "WORKSPACE"
+      }
+    }
+  }
 
   task {
     task_key                  = "market"
@@ -117,21 +134,6 @@ resource "databricks_job" "market_close" {
 
     pipeline_task {
       pipeline_id = databricks_pipeline.stocks["research"].id
-    }
-  }
-
-  task {
-    task_key = "dashboard_summary"
-    depends_on {
-      task_key = "research"
-    }
-
-    sql_task {
-      warehouse_id = data.databricks_sql_warehouse.main.id
-      file {
-        path   = databricks_workspace_file.dashboard_summary.workspace_path
-        source = "WORKSPACE"
-      }
     }
   }
 
@@ -171,6 +173,21 @@ resource "databricks_job" "market_weekend" {
   max_concurrent_runs = 1
 
   task {
+    task_key = "dashboard_summary"
+    depends_on {
+      task_key = "research"
+    }
+
+    sql_task {
+      warehouse_id = data.databricks_sql_warehouse.main.id
+      file {
+        path   = databricks_workspace_file.dashboard_summary.workspace_path
+        source = "WORKSPACE"
+      }
+    }
+  }
+
+  task {
     task_key                  = "market"
     max_retries               = local.retries
     min_retry_interval_millis = local.retry_minutes * 60000
@@ -193,21 +210,6 @@ resource "databricks_job" "market_weekend" {
     }
   }
 
-  task {
-    task_key = "dashboard_summary"
-    depends_on {
-      task_key = "research"
-    }
-
-    sql_task {
-      warehouse_id = data.databricks_sql_warehouse.main.id
-      file {
-        path   = databricks_workspace_file.dashboard_summary.workspace_path
-        source = "WORKSPACE"
-      }
-    }
-  }
-
   schedule {
     quartz_cron_expression = "0 0 8,12 ? * SAT"
     timezone_id            = "Asia/Kolkata"
@@ -225,16 +227,6 @@ resource "databricks_job" "trading" {
   max_concurrent_runs = 1
 
   task {
-    task_key                  = "trading"
-    max_retries               = local.retries
-    min_retry_interval_millis = local.retry_minutes * 60000
-
-    pipeline_task {
-      pipeline_id = databricks_pipeline.stocks["trading"].id
-    }
-  }
-
-  task {
     task_key = "dashboard_summary"
     depends_on {
       task_key = "trading"
@@ -246,6 +238,16 @@ resource "databricks_job" "trading" {
         path   = databricks_workspace_file.dashboard_summary.workspace_path
         source = "WORKSPACE"
       }
+    }
+  }
+
+  task {
+    task_key                  = "trading"
+    max_retries               = local.retries
+    min_retry_interval_millis = local.retry_minutes * 60000
+
+    pipeline_task {
+      pipeline_id = databricks_pipeline.stocks["trading"].id
     }
   }
 
