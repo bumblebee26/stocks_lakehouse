@@ -689,7 +689,7 @@ def trading_decisions():
 
 
 # ---------------------------------------------------------------------------
-# The feedback loop: every proposal with its scores, decision and outcome (real results only), and the
+# The feedback loop: every proposal with its scores, decision, outcome and the user's rating, and the
 # track record paper-trader reads each session (trader/track.py) so decisions learn from results.
 # ---------------------------------------------------------------------------
 # A proposal's outcome is its real net P&L when it was traded, or what it would have made when it was
@@ -702,12 +702,15 @@ def trading_decisions():
 #          CAST(regexp_extract(p.note, 'suggested \\w+ (\\d+)%', 1) AS INT) AS suggested_yes_pct, ...,
 #          CASE WHEN filled THEN 'taken' WHEN auto_no THEN 'skipped_auto' WHEN rejected THEN 'skipped_by_you'
 #               WHEN expired THEN 'expired' WHEN not_filled THEN 'not_filled' END AS decision,
-#          coalesce(t.net_pnl_rs, po.pnl_rs) AS outcome_rs
+#          coalesce(t.net_pnl_rs, po.pnl_rs) AS outcome_rs, fb.user_reply AS feedback
 #   FROM proposed p LEFT JOIN decisions ... LEFT JOIN stocks.gold.trades t ... LEFT JOIN passed_outcome po ...
+#   LEFT JOIN latest user_feedback fb ...;
 #   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.track_record AS
 #   SELECT 'setup' AS dimension, setup AS value, count(*) AS trades, sum(won) AS wins, ... FROM outcomes
 #   GROUP BY setup UNION ALL ... (hour, mood, yes_band, reviewer, mode, decision, source, sector, side,
 #   scanner, all);
+# The user's 👍/👎 is kept in proposal_outcomes for their own review (gold.rating_review, the dashboard's "Your
+# ratings" page) but is never a track_record dimension: ratings don't train the trader (from 17 Nov).
 TRACK_DAYS = 90
 TRACK_DIMENSIONS = [("all", None), ("setup", "setup"), ("hour", "hour"), ("mood", "mood"), ("yes_band", "yes_band"),
                     ("reviewer", "reviewer_verdict"), ("mode", "mode"), ("decision", "decision"),
@@ -789,7 +792,7 @@ def _note_value(pattern, cast=None):
     name="stocks.gold.proposal_outcomes",
     comment="One row per paper-trader proposal: its scores (suggestion, live checks, agent, reviewer), market mood, "
             "mode (auto/human), decision (taken, skipped_by_you, skipped_auto, expired, not_filled), outcome in "
-            "rupees (real if taken, what it would have made if skipped). Ratings retired 17 Nov.",
+            "rupees (real if taken, what it would have made if skipped) and the user's 👍/👎 feedback.",
     table_properties={"quality": "gold"},
 )
 def proposal_outcomes():
@@ -829,14 +832,19 @@ def proposal_outcomes():
     )
     taken = (spark.read.table("stocks.gold.trades")  # noqa: F821
              .filter("status = 'closed'").select("proposal_id", F.col("net_pnl_rs").alias("taken_net_pnl_rs")))
-    # The user's 👍/👎 ratings were retired on 17 Nov (only real outcomes teach the system): user_feedback events
-    # are no longer joined, so old ratings don't count anywhere.
+    fb_window = Window.partitionBy("proposal_id").orderBy(F.col("event_ts").desc())
+    feedback = (ev.filter("event = 'user_feedback'")
+                .withColumn("rn", F.row_number().over(fb_window)).filter("rn = 1")
+                .select("proposal_id",
+                        # 'none' = the user took their 👍/👎 reaction away: not rated
+                        F.when(F.col("user_reply") == "none", None).otherwise(F.col("user_reply")).alias("feedback")))
     decision = (F.when(F.col("filled") == 1, "taken").when(F.col("auto_no") == 1, "skipped_auto")
                 .when(F.col("rejected") == 1, "skipped_by_you").when(F.col("expired") == 1, "expired")
                 .when(F.col("not_filled") == 1, "not_filled").otherwise("undecided"))
     outcome = F.when(F.col("filled") == 1, F.col("taken_net_pnl_rs")).otherwise(F.col("would_have_made_rs"))
     return (
         proposed.join(decided, "proposal_id", "left").join(taken, "proposal_id", "left")
+        .join(feedback, "proposal_id", "left")
         .withColumn("decision", decision)
         .withColumn("outcome_rs", outcome)
         .withColumn("won", F.when(F.col("outcome_rs").isNotNull(), (F.col("outcome_rs") > 0).cast("int")))
@@ -848,7 +856,7 @@ def proposal_outcomes():
 @dp.materialized_view(
     name="stocks.gold.track_record",
     comment=f"How proposals turned out over the last {TRACK_DAYS} days, by dimension (setup, hour, mood, yes_band, "
-            "reviewer, mode, decision, source, sector, side (BUY/SELL), scanner, all): proposals with an outcome, wins, win rate, average and total "
+            "reviewer, mode, decision, source, sector, side (BUY/SELL), scanner, all; never the user's ratings): proposals with an outcome, wins, win rate, average and total "
             "outcome in rupees. paper-trader shows it in proposals and gives it to Claude each session.",
     table_properties={"quality": "gold"},
 )
@@ -874,6 +882,41 @@ def track_record():
     for part in parts[1:]:
         out = out.unionByName(part)
     return out.withColumn("win_rate_pct", F.round(F.col("wins") / F.col("trades") * 100, 1))
+
+
+# SQL equivalent (abridged):
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.rating_review AS
+#   SELECT coalesce(feedback, 'not rated') AS rating, decision_group, count(*) AS proposals, sum(won) AS wins,
+#          avg(won) * 100 AS win_rate_pct, sum(outcome_rs) AS total_outcome_rs, avg(outcome_rs) AS avg_outcome_rs,
+#          avg(outcome_r) AS avg_outcome_r,
+#          sum(CASE WHEN feedback = 'like' AND won = 1 OR feedback = 'dislike' AND won = 0 THEN 1 END) AS right_calls
+#   FROM stocks.gold.proposal_outcomes WHERE outcome_rs IS NOT NULL
+#   GROUP BY 1, 2 (decision_group: taken / skipped / all) ...;
+@dp.materialized_view(
+    name="stocks.gold.rating_review",
+    comment="Your 👍/👎 against what really happened, for your own learning (ratings never train the trader): per "
+            "rating (like, dislike, not rated) and decision group (taken, skipped, all): proposals with an outcome, "
+            "wins, win rate, total and average result in rupees and R, and right_calls (a 👍 that made money or a 👎 "
+            "that lost) with right_pct. Outcome = the real net P&L if taken, what it would have made if skipped.",
+    table_properties={"quality": "gold"},
+)
+def rating_review():
+    po = (spark.read.table("stocks.gold.proposal_outcomes")  # noqa: F821
+          .filter(F.col("outcome_rs").isNotNull() & (F.col("source") != "custom"))
+          .withColumn("rating", F.coalesce(F.col("feedback"), F.lit("not rated")))
+          .withColumn("decision_group", F.when(F.col("decision") == "taken", "taken").otherwise("skipped"))
+          .withColumn("right", F.when(((F.col("rating") == "like") & (F.col("won") == 1))
+                                      | ((F.col("rating") == "dislike") & (F.col("won") == 0)), 1)
+                      .when(F.col("rating").isin("like", "dislike"), 0)))
+    both = po.unionByName(po.withColumn("decision_group", F.lit("all")))
+    return (both.groupBy("rating", "decision_group")
+            .agg(F.count("*").alias("proposals"), F.sum("won").alias("wins"),
+                 F.round(F.sum("outcome_rs"), 2).alias("total_outcome_rs"),
+                 F.round(F.avg("outcome_rs"), 2).alias("avg_outcome_rs"),
+                 F.round(F.avg("outcome_r"), 2).alias("avg_outcome_r"),
+                 F.sum("right").alias("right_calls"))
+            .withColumn("win_rate_pct", F.round(F.col("wins") / F.col("proposals") * 100, 1))
+            .withColumn("right_pct", F.round(F.col("right_calls") / F.col("proposals") * 100, 1)))
 
 
 # ---------------------------------------------------------------------------
