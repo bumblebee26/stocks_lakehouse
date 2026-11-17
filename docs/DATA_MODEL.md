@@ -38,6 +38,8 @@ Each new file is read once. Every bronze table has these lineage columns: `_sour
 | Table | Grain | Notes |
 |---|---|---|
 | `bronze.nse_bhavcopy_raw` | instrument × day × file | All UDiFF columns as strings (`TckrSymb`, `SctySrs`, `ISIN`, `OpnPric`, `ClsPric`, `TtlTradgVol`...). Unknown columns go to `_rescued_data`. |
+| `bronze.nse_delivery_raw` | stock × day × file | `symbol`, `series`, `deliv_qty`, `deliv_per` (from NSE's `sec_bhavdata_full`). Explicit schema. |
+| `bronze.nse_fo_raw` | stock × weekly file | `symbol`, `underlying`, `as_of` (NSE's F&O list). Explicit schema. |
 | `bronze.massive_grouped_raw` | file (one US day) | `results` kept as **JSON text** (fields `T` and `t` clash, see ARCHITECTURE), plus `status`, `resultsCount`, `adjusted`. |
 | `bronze.fred_observations_raw` | series × date × file | `series_id`, `date`, `value`, `name`, `region`, `asset_class`, `unit`. Explicit schema. |
 | `bronze.news_raw` | news item × snapshot | `id`, `feed`, `symbol` (null when the company couldn't be matched), `company`, `category`, `title`, `description`, `link`, `published_ist`, `fetched_at_ist`. Explicit schema. |

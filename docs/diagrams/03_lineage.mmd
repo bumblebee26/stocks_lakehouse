@@ -9,6 +9,8 @@ flowchart LR
     subgraph LAND["Landing volume"]
         direction TB
         LN["nse/*.csv"]
+        LD["nse_delivery/*.jsonl"]
+        LO["nse_fo/*.jsonl<br/><i>F&amp;O list, Mondays</i>"]
         LM["massive/*.json"]
         LF["fred/*.json"]
         LT["trades/*.jsonl<br/><i>paper-trader</i>"]
@@ -28,6 +30,8 @@ flowchart LR
         B6["fundamentals_raw"]
         B7["index_members_raw"]
         B8["news_raw"]
+        B9["nse_delivery_raw"]
+        B10["nse_fo_raw"]
     end
 
     subgraph S["🥈 Silver · materialized views"]
@@ -47,6 +51,8 @@ flowchart LR
         S13["country_etfs<br/><i>reference list</i>"]
         S14["adr_pairs<br/><i>reference list</i>"]
         S15["shadow_pools<br/><i>paper-only pools</i>"]
+        S16["nse_delivery<br/><i>delivery %</i>"]
+        S17["fno_symbols<br/><i>latest F&amp;O list</i>"]
     end
 
     subgraph G["🥇 Gold · materialized views"]
@@ -74,6 +80,10 @@ flowchart LR
         G21["<b>intraday_universe</b><br/><i>read by paper-trader</i>"]
         G22["swing_signals<br/><i>read by paper-trader</i>"]
         G23["shadow_pools_daily"]
+        G24["<b>technical_indicators</b><br/><i>scanner maths, read by paper-trader</i>"]
+        G25["<b>technical_screen</b><br/><i>today's picks, read by brief + paper-trader</i>"]
+        G26["signal_performance"]
+        G27["data_freshness<br/><i>which day each source has</i>"]
     end
 
     LN --> B1 --> S1 --> S3
@@ -122,12 +132,22 @@ flowchart LR
     S3 --> G22
     S11 --> G22
     S12 --> G22
+    LD --> B9 --> S16
+    LO --> B10 --> S17
+    S1 --> G24
+    S11 --> G24
+    G24 --> G25
+    S11 --> G25
+    S16 --> G25
+    S17 --> G25
+    G24 --> G26
+    S1 & S16 & S12 & G24 -- "latest day" --> G27
 
     classDef land fill:#fff7ed,stroke:#f59e0b,color:#451a03
     classDef bronze fill:#f5e6d3,stroke:#b45309,color:#451a03
     classDef silver fill:#eef2f6,stroke:#64748b,color:#0f172a
     classDef gold fill:#fef9c3,stroke:#ca8a04,color:#422006
-    class LN,LM,LF,LT,LP,LU,LI,LW land
-    class B1,B2,B3,B4,B5,B6,B7,B8 bronze
-    class S1,S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12,S13,S14,S15 silver
-    class G1,G2,G3,G4,G5,G6,G7,G8,G9,G10,G11,G12,G13,G14,G15,G16,G17,G18,G19,G20,G21,G22,G23 gold
+    class LN,LD,LO,LM,LF,LT,LP,LU,LI,LW land
+    class B1,B2,B3,B4,B5,B6,B7,B8,B9,B10 bronze
+    class S1,S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12,S13,S14,S15,S16,S17 silver
+    class G1,G2,G3,G4,G5,G6,G7,G8,G9,G10,G11,G12,G13,G14,G15,G16,G17,G18,G19,G20,G21,G22,G23,G24,G25,G26,G27 gold
