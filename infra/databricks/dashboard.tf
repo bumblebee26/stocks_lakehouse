@@ -276,11 +276,11 @@ locals {
     SQL
 
     swing_holdings = <<-SQL
-      ${replace(local.strategy_holdings_sql, "__POOLS__", "'swing', 'swing_shadow', 'swing_tech_shadow'")}
+      ${replace(local.strategy_holdings_sql, "__POOLS__", "'swing', 'swing_shadow', 'swing_tech_shadow', 'swing_mom_shadow'")}
     SQL
 
     longterm_holdings = <<-SQL
-      ${replace(local.strategy_holdings_sql, "__POOLS__", "'long_term', 'long_term_shadow'")}
+      ${replace(local.strategy_holdings_sql, "__POOLS__", "'long_term', 'long_term_shadow', 'long_term_mom_shadow'")}
     SQL
 
     scanner_today = <<-SQL
@@ -291,6 +291,15 @@ locals {
       FROM stocks.gold.technical_screen
       WHERE list_type IN ('strict', 'near-miss')
       ORDER BY list_type DESC, rank
+    SQL
+
+    momentum_top = <<-SQL
+      SELECT CAST(swing_rank AS INT) AS swing_rank, CAST(lt_rank AS INT) AS lt_rank, symbol, company, industry, close,
+             ret_1m_pct, ret_3m_pct, ret_6m_pct, ret_12m_pct, vol_1y_pct, pct_of_52w_high, rsi14,
+             CAST(news_pos_5d AS INT) AS good_news_5d, latest_good_news, scanner_strict, swing_score, lt_score, trade_date
+      FROM stocks.gold.momentum_ranks
+      WHERE swing_rank <= 12 OR lt_rank <= 30
+      ORDER BY coalesce(swing_rank, 999), lt_rank
     SQL
 
     scanner_record = <<-SQL
@@ -384,7 +393,9 @@ locals {
     CASE pool WHEN 'intraday' THEN 'Intraday (real)' WHEN 'swing' THEN 'Swing (real: held in NIFTYBEES)'
               WHEN 'long_term' THEN 'Long-term (real: cash until buying starts)'
               WHEN 'swing_shadow' THEN 'Swing shadow: news breakouts' WHEN 'swing_tech_shadow' THEN 'Swing shadow: technical scanner'
-              WHEN 'long_term_shadow' THEN 'Long-term shadow: quality picks' ELSE pool END
+              WHEN 'long_term_shadow' THEN 'Long-term shadow: quality picks'
+              WHEN 'swing_mom_shadow' THEN 'Swing shadow: momentum + news'
+              WHEN 'long_term_mom_shadow' THEN 'Long-term shadow: momentum (top 15)' ELSE pool END
   SQL
   strategy_group_sql = "CASE WHEN pool LIKE 'swing%' THEN 'Swing' WHEN pool LIKE 'long_term%' THEN 'Long-term' ELSE 'Intraday' END"
 
@@ -478,6 +489,7 @@ locals {
       swing_holdings       = ["strategy", "symbol", "sector", "qty", "avg_cost", "last_price", "value_rs", "pnl_rs", "pnl_pct", "opened"]
       longterm_holdings    = ["strategy", "symbol", "sector", "qty", "avg_cost", "last_price", "value_rs", "pnl_rs", "pnl_pct", "opened"]
       scanner_today        = ["list_type", "rank", "symbol", "company", "close", "setup", "stance", "rsi", "adx", "volume_x", "delivery_pct", "fno", "entry_low", "entry_high", "stop", "target2", "rr", "misses", "trade_date"]
+      momentum_top         = ["swing_rank", "lt_rank", "symbol", "company", "industry", "close", "ret_1m_pct", "ret_3m_pct", "ret_6m_pct", "ret_12m_pct", "vol_1y_pct", "pct_of_52w_high", "rsi14", "good_news_5d", "latest_good_news", "scanner_strict", "swing_score", "lt_score", "trade_date"]
       scanner_record       = ["signal", "days_after", "signals", "avg_return_pct", "vs_niftybees_pct", "beat_niftybees_pct"]
       shadow_exit_rules    = ["rule", "trades", "would_have_made_rs", "actual_rs", "vs_actual_rs", "beat_actual_pct"]
       shadow_models_real   = ["rule", "trades", "would_have_made_rs", "actual_rs", "vs_actual_rs", "beat_actual_pct"]
@@ -603,6 +615,7 @@ locals {
       swing_hold        = { ds = "swing_holdings", title = "What each swing strategy holds now", desc = "Real pool and shadow pools (paper).", pos = [0, 13, 12, 6] }
       swing_scan        = { ds = "scanner_today", title = "Today's technical scanner (Nifty 200): strict picks and near-misses", desc = "What the scanner shadow pool buys from (next day, only at the scanner's level). Indicative levels, never a guaranteed return.", pos = [0, 19, 12, 7] }
       swing_signals     = { ds = "scanner_record", title = "How each scanner signal did afterwards (vs NIFTYBEES)", desc = "Average return 5, 10 and 20 trading days after each signal over ~6 months, and how often it beat NIFTYBEES. Past results only.", pos = [0, 26, 12, 7] }
+      swing_mom         = { ds = "momentum_top", title = "Momentum ranks (Nifty 200): swing top 12 and long-term top 30", desc = "What the momentum shadow pools buy from. Swing: 1- and 3-month strength, near the 52-week high, fresh good news, scanner picks. Long term: volatility-adjusted 6- and 12-month momentum (the Momentum 30 method). Past strength only.", pos = [0, 33, 12, 8] }
       lt_board          = { ds = "longterm_scoreboard", title = "Long-term scoreboard", desc = "Return since each started vs NIFTYBEES over the same days.", pos = [0, 2, 12, 4] }
       lt_hold           = { ds = "longterm_holdings", title = "What each long-term strategy holds now", desc = "Real pool and shadow pool (paper).", pos = [0, 13, 12, 6] }
       rating_table      = { ds = "rating_summary", title = "Your 👍/👎 vs what really happened", desc = "For your own learning: ratings never train the trader. Right calls = a 👍 that made money or a 👎 that lost (taken: real result; skipped: what it would have made).", pos = [0, 2, 12, 7] }
@@ -773,7 +786,7 @@ locals {
         {
           widget = {
             name                 = "swing_title"
-            multilineTextboxSpec = { lines = ["## Swing pool: real vs shadow strategies (dummy money)", "Real pool: Rs 60,000 held in NIFTYBEES while new rules are tested. Shadow pools (paper, same costs): news breakouts (from 16 Nov) and the technical scanner's strict picks (from 17 Nov). Not advice."] }
+            multilineTextboxSpec = { lines = ["## Swing pool: real vs shadow strategies (dummy money)", "Real pool: Rs 60,000 held in NIFTYBEES while new rules are tested. Shadow pools (paper, same costs): news breakouts (from 16 Nov), the technical scanner's strict picks (from 17 Nov) and momentum + news (from 18 Nov, 2% risk per trade). Not advice."] }
           }
           position = { x = 0, y = 0, width = 12, height = 2 }
         },
@@ -782,6 +795,7 @@ locals {
         local.table_widget.swing_hold,
         local.table_widget.swing_scan,
         local.table_widget.swing_signals,
+        local.table_widget.swing_mom,
       ]
       }, {
       name          = "long_term"
@@ -792,7 +806,7 @@ locals {
         {
           widget = {
             name                 = "quality_title"
-            multilineTextboxSpec = { lines = ["## Long-term pool: real vs shadow (dummy money)", "Real pool: Rs 1 lakh in cash until its go/no-go review (18 Dec). Shadow pool (paper): buys the weekly quality picks. Below: company quality, refreshed every Saturday. Tests: return on capital above 15% (banks: return on assets above 1.2%), debt below half of equity, operating cash flow positive in most years, revenue and profit growing over 10% a year, P/E in the cheaper half. Not advice."] }
+            multilineTextboxSpec = { lines = ["## Long-term pool: real vs shadow (dummy money)", "Real pool: Rs 1 lakh in cash until its go/no-go review (18 Dec). Shadow pools (paper): the weekly quality picks, and momentum (top 15 of the Nifty 200, rebalanced monthly, from 21 Nov). Below: company quality, refreshed every Saturday. Tests: return on capital above 15% (banks: return on assets above 1.2%), debt below half of equity, operating cash flow positive in most years, revenue and profit growing over 10% a year, P/E in the cheaper half. Not advice."] }
           }
           position = { x = 0, y = 0, width = 12, height = 2 }
         },
