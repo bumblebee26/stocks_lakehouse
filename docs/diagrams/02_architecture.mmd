@@ -39,7 +39,7 @@ flowchart TB
         direction TB
         VOL[("<b>Volume</b><br/>stocks.bronze.landing")]
         NVOL[("<b>News volume</b><br/>stocks.bronze.news")]
-        JOB["<b>Jobs</b><br/>market-close: NSE file → market → research<br/>market-weekend: Sat 08:00 · 12:00, the same<br/>trading: trades file → trading<br/>each then the dashboard summaries"]
+        JOB["<b>Jobs</b><br/>market-close: NSE file → market → research<br/>market-morning: 11:15 Tue–Sat → market<br/>market-weekend: Sat 08:00 → market → research<br/>trading: trades file → trading<br/>each then the dashboard summaries"]
         subgraph PIPE["Lakeflow pipelines (serverless, one runs at a time)"]
             direction LR
             BR["<b>stocks-market</b><br/>bronze 8 · silver 12 · gold 13<br/>NSE · US · FRED · news · fundamentals"]
