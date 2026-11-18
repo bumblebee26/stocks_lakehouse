@@ -163,11 +163,10 @@ locals {
 
     intra_board = <<-SQL
       WITH t AS (${local.intra_shadow_sql}),
-           real_trades AS (SELECT DISTINCT proposal_id, actual_rs FROM t WHERE test = 'exit rules'),
-           real_total AS (SELECT sum(actual_rs) AS rs FROM real_trades)
+           real_trades AS (SELECT DISTINCT proposal_id, actual_rs FROM t WHERE test = 'exit rules')
       SELECT rule_label AS rule, CASE test WHEN 'models' THEN 'Models' ELSE 'Exit rules' END AS kind, CAST(count(*) AS INT) AS trades,
              round(sum(would_have_made_rs), 0) AS total_rs,
-             round(sum(would_have_made_rs) - (SELECT rs FROM real_total), 0) AS vs_real_rs,
+             round(sum(vs_actual_rs), 0) AS vs_real_rs,
              round(100 * avg(CASE WHEN vs_actual_rs > 0 THEN 1 ELSE 0 END), 0) AS beat_real_pct
       FROM t GROUP BY rule_label, test
       UNION ALL
