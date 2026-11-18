@@ -883,7 +883,8 @@ locals {
       markets_title  = { lines = ["## Global markets: what matters for India's next open", "US, Asia, Europe, the rupee, crude, yields and the fear gauge, plus what the NSE did under the surface."], pos = [0, 0, 12, 2] }
       markets_tables = { lines = ["### Full tables"], pos = [0, 34, 12, 1] }
       } : k => {
-      widget   = { name = k, multilineTextboxSpec = { lines = t.lines } }
+      # one string with real line breaks: Databricks joins a text box's lines without a break
+      widget   = { name = k, multilineTextboxSpec = { lines = [join("\n", t.lines)] } }
       position = { x = t.pos[0], y = t.pos[1], width = t.pos[2], height = t.pos[3] }
     }
   }
@@ -893,7 +894,8 @@ locals {
       for name, sql in local.dashboard_datasets : {
         name        = name
         displayName = replace(name, "_", " ")
-        queryLines  = [sql]
+        # one entry per line, as Databricks stores it, so plans don't show a change that isn't there
+        queryLines = [for line in split("\n", trimsuffix(sql, "\n")) : "${line}\n"]
       }
     ]
 
