@@ -163,15 +163,32 @@ class Handler(unittest.TestCase):
     def _run(self, fake_query, event=None):
         with mock.patch.object(databricks_sql, "query", side_effect=fake_query), \
              mock.patch.object(premarket, "fetch_live", return_value=(SESSIONS, live())), \
+             mock.patch.object(premarket.snapshot, "save", return_value={"rows": 21, "key": "k"}) as save, \
+             mock.patch.object(premarket.snapshot, "collect", return_value=[{}] * 21), \
              mock.patch.object(premarket.dt, "datetime", wraps=dt.datetime) as fake_dt, \
              mock.patch.object(telegram, "send") as send:
             fake_dt.now.return_value = dt.datetime(2026, 11, 16, 8, 45, tzinfo=premarket.IST)
+            self.save = save
             return premarket.handler(event or {}, None), send
 
     def test_dry_run_does_not_send(self):
         out, send = self._run(lambda sql: [], {"dry_run": True})
         send.assert_not_called()
+        self.save.assert_not_called()
+        self.assertEqual(out["snapshot"]["rows"], 21)
         self.assertIn("Technical scanner", out["scanner"])
+
+    def test_saves_snapshot_then_sends(self):
+        out, send = self._run(lambda sql: [])
+        self.save.assert_called_once()
+        self.assertEqual(out["snapshot"], {"rows": 21, "key": "k"})
+        self.assertEqual(send.call_count, 2)
+
+    def test_failed_snapshot_still_sends(self):
+        with mock.patch.object(premarket.snapshot, "save", side_effect=RuntimeError("S3 denied")):
+            out = premarket.save_snapshot(dt.datetime(2026, 11, 16, 8, 45, tzinfo=premarket.IST), False)
+        self.assertEqual(out["rows"], 0)
+        self.assertIn("S3 denied", out["error"])
 
     def test_one_failed_query_still_sends_both(self):
         data = sample()

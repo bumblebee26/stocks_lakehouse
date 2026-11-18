@@ -27,7 +27,7 @@ SELECT 'overview' AS page, concat_ws(' ',
    ORDER BY volume_ratio DESC LIMIT 1),
   (SELECT 'US volatility index (VIX): ' || format_number(value, 1)
           || CASE WHEN value >= 25 THEN ', a nervous market.' WHEN value <= 15 THEN ', a calm market.' ELSE ', normal.' END
-   FROM stocks.gold.global_snapshot WHERE upper(name) LIKE '%VIX%' ORDER BY obs_date DESC LIMIT 1)
+   FROM stocks.gold.global_snapshot WHERE instrument = 'VIXCLS')
 ) AS facts
 UNION ALL
 SELECT 'portfolio', concat_ws(' ',

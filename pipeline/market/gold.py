@@ -1,6 +1,7 @@
 """MARKET pipeline (stocks-market): market data in, cleaned, and the light market summaries. Runs after the NSE evening
-file (job stocks-market-close, then the research pipeline) and at 11:30 IST Mon-Sat (job stocks-market-morning: US
-prices, FRED, the F&O list, Saturday fundamentals).
+file (job stocks-market-close, then the research pipeline), after the 08:45 IST pre-open snapshot Mon-Fri (job
+stocks-market-preopen), at 11:15 IST Tue-Sat (job stocks-market-morning: US prices, FRED, the F&O list) and on
+Saturday at 08:00 (job stocks-market-weekend: fundamentals, the Nifty 200 list).
 
 GOLD: the tables the dashboard, the morning brief and the paper trader read.
 
@@ -11,7 +12,7 @@ GOLD: the tables the dashboard, the morning brief and the paper trader read.
   stocks.silver.adr_pairs                    Indian ADR / NSE pairs
   stocks.gold.adr_premium                    Indian ADRs in New York vs their NSE shares (+ USD/INR premium)
   stocks.gold.global_markets_daily           global instruments with 1/5/20-day changes
-  stocks.gold.global_snapshot                latest reading per global instrument
+  stocks.gold.global_snapshot                latest reading per global instrument (FRED/Massive or the pre-open Yahoo snapshot)
   stocks.gold.india_vs_global                which global moves line up with India's next open
   stocks.gold.company_fundamentals           per company: profitability, debt, cash, growth, P/E and the long-term pool's quality tests
   stocks.gold.longterm_candidates            long-term pool: Nifty 200 companies ranked, this week's 10 picks with target weights and reasons
@@ -360,24 +361,52 @@ def global_markets_daily():
         .withColumn("change_20d_pct", (F.col("value") / F.lag("value", 20).over(w) - 1) * 100)
     )
 
+# Latest reading per instrument: the newest of FRED/Massive (global_markets_daily) and the 08:45 IST Yahoo snapshot
+# (silver.premarket_quotes); on the same date FRED/Massive wins. Yahoo rows carry Yahoo's own changes, so a reading
+# never mixes two sources (Brent: FRED has spot, Yahoo the front-month future). source is 'Yahoo live' for a session
+# still trading at 08:45 IST (Asia, futures, currencies) and 'Yahoo' for a finished one.
+#
 # SQL equivalent:
 #   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.global_snapshot AS
-#   SELECT * EXCEPT (rn) FROM (
-#     SELECT *, row_number() OVER (PARTITION BY instrument ORDER BY obs_date DESC) AS rn
-#     FROM stocks.gold.global_markets_daily
+#   WITH r AS (
+#     SELECT *, 0 AS pref FROM stocks.gold.global_markets_daily
+#     UNION ALL
+#     SELECT instrument, name, region, asset_class, unit,
+#            CASE WHEN reading = 'live' THEN 'Yahoo live' ELSE 'Yahoo' END AS source, obs_date, value,
+#            change_abs, change_pct, change_5d_pct, change_20d_pct, 1 AS pref
+#     FROM stocks.silver.premarket_quotes
+#   )
+#   SELECT * EXCEPT (rn, pref) FROM (
+#     SELECT *, row_number() OVER (PARTITION BY instrument ORDER BY obs_date DESC, pref) AS rn FROM r
 #   ) WHERE rn = 1;
+SNAPSHOT_COLUMNS = ["instrument", "name", "region", "asset_class", "unit", "source", "obs_date", "value",
+                    "change_abs", "change_pct", "change_5d_pct", "change_20d_pct"]
+
 @dp.materialized_view(
     name="stocks.gold.global_snapshot",
-    comment="Latest reading per global instrument, with its changes and as-of date.",
+    comment="Latest reading per global instrument (FRED/Massive or the 08:45 IST Yahoo snapshot, whichever is newer; "
+            "FRED/Massive on a tie), with its changes and as-of date. source 'Yahoo live' = that market was still "
+            "trading at 08:45 IST.",
     table_properties={"quality": "gold"},
 )
 def global_snapshot():
-    latest = Window.partitionBy("instrument").orderBy(F.col("obs_date").desc())
-    return (
+    official = (
         spark.read.table("stocks.gold.global_markets_daily")  # noqa: F821
+        .select(*SNAPSHOT_COLUMNS)
+        .withColumn("_pref", F.lit(0))
+    )
+    yahoo = (
+        spark.read.table("stocks.silver.premarket_quotes")  # noqa: F821
+        .withColumn("source", F.when(F.col("reading") == "live", F.lit("Yahoo live")).otherwise(F.lit("Yahoo")))
+        .select(*SNAPSHOT_COLUMNS)
+        .withColumn("_pref", F.lit(1))
+    )
+    latest = Window.partitionBy("instrument").orderBy(F.col("obs_date").desc(), F.col("_pref"))
+    return (
+        official.unionByName(yahoo)
         .withColumn("_rn", F.row_number().over(latest))
         .filter("_rn = 1")
-        .drop("_rn")
+        .drop("_rn", "_pref")
     )
 
 # ---------------------------------------------------------------------------

@@ -3,7 +3,7 @@
 # Source code lives in ../../pipeline/<pipeline>/*.py and is uploaded to your workspace home folder, so
 # `terraform apply` after a code change redeploys it.
 #
-#   market    market data in, cleaned, and the light market summaries (33 tables)
+#   market    market data in, cleaned, and the light market summaries (35 tables)
 #   research  the heavy daily research: technical scanner, momentum ranks, signal record (5 tables, pandas)
 #   trading   the paper-trader's journal and portfolio exports and everything built on them (23 tables)
 #
@@ -14,6 +14,9 @@
 #   job stocks-market-close    when the NSE evening file lands (landing/nse/, ~19:30 IST Mon-Fri):
 #                              market -> research -> dashboard summary. Picks up everything else that landed during
 #                              the day too (US prices, FRED, the F&O list).
+#   job stocks-market-preopen  when the 08:45 IST brief saves its Yahoo snapshot (landing/premarket/, Mon-Fri):
+#                              market -> dashboard summary, so Global markets is current by about 09:00, before
+#                              NSE opens (added 18 Nov). The newest reading wins; FRED and Massive replace it later.
 #   job stocks-market-morning  11:15 IST Tue-Sat: market -> dashboard summary (the overnight US prices that land at
 #                              11:00 and the 06:00 FRED file, so the dashboard's global markets are current by
 #                              mid-morning; added 18 Nov).
@@ -257,6 +260,67 @@ resource "databricks_job" "market_morning" {
     quartz_cron_expression = "0 15 11 ? * TUE-SAT"
     timezone_id            = "Asia/Kolkata"
     pause_status           = "UNPAUSED"
+  }
+
+  email_notifications {
+    on_failure = [data.databricks_current_user.me.user_name]
+  }
+}
+
+resource "databricks_job" "market_preopen" {
+  name                = "${var.name_prefix}-market-preopen"
+  description         = "When the 08:45 IST pre-open snapshot lands (landing/premarket/, Mon-Fri): market pipeline, then the dashboard summaries, so Global markets is current before NSE opens. Managed by Terraform."
+  max_concurrent_runs = 1
+
+  task {
+    task_key = "dashboard_summary"
+    depends_on {
+      task_key = "market"
+    }
+
+    sql_task {
+      warehouse_id = data.databricks_sql_warehouse.main.id
+      file {
+        path   = databricks_workspace_file.dashboard_summary.workspace_path
+        source = "WORKSPACE"
+      }
+    }
+  }
+
+  # Short retries: a run that finishes after 09:15 has lost most of its point.
+  task {
+    task_key                  = "market"
+    max_retries               = 2
+    min_retry_interval_millis = 5 * 60000
+
+    pipeline_task {
+      pipeline_id = databricks_pipeline.stocks["market"].id
+    }
+  }
+
+  dynamic "trigger" {
+    for_each = var.job_trigger == "file_arrival" ? [1] : []
+
+    content {
+      pause_status = "UNPAUSED"
+
+      file_arrival {
+        url                               = "${local.landing_path}/premarket/"
+        min_time_between_triggers_seconds = 900
+        wait_after_last_change_seconds    = 60
+      }
+    }
+  }
+
+  # Fallback if file-arrival triggers aren't available: 08:50 IST Mon-Fri
+  dynamic "schedule" {
+    for_each = var.job_trigger == "schedule" ? [1] : []
+
+    content {
+      quartz_cron_expression = "0 50 8 ? * MON-FRI"
+      timezone_id            = "Asia/Kolkata"
+      pause_status           = "UNPAUSED"
+    }
   }
 
   email_notifications {

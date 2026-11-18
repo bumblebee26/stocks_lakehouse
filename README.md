@@ -60,7 +60,7 @@ market breadth, unusual volume, Indian ADR premium vs USD/INR, and a global mark
 ```
 fetchers/          Lambda code: nse (+ delivery), nse_fo, massive, fred, news, sync, premarket, yahoo (+ shared helpers). Python stdlib + boto3 only.
 pipeline/          Lakeflow pipelines in Python, SQL equivalents in comments:
-  market/          bronze.py, silver.py, gold.py: market data in, cleaned, light summaries (33 tables)
+  market/          bronze.py, silver.py, gold.py: market data in, cleaned, light summaries (35 tables)
   research/        gold.py: technical scanner, momentum ranks, signal record, data freshness (5 tables, pandas)
   trading/         bronze.py, silver.py, gold.py: paper-trader journal, portfolio, shadows (23 tables)
 sql/               dashboard_summary.sql: "In plain words" page summaries, run by each job after its pipelines

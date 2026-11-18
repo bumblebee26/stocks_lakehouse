@@ -1,6 +1,7 @@
 """MARKET pipeline (stocks-market): market data in, cleaned, and the light market summaries. Runs after the NSE evening
-file (job stocks-market-close, then the research pipeline) and at 11:30 IST Mon-Sat (job stocks-market-morning: US
-prices, FRED, the F&O list, Saturday fundamentals).
+file (job stocks-market-close, then the research pipeline), after the 08:45 IST pre-open snapshot Mon-Fri (job
+stocks-market-preopen), at 11:15 IST Tue-Sat (job stocks-market-morning: US prices, FRED, the F&O list) and on
+Saturday at 08:00 (job stocks-market-weekend: fundamentals, the Nifty 200 list).
 
 BRONZE: raw files from the landing volume, ingested incrementally with Auto Loader.
 
@@ -19,6 +20,7 @@ _rescued_data instead (schemaEvolutionMode = rescue).
   stocks.bronze.index_members_raw            Nifty 200 lists
   stocks.bronze.nse_delivery_raw             NSE delivery file
   stocks.bronze.nse_fo_raw                   NSE F&O stock list
+  stocks.bronze.premarket_raw                pre-open world-markets snapshot (Yahoo, 08:45 IST Mon-Fri)
 Tables of the research and trading pipelines are never defined here; the three pipelines never run at
 the same time (Free Edition allows one active pipeline).
 """
@@ -315,4 +317,36 @@ def nse_fo_raw():
         .option("cloudFiles.partitionColumns", "")
         .schema(FNO_SCHEMA)
         .load(f"{LANDING}/nse_fo/")
+    )
+
+# ---------------------------------------------------------------------------
+# Pre-open snapshot: world markets from Yahoo, written by the 08:45 IST brief (fetchers/snapshot.py)
+# ---------------------------------------------------------------------------
+# One JSON line per instrument: its latest daily candle and Yahoo's own 1/5/20-session changes. Ids FRED also
+# carries keep FRED's id (SP500, DEXINUS...), so gold.global_snapshot can show whichever reading is newer.
+#
+# SQL equivalent:
+#   CREATE OR REFRESH STREAMING TABLE stocks.bronze.premarket_raw AS
+#   SELECT *, <lineage columns> FROM STREAM read_files('/Volumes/stocks/bronze/landing/premarket/',
+#     format => 'json', pathGlobFilter => '*.jsonl', schema => '<PREMARKET_SCHEMA below>');
+PREMARKET_SCHEMA = (
+    "instrument STRING, name STRING, region STRING, asset_class STRING, unit STRING, yahoo_symbol STRING, "
+    "obs_date STRING, value DOUBLE, change_abs DOUBLE, change_pct DOUBLE, change_5d_pct DOUBLE, "
+    "change_20d_pct DOUBLE, reading STRING, fetched_at_ist STRING"
+)
+
+@dp.table(
+    name="stocks.bronze.premarket_raw",
+    comment="Raw pre-open world-markets snapshots from Yahoo (08:45 IST Mon-Fri), one row per instrument per file.",
+    table_properties={"quality": "bronze"},
+)
+def premarket_raw():
+    return with_lineage(
+        spark.readStream.format("cloudFiles")  # noqa: F821
+        .option("cloudFiles.format", "json")
+        .option("pathGlobFilter", "*.jsonl")
+        .option("rescuedDataColumn", "_rescued_data")
+        .option("cloudFiles.partitionColumns", "")
+        .schema(PREMARKET_SCHEMA)
+        .load(f"{LANDING}/premarket/")
     )

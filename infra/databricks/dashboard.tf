@@ -399,7 +399,11 @@ locals {
            br AS (SELECT pct_above_ma20, row_number() OVER (ORDER BY trade_date DESC) AS rn
                   FROM stocks.gold.market_breadth WHERE market = 'IN'),
            inr AS (SELECT value, row_number() OVER (ORDER BY obs_date DESC) AS rn
-                   FROM stocks.silver.global_daily WHERE instrument = 'DEXINUS' AND value IS NOT NULL),
+                   FROM (SELECT obs_date, value FROM g WHERE instrument = 'DEXINUS'
+                         UNION ALL
+                         SELECT obs_date, value FROM stocks.silver.global_daily
+                         WHERE instrument = 'DEXINUS' AND value IS NOT NULL
+                           AND obs_date < (SELECT obs_date FROM g WHERE instrument = 'DEXINUS'))),
            inr20 AS (SELECT max(CASE WHEN rn = 1 THEN value END) AS now, max(value) AS hi, min(value) AS lo FROM inr WHERE rn <= 20),
            mover AS (SELECT name, change_pct FROM g
                      WHERE asset_class IN ('equity_index', 'equity_etf', 'commodity') AND change_pct IS NOT NULL
@@ -454,7 +458,8 @@ locals {
              ${replace(local.signed_pct_sql, "__V__", "change_pct")} AS last_move,
              ${replace(local.signed_pct_sql, "__V__", "change_5d_pct")} AS over_5,
              ${replace(local.signed_pct_sql, "__V__", "change_20d_pct")} AS over_20,
-             obs_date AS as_of
+             concat(date_format(obs_date, 'EEE d MMM'),
+                    CASE source WHEN 'Yahoo live' THEN ' · live (Yahoo)' WHEN 'Yahoo' THEN ' (Yahoo)' ELSE '' END) AS as_of
       FROM stocks.gold.global_snapshot
       ORDER BY CASE asset_class WHEN 'equity_index' THEN 1 WHEN 'equity_etf' THEN 2 WHEN 'fx' THEN 3 WHEN 'commodity' THEN 4
                                 WHEN 'rates' THEN 5 ELSE 6 END, region, name
@@ -844,11 +849,11 @@ locals {
       calls_vs_trader   = { ds = "calls_vs_trader", title = "You vs the trader", desc = "Where you disagreed shows what following you would have changed (ratings still never train it).", pos = [5, 6, 7, 5] }
       calls_list        = { ds = "rating_trades", title = "Every rated proposal (newest first)", desc = "Your rating, what the trader did, the outcome and whether your call was right.", pos = [0, 17, 12, 9] }
       calls_summary     = { ds = "rating_summary", title = "By decision", desc = "Taken = the real result; skipped = what it would have made.", pos = [0, 26, 12, 6] }
-      mk_read           = { ds = "market_read", title = "Today's read", desc = "Written each evening from the tables below with fixed rules (not AI). Past patterns, not predictions.", pos = [0, 2, 12, 5] }
-      mk_world          = { ds = "world_moves", title = "Around the world", desc = "Last move, and over the last 5 and 20 readings (trading days; FRED currencies are weekly).", pos = [0, 10, 7, 12] }
+      mk_read           = { ds = "market_read", title = "Today's read", desc = "Written from the tables below with fixed rules (not AI), each evening and again by about 09:00 IST from the pre-open snapshot. Past patterns, not predictions.", pos = [0, 2, 12, 5] }
+      mk_world          = { ds = "world_moves", title = "Around the world", desc = "Last move, and over the last 5 and 20 sessions. Newest reading wins: the 08:45 IST Yahoo snapshot or FRED/Massive; live = that market is still trading.", pos = [0, 10, 7, 12] }
       mk_us_after       = { ds = "us_after_moves", title = "What the Nifty did after the US moved", desc = "Since 2023. The open follows the US more than the close does.", pos = [0, 22, 6, 6] }
       mk_unusual        = { ds = "unusual_latest", title = "Unusual volume, latest session", desc = "Stocks trading far above their 20-day average volume.", pos = [0, 28, 6, 6] }
-      details_global    = { ds = "global_latest", title = "Every global instrument: latest reading", desc = "FRED series and US-listed country ETFs.", pos = [0, 35, 12, 8] }
+      details_global    = { ds = "global_latest", title = "Every global instrument: latest reading", desc = "FRED series, US-listed country ETFs and the 08:45 IST Yahoo snapshot (source column).", pos = [0, 35, 12, 8] }
       details_ivg       = { ds = "india_vs_global", title = "India's next open vs global moves", desc = "Correlation over all sessions; same direction = how often the gap matched the global move.", pos = [0, 43, 12, 7] }
       details_adr       = { ds = "adr_latest", title = "Indian ADRs vs NSE shares", desc = "Premium vs the pair's median, and vs USD/INR.", pos = [0, 50, 12, 5] }
       summary_overview  = { ds = "summary_overview", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 55, 12, 4] }
