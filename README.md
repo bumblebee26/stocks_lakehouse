@@ -46,7 +46,8 @@ market breadth, unusual volume, Indian ADR premium vs USD/INR, and a global mark
 | 06:00 Tue–Sat | FRED: global indices, FX, VIX, oil, rates (rolling 21-day window) |
 | ~19:35 Mon–Fri | Databricks job `stocks-market-close` (when the NSE file lands): pipelines `stocks-market` then `stocks-research`, then the dashboard summaries |
 | ~15:50, ~23:35 Mon–Fri | Databricks job `stocks-trading` (when paper-trader's export lands): pipeline `stocks-trading`, then the dashboard summaries |
-| 08:00, 12:00 Sat | Databricks job `stocks-market-weekend`: market and research (fundamentals, Nifty 200 list, Friday's US file) |
+| 11:15 Tue–Sat | Databricks job `stocks-market-morning`: market pipeline (the overnight US prices and FRED), then the dashboard summaries |
+| 08:00 Sat | Databricks job `stocks-market-weekend`: market and research (fundamentals, Nifty 200 list) |
 | every minute 09:00–15:59, every 30 min otherwise (08:00–19:30) Mon–Fri | Company news: NSE (announcements, results, board meetings, corporate actions) every run; Business Standard markets, RBI and SEBI press releases at most every 4–5 minutes; BSE announcements built but off (`bse_news_enabled`) |
 | 08:45 Mon–Fri | Pre-market brief and the technical scanner to Telegram (India first; US figures live from Yahoo) |
 | 15:45 Mon–Fri | paper-trader pushes the day's trade journal to `landing/trades/` and a portfolio snapshot to `landing/portfolio/` |

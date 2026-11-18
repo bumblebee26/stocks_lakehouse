@@ -14,9 +14,11 @@
 #   job stocks-market-close    when the NSE evening file lands (landing/nse/, ~19:30 IST Mon-Fri):
 #                              market -> research -> dashboard summary. Picks up everything else that landed during
 #                              the day too (US prices, FRED, the F&O list).
-#   job stocks-market-weekend  Saturday 08:00 and 12:00 IST: market -> research -> dashboard summary (the 07:15
-#                              fundamentals and Nifty 200 list, so the momentum ranks are ready for the 10:15
-#                              long-term shadow job; Friday's US and FRED files).
+#   job stocks-market-morning  11:15 IST Tue-Sat: market -> dashboard summary (the overnight US prices that land at
+#                              11:00 and the 06:00 FRED file, so the dashboard's global markets are current by
+#                              mid-morning; added 18 Nov).
+#   job stocks-market-weekend  Saturday 08:00 IST: market -> research -> dashboard summary (the 07:15 fundamentals
+#                              and Nifty 200 list, so the momentum ranks are ready for the 10:15 long-term shadow job).
 #   job stocks-trading         when the paper trader's export lands (landing/trades/, 15:45 and 23:30 IST):
 #                              trading -> dashboard summary.
 # ---------------------------------------------------------------------------
@@ -169,7 +171,7 @@ resource "databricks_job" "market_close" {
 
 resource "databricks_job" "market_weekend" {
   name                = "${var.name_prefix}-market-weekend"
-  description         = "Saturday 08:00 and 12:00 IST: market pipeline (fundamentals, Nifty 200 list, US, FRED), research (momentum ranks for the 10:15 long-term job), then the dashboard summaries. Managed by Terraform."
+  description         = "Saturday 08:00 IST: market pipeline (fundamentals, Nifty 200 list), research (momentum ranks for the 10:15 long-term job), then the dashboard summaries. Managed by Terraform."
   max_concurrent_runs = 1
 
   task {
@@ -211,7 +213,48 @@ resource "databricks_job" "market_weekend" {
   }
 
   schedule {
-    quartz_cron_expression = "0 0 8,12 ? * SAT"
+    quartz_cron_expression = "0 0 8 ? * SAT"
+    timezone_id            = "Asia/Kolkata"
+    pause_status           = "UNPAUSED"
+  }
+
+  email_notifications {
+    on_failure = [data.databricks_current_user.me.user_name]
+  }
+}
+
+resource "databricks_job" "market_morning" {
+  name                = "${var.name_prefix}-market-morning"
+  description         = "11:15 IST Tue-Sat: market pipeline (the overnight US prices that land at 11:00, FRED), then the dashboard summaries. Managed by Terraform."
+  max_concurrent_runs = 1
+
+  task {
+    task_key = "dashboard_summary"
+    depends_on {
+      task_key = "market"
+    }
+
+    sql_task {
+      warehouse_id = data.databricks_sql_warehouse.main.id
+      file {
+        path   = databricks_workspace_file.dashboard_summary.workspace_path
+        source = "WORKSPACE"
+      }
+    }
+  }
+
+  task {
+    task_key                  = "market"
+    max_retries               = local.retries
+    min_retry_interval_millis = local.retry_minutes * 60000
+
+    pipeline_task {
+      pipeline_id = databricks_pipeline.stocks["market"].id
+    }
+  }
+
+  schedule {
+    quartz_cron_expression = "0 15 11 ? * TUE-SAT"
     timezone_id            = "Asia/Kolkata"
     pause_status           = "UNPAUSED"
   }

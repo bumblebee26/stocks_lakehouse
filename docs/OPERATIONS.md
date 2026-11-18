@@ -9,7 +9,8 @@ Day-to-day running of the lakehouse once [SETUP.md](SETUP.md) is done.
 | 11:00 Tue–Sat | `stocks-fetch-massive` (the free plan releases a US day ~10:30 IST; each run fetches any of the last 3 weekdays not yet in the volume) | `landing/massive/date=<US date>/grouped_daily_YYYYMMDD.json` |
 | 06:00 Tue–Sat | `stocks-fetch-fred` | `landing/fred/date=<today>/fred_<start>_<end>.json` (last 21 days) |
 | ~19:35 Mon–Fri, 5 min after the NSE file lands | Databricks job `stocks-market-close` | Pipeline `stocks-market` (prices, news, US, FRED, fundamentals: everything that landed today), then `stocks-research` (scanner, momentum ranks, signal record, data freshness), then `sql/dashboard_summary.sql` rebuilds `gold.dashboard_summary_facts` and `gold.dashboard_summary` (the dashboard's "In plain words" text) |
-| 08:00 and 12:00 Sat | Databricks job `stocks-market-weekend` | The same three steps, for the 07:15 fundamentals and Nifty 200 list (the momentum ranks are ready for paper-trader's 10:15 long-term shadow) and Friday's US file |
+| 11:15 Tue–Sat | Databricks job `stocks-market-morning` | Pipeline `stocks-market` for the overnight US prices (land 11:00) and FRED (06:00), then the dashboard summaries, so Global markets is current by mid-morning |
+| 08:00 Sat | Databricks job `stocks-market-weekend` | Market, research and summaries for the 07:15 fundamentals and Nifty 200 list (the momentum ranks are ready for paper-trader's 10:15 long-term shadow) |
 | ~15:50 and ~23:35 Mon–Fri, 5 min after paper-trader's export lands | Databricks job `stocks-trading` | Pipeline `stocks-trading` (journal, portfolio, shadows, model tests, track record), then the dashboard summaries |
 | every minute 09:00–15:59 (schedule `stocks-fetch-news-live`), every 30 min otherwise 08:00–19:30, Mon–Fri | `stocks-fetch-news` | `latest.jsonl` in the news volume every run (read by paper-trader); `date=<today>/snap_HHMM.jsonl` (+ S3 copy under `landing/news/`) at :00/:30 and when new items appear (at most every 5 min); read by `stocks-market` at its next run |
 | 08:00 Mon | `stocks-fetch-nse_fo` | `landing/nse_fo/date=<today>/fno_symbols.jsonl` (fails if fewer than 100 stocks) |
@@ -64,7 +65,7 @@ aws lambda invoke --function-name stocks-fetch-nse --region ap-southeast-2 --inv
 - Long ranges continue themselves in new invocations. Run **one Massive backfill at a time** (rate limit).
 - Massive's free plan only serves the last 2 years.
 - After an NSE backfill `stocks-market-close` runs on its own; after a Massive, FRED or fundamentals backfill the
-  new files are read at the next run (or run `stocks-market-weekend` now: Actions → *Run Databricks jobs*). To rebuild
+  new files are read at the next run (11:15 or 19:35; or run `stocks-market-weekend` now: Actions → *Run Databricks jobs*). To rebuild
   from scratch instead, use **Full refresh all** on `stocks-market`, then run `stocks-research` and `stocks-trading`
   (one at a time: Free Edition runs one pipeline at a time).
 
@@ -85,7 +86,7 @@ Options: `{"prefix": "landing/nse/"}` for one source, `{"overwrite": true}` to r
 | Lambda logs | `aws logs tail /aws/lambda/stocks-fetch-nse --since 1h --region ap-southeast-2` (or `-massive`, `-fred`, `-news`, `stocks-premarket-brief`, `stocks-sync-volume`) |
 | Schedules on? | `aws scheduler list-schedules --region ap-southeast-2 --query "Schedules[].[Name,State]" --output table` |
 | Files arriving? | `aws s3 ls s3://stocks-lakehouse-landing-<account-id>/landing/nse/` |
-| Pipeline runs | Databricks → **Jobs & Pipelines** → `stocks-market-close`, `stocks-market-weekend`, `stocks-trading` (pipeline tasks retry every 15 min up to 4 times, then `dashboard_summary`; failures email you) |
+| Pipeline runs | Databricks → **Jobs & Pipelines** → `stocks-market-close`, `stocks-market-morning`, `stocks-market-weekend`, `stocks-trading` (pipeline tasks retry every 15 min up to 4 times, then `dashboard_summary`; failures email you) |
 | Paper-trading ledger start | `ledger_start` in `infra/databricks/variables.tf` (18 Nov 2026, after the 17 Nov reset): portfolio, shadow pools, daily P&L, results per setup/hour, decisions and custom trades start there; the track record, ratings, shadow rules and model tests keep all history |
 | Run jobs now | GitHub → Actions → **Run Databricks jobs** (job names in order; waits for each and shows every task), or **Run now** in Databricks |
 | Data freshness | `SELECT market, max(trade_date) FROM stocks.silver.trading_days GROUP BY market;` |
