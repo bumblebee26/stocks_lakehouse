@@ -62,6 +62,7 @@ resource "databricks_file" "landing_readme" {
     portfolio     = "Paper-trader pools and holdings (dummy money, JSON lines), pushed daily at 15:45 IST with the trade journal."
     index_members = "NSE index constituents (Nifty 200: symbol, company, industry, ISIN), pushed weekly with the fundamentals."
     fundamentals  = "Company financials (annual and quarterly, JSON lines) for about 250 large NSE companies, pushed weekly by paper-trader's Company fundamentals workflow."
+    premarket     = "Pre-open world-markets snapshot from Yahoo (JSON lines), written by the 08:45 IST brief Mon-Fri. A new file starts stocks-market-preopen."
   }
 
   path           = "/Volumes/${databricks_volume.landing.catalog_name}/${databricks_volume.landing.schema_name}/${databricks_volume.landing.name}/${each.key}/_README.txt"

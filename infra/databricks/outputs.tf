@@ -39,6 +39,7 @@ output "job_ids" {
   value = {
     market_close   = databricks_job.market_close.id
     market_morning = databricks_job.market_morning.id
+    market_preopen = databricks_job.market_preopen.id
     market_weekend = databricks_job.market_weekend.id
     trading        = databricks_job.trading.id
   }

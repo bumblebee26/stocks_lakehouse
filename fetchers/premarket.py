@@ -15,8 +15,11 @@
    near-misses with the filter each missed, the Nifty 50 regime, and the lists' dates and sources. Each pick has
    indicative levels, NSE and Groww links, and a "Swing buy" button the paper trader confirms before acting.
 
+Before either message, it saves the pre-open snapshot of world markets to the lakehouse (snapshot.py), which starts
+the stocks-market-preopen job so the dashboard's Global markets page is current before NSE opens.
+
 Telegram has no table markup, so tables are <pre> blocks kept narrow enough for a phone.
-Event: {} for a normal run, {"dry_run": true} to return the messages without sending.
+Event: {} for a normal run, {"dry_run": true} to return the messages without sending (and without saving).
 """
 
 import datetime as dt
@@ -25,6 +28,7 @@ import re
 from zoneinfo import ZoneInfo
 
 import databricks_sql
+import snapshot
 import telegram
 import yahoo
 from common import log
@@ -409,9 +413,23 @@ def chunks(text, limit=telegram.MAX_LENGTH - 96):
     return parts
 
 
+def save_snapshot(now, dry_run):
+    """The pre-open snapshot for the lakehouse (snapshot.py), first so the market run can start at once.
+    It never stops the brief: a failure is logged and reported."""
+    try:
+        if dry_run:
+            return {"rows": len(snapshot.collect(now)), "key": None}
+        return snapshot.save(now)
+    except Exception as err:  # noqa: BLE001
+        log.warning("pre-open snapshot failed: %s", err)
+        return {"rows": 0, "key": None, "error": str(err)[:200]}
+
+
 def handler(event, context):
     event = event or {}
-    today = dt.datetime.now(IST).date()
+    now = dt.datetime.now(IST)
+    today = now.date()
+    snap = save_snapshot(now, bool(event.get("dry_run")))
     data, failed = fetch_all(QUERIES)
     sessions, live = fetch_live(today)
     expected = expected_dates(today, sessions)
@@ -420,7 +438,8 @@ def handler(event, context):
     scan, buttons = build_scanner(data, expected, fresh, failed)
     if event.get("dry_run"):
         log.info("Dry run; messages not sent:\n%s\n\n%s", brief, scan)
-        return {"sent": False, "failed_queries": failed, "message": brief, "scanner": scan, "buttons": buttons}
+        return {"sent": False, "failed_queries": failed, "message": brief, "scanner": scan, "buttons": buttons,
+                "snapshot": snap}
     telegram.send(brief)
     parts = chunks(scan)
     for i, part in enumerate(parts):
@@ -428,4 +447,4 @@ def handler(event, context):
         telegram.send(part if len(parts) == 1 else f"{part}\n<i>({i + 1}/{len(parts)})</i>",
                       buttons=buttons if last else None)
     return {"sent": True, "failed_queries": failed, "chars": len(brief) + len(scan),
-            "scanner_parts": len(parts), "swing_buttons": len(buttons)}
+            "scanner_parts": len(parts), "swing_buttons": len(buttons), "snapshot": snap}

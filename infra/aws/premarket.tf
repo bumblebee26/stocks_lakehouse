@@ -1,5 +1,6 @@
 # Pre-market brief: queries the gold tables via Databricks SQL and sends a
-# Telegram message at 08:45 IST, Monday-Friday.
+# Telegram message at 08:45 IST, Monday-Friday. First it saves the pre-open Yahoo
+# snapshot to landing/premarket/, which starts the stocks-market-preopen Databricks job.
 #
 # Telegram settings are created as placeholders; set the real values yourself
 # so they never land in Terraform state:
@@ -55,6 +56,14 @@ data "aws_iam_policy_document" "premarket" {
       aws_ssm_parameter.telegram_chat_id.arn,
     ])
   }
+
+  # The pre-open snapshot (fetchers/snapshot.py): its own landing prefix only.
+  statement {
+    sid       = "WritePremarketLanding"
+    effect    = "Allow"
+    actions   = ["s3:PutObject"]
+    resources = ["${module.landing_bucket.arn}/landing/premarket/*"]
+  }
 }
 
 resource "aws_iam_role_policy" "premarket" {
@@ -70,7 +79,7 @@ resource "aws_cloudwatch_log_group" "premarket" {
 
 resource "aws_lambda_function" "premarket" {
   function_name = local.premarket_function_name
-  description   = "Pre-market brief from the gold tables -> Telegram."
+  description   = "Pre-market brief from the gold tables -> Telegram; saves the pre-open Yahoo snapshot to landing/premarket/."
   role          = aws_iam_role.premarket.arn
 
   runtime       = var.lambda_python_runtime
@@ -87,6 +96,9 @@ resource "aws_lambda_function" "premarket" {
       DATABRICKS_URL_PARAM       = local.databricks_url_param
       DATABRICKS_TOKEN_PARAM     = local.databricks_token_param
       DATABRICKS_WAREHOUSE_PARAM = local.databricks_warehouse_param
+      LANDING_BUCKET             = module.landing_bucket.id
+      PUSH_TO_DATABRICKS         = var.databricks_push_enabled ? "true" : "false"
+      LANDING_VOLUME_PATH        = var.databricks_volume_path
       TELEGRAM_TOKEN_PARAM       = aws_ssm_parameter.telegram_bot_token.name
       TELEGRAM_CHAT_ID_PARAM     = aws_ssm_parameter.telegram_chat_id.name
       US_PROXY                   = var.us_proxy_symbol

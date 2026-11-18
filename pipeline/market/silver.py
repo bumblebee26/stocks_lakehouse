@@ -1,6 +1,7 @@
 """MARKET pipeline (stocks-market): market data in, cleaned, and the light market summaries. Runs after the NSE evening
-file (job stocks-market-close, then the research pipeline) and at 11:30 IST Mon-Sat (job stocks-market-morning: US
-prices, FRED, the F&O list, Saturday fundamentals).
+file (job stocks-market-close, then the research pipeline), after the 08:45 IST pre-open snapshot Mon-Fri (job
+stocks-market-preopen), at 11:15 IST Tue-Sat (job stocks-market-morning: US prices, FRED, the F&O list) and on
+Saturday at 08:00 (job stocks-market-weekend: fundamentals, the Nifty 200 list).
 
 SILVER: cleaned, typed, de-duplicated tables. Materialized views: they recompute incrementally where
 possible, and make de-duplication simple (a re-fetched day replaces the old copy: latest file wins).
@@ -13,6 +14,7 @@ Data-quality expectations drop bad rows and report counts in the pipeline UI.
   stocks.silver.fred_daily
   stocks.silver.country_etfs
   stocks.silver.global_daily
+  stocks.silver.premarket_quotes             the pre-open Yahoo snapshot, one row per instrument per date (newest file)
   stocks.silver.news                         NSE company news, one row per item (id), typed
   stocks.silver.fundamentals                 company financials, one row per symbol x metric x period (newest fetch wins)
   stocks.silver.index_members                the latest Nifty 200 list: symbol, company, industry
@@ -335,6 +337,47 @@ def global_daily():
         )
     )
     return fred.select(*GLOBAL_COLUMNS).unionByName(etfs.select(*GLOBAL_COLUMNS))
+
+# ---------------------------------------------------------------------------
+# Pre-open snapshot (Yahoo, 08:45 IST Mon-Fri), de-duplicated: the newest file wins per instrument and date
+# ---------------------------------------------------------------------------
+# Kept apart from global_daily, so the history (and india_vs_global) stays FRED and Massive only; the dashboard
+# reads it through gold.global_snapshot, which takes the newer reading per instrument.
+#
+# SQL equivalent:
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.silver.premarket_quotes (
+#     CONSTRAINT has_instrument EXPECT (instrument IS NOT NULL) ON VIOLATION DROP ROW,
+#     CONSTRAINT has_date       EXPECT (obs_date IS NOT NULL)   ON VIOLATION DROP ROW,
+#     CONSTRAINT has_value      EXPECT (value IS NOT NULL)      ON VIOLATION DROP ROW
+#   ) AS
+#   SELECT instrument, name, region, asset_class, unit, 'Yahoo' AS source, to_date(obs_date) AS obs_date, value,
+#          change_abs, change_pct, change_5d_pct, change_20d_pct, reading, yahoo_symbol,
+#          to_timestamp(fetched_at_ist) AS fetched_at_ist, _source_file, _file_modified_at
+#   FROM (SELECT *, row_number() OVER (PARTITION BY instrument, to_date(obs_date) ORDER BY _file_modified_at DESC) AS rn
+#         FROM stocks.bronze.premarket_raw) WHERE rn = 1;
+@dp.materialized_view(
+    name="stocks.silver.premarket_quotes",
+    comment="Pre-open world-markets snapshot from Yahoo (08:45 IST Mon-Fri), one row per instrument per date: "
+            "value, Yahoo's own 1/5/20-session changes, and reading = live (session still trading) or close.",
+    table_properties={"quality": "silver"},
+)
+@dp.expect_all_or_drop({
+    "has_instrument": "instrument IS NOT NULL",
+    "has_date": "obs_date IS NOT NULL",
+    "has_value": "value IS NOT NULL",
+})
+def premarket_quotes():
+    raw = spark.read.table("stocks.bronze.premarket_raw")  # noqa: F821
+    typed = raw.select(
+        "instrument", "name", "region", "asset_class", "unit",
+        F.lit("Yahoo").alias("source"),
+        F.to_date("obs_date").alias("obs_date"),
+        "value", "change_abs", "change_pct", "change_5d_pct", "change_20d_pct",
+        "reading", "yahoo_symbol",
+        F.to_timestamp("fetched_at_ist").alias("fetched_at_ist"),
+        "_source_file", "_file_modified_at",
+    )
+    return latest_file_wins(typed, ["instrument", "obs_date"])
 
 # ---------------------------------------------------------------------------
 # Company news (NSE RSS)
