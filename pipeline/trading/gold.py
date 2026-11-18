@@ -639,6 +639,8 @@ SHADOW_RULE_WORDS = {
     "target_1_5r": "target 1.5R", "level_target": "target at yesterday's high/low",
     "orb5_1_5r": "5-min range, 1.5R target", "orb5_level": "5-min range, target at yesterday's high/low",
     "orb15_1_5r": "15-min range, 1.5R target", "orb15_level": "15-min range, target at yesterday's high/low",
+    "orb5_retest": "5-min range, wait for the retest", "orb15_retest": "15-min range, wait for the retest",
+    "skip_stretched": "skip stretched breakouts",
 }
 
 def _rule_label():
