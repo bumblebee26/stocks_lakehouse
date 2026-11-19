@@ -116,3 +116,7 @@ Country ETFs (Japan, Germany, UK, Eurozone, Europe, China, Hong Kong, Korea, Tai
 come from the Massive data, giving daily equity coverage for markets FRED doesn't carry.
 
 *Historical tendencies only. Not investment advice.*
+
+## Licence
+
+Copyright 2026 Viren Baria. Licensed under the [Apache License, Version 2.0](LICENSE); see [NOTICE](NOTICE).
