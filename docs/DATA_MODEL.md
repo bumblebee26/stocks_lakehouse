@@ -16,6 +16,7 @@ Same layout in S3 (`s3://stocks-lakehouse-landing-<account-id>/landing/`) and in
 | `nse_fo/date=YYYY-MM-DD/fno_symbols.jsonl` | NSE's F&O stock list (`fo_mktlots.csv`, index rows dropped), Mondays 08:00 IST | NDJSON |
 | `massive/date=YYYY-MM-DD/grouped_daily_YYYYMMDD.json` | Massive grouped daily, all US tickers | JSON |
 | `fred/date=YYYY-MM-DD/fred_<start>_<end>.json` | FRED observations for a date range | NDJSON |
+| `premarket/date=YYYY-MM-DD/yahoo_HHMM.jsonl` | Pre-open world-markets snapshot from Yahoo (21 markets: latest daily candle and Yahoo's own 1/5/20-session changes), written by the 08:45 IST brief Mon–Fri; a new file starts `stocks-market-preopen` | NDJSON |
 | `trades/date=YYYY-MM-DD/events.jsonl` | Paper-trader journal (dummy money), pushed 15:45 IST by `stocks-trader-guardian` (volume; S3 copy in the trader's own bucket) | NDJSON |
 | `index_members/date=YYYY-MM-DD/nifty200.jsonl` | NSE's Nifty 200 list (symbol, company, industry, ISIN), pushed weekly with the fundamentals (volume only) | NDJSON |
 | `portfolio/date=YYYY-MM-DD/portfolio.jsonl` | Paper-trader pools (capital, cash, equity) and holdings (qty, cost, last price, value, P&L), pushed daily at 15:45 IST with the journal (volume only) | NDJSON |
@@ -41,6 +42,7 @@ Each new file is read once. Every bronze table has these lineage columns: `_sour
 | `bronze.nse_delivery_raw` | stock × day × file | `symbol`, `series`, `deliv_qty`, `deliv_per` (from NSE's `sec_bhavdata_full`). Explicit schema. |
 | `bronze.nse_fo_raw` | stock × weekly file | `symbol`, `underlying`, `as_of` (NSE's F&O list). Explicit schema. |
 | `bronze.massive_grouped_raw` | file (one US day) | `results` kept as **JSON text** (fields `T` and `t` clash, see ARCHITECTURE), plus `status`, `resultsCount`, `adjusted`. |
+| `bronze.premarket_raw` | instrument × file | The pre-open Yahoo snapshot: `instrument`, `name`, `region`, `asset_class`, `unit`, `yahoo_symbol`, `obs_date`, `value`, `change_abs`, `change_pct`, `change_5d_pct`, `change_20d_pct`, `reading` (`live` or `close`), `fetched_at_ist`. Explicit schema. |
 | `bronze.fred_observations_raw` | series × date × file | `series_id`, `date`, `value`, `name`, `region`, `asset_class`, `unit`. Explicit schema. |
 | `bronze.news_raw` | news item × snapshot | `id`, `feed`, `symbol` (null when the company couldn't be matched), `company`, `category`, `title`, `description`, `link`, `published_ist`, `fetched_at_ist`. Explicit schema. |
 | `bronze.index_members_raw` | company × file | `symbol`, `company`, `industry`, `isin`, `index_name`, `as_of`. Explicit schema. |
@@ -70,6 +72,7 @@ Each new file is read once. Every bronze table has these lineage columns: `_sour
 | `silver.country_etfs` | ticker | Reference list of the 12 country ETFs: `symbol`, `name`, `region` (from `COUNTRY_ETFS` in `silver.py`) | — |
 | `silver.adr_pairs` | ADR | Reference list of Indian ADRs: `adr`, `nse_symbol`, `shares_per_adr` (from `ADR_PAIRS` in `gold.py`) | — |
 | `silver.global_daily` | instrument × date | `instrument`, `name`, `region`, `asset_class`, `unit`, `source` (`FRED`/`Massive`), `obs_date`, `value`. FRED series + 12 country ETFs. | — |
+| `silver.premarket_quotes` | instrument × date | The pre-open Yahoo snapshot, newest file per instrument and date: value, Yahoo's own 1/5/20-session changes, `reading` (`live` = that market was still trading at 08:45 IST). Kept out of `global_daily`, so history and `india_vs_global` stay FRED and Massive only | instrument, date and value present |
 
 Reference lists (`country_etfs`, `adr_pairs`) are pipeline tables rather than inline lists so the views that
 join them read only Delta sources and can refresh incrementally.
@@ -89,7 +92,7 @@ For NSE, `series = 'EQ'` is the main board. Gold uses `EQ` only.
 | `gold.nifty_after_us_moves_summary` | US move bucket | On average, after big US up/down/flat days | `sessions`, `avg_india_gap_pct`, `pct_india_up_days`, `pct_gap_same_direction_as_us`, `corr_us_return_india_gap` |
 | `gold.adr_premium` | ADR × day | Are Indian ADRs (INFY, WIT, HDB, IBN, RDY) rich or cheap vs their NSE shares? | `implied_inr_per_usd`, `relative_premium_pct`, `fx_inr_per_usd`, `fx_date`, `fx_premium_pct` |
 | `gold.global_markets_daily` | instrument × date | Global instruments with changes | `change_abs`, `change_pct`, `change_5d_pct`, `change_20d_pct` |
-| `gold.global_snapshot` | instrument | The latest reading of every global instrument | same, latest row only |
+| `gold.global_snapshot` | instrument | The latest reading of every global instrument: the newer of FRED/Massive and the 08:45 Yahoo snapshot (FRED/Massive on the same date) | same, latest row only; `source` `Yahoo live` when that market was still trading at 08:45 IST |
 | `gold.india_vs_global` | instrument | Which global moves line up with India's next open? | `sessions`, `corr_with_india_gap`, `corr_with_india_return`, `pct_same_direction_gap` |
 | `gold.trades` | paper trade | Each dummy-money trade from entry to exit | `entry_price`, `exit_price`, `exit_reason`, `status`, `net_pnl_rs`, `fees_rs`, `r_multiple`, `holding_minutes`, `entry_hour`, `is_win` |
 | `gold.trading_daily` | day | How did the day go, and does it match the ledger? | `proposals`, `rejected`, `expired`, `trades_opened`, `trades_closed`, `win_rate_pct`, `net_pnl_rs`, `end_balance_rs`, `reconciliation_diff_rs`, `reconciliation` |
@@ -109,9 +112,9 @@ For NSE, `series = 'EQ'` is the main board. Gold uses `EQ` only.
 | `gold.signal_performance` | signal × horizon | Has each scanner signal worked? | `signal` (strict, near_miss, above_mas, macd_cross_up, breakout, pullback), `horizon_days` (5, 10, 20), `signals`, `avg_return_pct`, `avg_excess_pct` (vs NIFTYBEES), `beat_niftybees_pct` |
 | `gold.data_freshness` | source | Which day does each source have? Readers leave out a source that is missing the day it should have | `source` (nse_prices, nse_delivery, us_prices, fred_global, company_news, fno_list, nifty200_list, technical_scanner), `latest_date`, `checked_at` |
 | `gold.shadow_pools_daily` | shadow pool × day | Are the rules tested on paper beating NIFTYBEES? | `pool` (swing_shadow, swing_tech_shadow, swing_mom_shadow, swing_mom_conc_shadow, long_term_shadow, long_term_mom_shadow, long_term_mom_conc_shadow), `equity`, `return_pct`, `nifty_return_pct` (NIFTYBEES since the pool's first day here), `vs_nifty_pct` |
-| `gold.shadow_rules_trades` | real trade × rule | What each of your real intraday trades would have made under other rules: `test` (exit rules: stop variants, trailing, breakeven, half and run, time stop; models: filter, vol_stop, early_cut, let_run, combined), `rule`, `rule_label`, `actual_rs`, `would_have_made_rs`, `vs_actual_rs` |
-| `gold.shadow_rules_summary` | test × rule | Totals of the above: `trades`, `would_have_made_rs`, `actual_rs`, `vs_actual_rs`, `beat_actual_pct`, `first_day`, `last_day` |
-| `gold.orb_test` | stock × day × variant | The opening-range test on paper: `rule` (orb5_2r, orb5_eod, orb15_2r, orb15_eod), `would_have_made_rs` |
+| `gold.shadow_rules_trades` | real trade × rule | What each of your real intraday trades would have made under other rules: `test` (exit rules: stop variants, trailing, breakeven, half and run, time stop, from 19 Nov `target_1_5r` and `level_target` (yesterday's high/low); models: filter, vol_stop, early_cut, let_run, combined, `skip_stretched`), `rule`, `rule_label`, `actual_rs`, `would_have_made_rs`, `vs_actual_rs` |
+| `gold.shadow_rules_summary` | test × rule | Totals of the above: `trades`, `would_have_made_rs`, `actual_rs`, `vs_actual_rs`, `beat_actual_pct`, `first_day`, `last_day`. Each rule is compared with real on its own trades, so a rule that started later (19 Nov) isn't measured against every real trade since 18 Nov |
+| `gold.orb_test` | stock × day × variant | The opening-range test on paper: `rule` (orb5_2r, orb5_eod, orb15_2r, orb15_eod; from 19 Nov also orb5/orb15 `_1_5r`, `_level` and `_retest`: wait for the price to come back to the range edge), `would_have_made_rs` |
 | `gold.model_backtest` | run day × rule | The shadow models' daily walk-forward backtest over every scanner setup on ~200 stocks: `signals`, `traded`, `total_r`, `vs_current_r`, `avg_r`, `win_pct`, `days`, `days_up_pct`, `worst_day_r`, `is_latest` (R = one unit of risk, ~Rs 400) |
 | `gold.momentum_ranks` | Nifty 200 stock, latest NSE day | Which stocks have the strongest momentum? (for the momentum shadow pools) | `ret_1m_pct`, `ret_3m_pct`, `ret_6m_pct`, `ret_12m_pct`, `vol_1y_pct`, `pct_of_52w_high`, `atr14`, `rsi14`, `uptrend`, `scanner_strict`, `news_pos_5d` / `news_neg_5d` (good: results, order, merger, dividend/bonus/buyback; bad: regulatory, pledge), `latest_good_news`, `quality_ok`, `lt_score` + `lt_rank` (z-scored 6- and 12-month return / volatility, the Momentum 30 method), `swing_eligible`, `swing_score` + `swing_rank` |
 | `gold.longterm_candidates` | company | What would the long-term pool buy this week? | `rank`, `is_pick` (top 10, max 2 per industry), `score` (100 × quality + growth bonus − price penalty), `target_weight_pct` (90% invested in equal parts, max 15%), `reasons` (plain words) |
@@ -163,6 +166,10 @@ previous close ÷ our last close, applied when more than 3% off 1). The maths is
 | VIXCLS | FXI China, EWH Hong Kong, EWY South Korea, EWT Taiwan |
 | DEXINUS, DEXJPUS, DEXUSEU, DEXUSUK, DEXCHUS, DTWEXBGS | EWZ Brazil, EEM Emerging markets, INDA India |
 | DCOILBRENTEU, DCOILWTICO, DGS10 | |
+
+The 08:45 pre-open snapshot reads the 13 FRED instruments above from Yahoo under the same ids (Brent and WTI as
+front-month futures), plus Kospi, Hang Seng, Shanghai Composite, DAX, FTSE 100, S&P 500 futures, gold and India VIX.
+`gold.global_snapshot` shows whichever reading is newer.
 
 ## Configuration and secrets
 

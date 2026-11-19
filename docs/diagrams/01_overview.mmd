@@ -4,6 +4,7 @@ flowchart LR
         NSE["🇮🇳 <b>NSE</b><br/>bhavcopy · delivery · F&amp;O list<br/>company news"]
         MAS["🇺🇸 <b>Massive</b><br/>all US stocks + country ETFs"]
         FRED["🌍 <b>FRED</b><br/>indices · FX · VIX · oil · rates"]
+        YF["📈 <b>Yahoo Finance</b><br/>world markets before NSE opens"]
     end
 
     subgraph I["② Ingest · AWS"]
@@ -32,6 +33,7 @@ flowchart LR
     NSE --> LAM
     MAS --> LAM
     FRED --> LAM
+    YF --> LAM
     LAM -- "push" --> VOL
     GO --> DASH
     GO --> TG
@@ -43,7 +45,7 @@ flowchart LR
     classDef silver fill:#eef2f6,stroke:#64748b,color:#0f172a
     classDef gold fill:#fef9c3,stroke:#ca8a04,color:#422006
     classDef out fill:#ecfdf5,stroke:#10b981,color:#022c22
-    class NSE,MAS,FRED src
+    class NSE,MAS,FRED,YF src
     class SCH,LAM,S3 aws
     class VOL dbx
     class BR bronze

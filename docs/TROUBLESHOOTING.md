@@ -120,13 +120,13 @@ inferred.
 **Fix (in the repo):** FRED bronze has an explicit schema, and Terraform writes a `_README.txt` into every
 source folder so the path always exists.
 
-### `stocks-market-close` or `stocks-trading` doesn't start when files land
+### `stocks-market-close`, `stocks-market-preopen` or `stocks-trading` doesn't start when files land
 
 **Cause:** The trigger waits until no new files have arrived in its folder (`landing/nse/` or `landing/trades/`)
-for 5 minutes (so a backfill causes one run, not hundreds), and runs at most every 15 minutes. Files in other
+for 5 minutes (`landing/premarket/`: 1 minute) (so a backfill causes one run, not hundreds), and runs at most every 15 minutes. Files in other
 folders (Massive, FRED, F&O list) don't start a job; the next market run reads them. File-arrival triggers may
 also be unavailable on some plans.
-**Fix:** Wait, or click **Run now**. If the trigger never fires, set `job_trigger = "schedule"` (20:15, and
+**Fix:** Wait, or click **Run now**. If the trigger never fires, set `job_trigger = "schedule"` (20:15, 08:50, and
 15:55/23:55 IST Mon–Fri) and deploy.
 
 ### A pipeline task fails with `QUOTA_EXCEEDED` (or "active pipeline" limit)
@@ -204,6 +204,14 @@ figure (India VIX, S&P 500, Nasdaq, Brent, USD/INR) couldn't be read. That part 
 day is never used in its place. For NSE data, check the `stocks-fetch-nse` log and the `stocks-market-close` runs;
 `stocks.gold.data_freshness` shows the day each source has.
 
+### Global markets page is not current by 09:00
+
+The 08:45 brief saves the pre-open Yahoo snapshot to `landing/premarket/` before its messages; that file starts
+`stocks-market-preopen`. Check the brief's log for `pre-open snapshot failed`, that
+`aws s3 ls s3://stocks-lakehouse-landing-<account-id>/landing/premarket/` has today's file, and the job's last run
+(it retries twice, 5 minutes apart, and then waits for the 11:15 morning run). If another pipeline was running,
+the snapshot is picked up at the next market run; FRED and Massive replace it later in the day.
+
 ### Scanner message says "⚠️ The scan for ... hasn't run" or "Scanner unavailable today"
 
 `stocks.gold.technical_screen` is behind or failed. Check that the 19:30 NSE file arrived and the `stocks-market-close` run
@@ -222,7 +230,7 @@ Saturday fundamentals run.
 ### An "In plain words" box is empty or shows plain facts instead of AI text
 **Cause:** The job's `dashboard_summary` task failed or hasn't run yet, or `ai_summarize` failed (the dashboard
 then falls back to the facts). A sentence whose data is missing is left out on purpose.
-**Fix:** Open the last run of any of the three jobs and check its `dashboard_summary` task. To rebuild now, run the job
+**Fix:** Open the last run of any of the jobs and check its `dashboard_summary` task. To rebuild now, run the job
 again; `SELECT * FROM stocks.gold.dashboard_summary` shows the facts, the AI text and when it was generated.
 
 ### No trades for a day that had trading

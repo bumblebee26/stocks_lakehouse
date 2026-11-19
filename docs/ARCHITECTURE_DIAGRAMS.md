@@ -25,7 +25,7 @@ The whole system is four stages, read left to right:
 
 | Stage | What happens | Runs on |
 |---|---|---|
-| **① Sources** | Three public data sources, plus news feeds. **NSE** publishes one file per trading day with every Indian equity (and a delivery file beside it), a weekly list of stocks with futures and options (F&O), and RSS feeds of company news (fetched every minute in market hours, every 30 minutes otherwise; Business Standard markets, RBI and SEBI are read every few minutes too). **Massive** returns one file per US trading day with every US stock and ETF (including the country ETFs used for world markets). **FRED** provides 14 global series: equity indices, exchange rates, VIX, oil and US rates. | Third parties |
+| **① Sources** | Three public data sources, plus news feeds. **NSE** publishes one file per trading day with every Indian equity (and a delivery file beside it), a weekly list of stocks with futures and options (F&O), and RSS feeds of company news (fetched every minute in market hours, every 30 minutes otherwise; Business Standard markets, RBI and SEBI are read every few minutes too). **Massive** returns one file per US trading day with every US stock and ETF (including the country ETFs used for world markets). **FRED** provides 14 global series: equity indices, exchange rates, VIX, oil and US rates. **Yahoo Finance** gives the 08:45 IST pre-open snapshot of 21 world markets (so the dashboard is current before NSE opens) and the brief's live figures. | Third parties |
 | **② Ingest** | **EventBridge** triggers a **Lambda fetcher** per source on a schedule (daily; news every minute in market hours, every 30 minutes otherwise). Each fetcher downloads the day's data, saves the untouched file in **S3** as a permanent raw archive, and **pushes** the same file into Databricks. | AWS |
 | **③ Lakehouse** | Files land in a Unity Catalog **volume**. Three pipelines (**market**, then **research**; **trading** for paper-trader's files) turn them into tables: **bronze** (raw, as delivered), **silver** (cleaned, typed, de-duplicated, India and US unified into one schema), **gold** (insights). | Databricks |
 | **④ Consume** | A **dashboard** shows the gold tables. At 08:45 IST, before the Indian market opens, two **Telegram messages**: the brief, India first (India VIX and the risk it implies, the Nifty 50's trend, world markets only as support), and the **technical scanner**'s picks from the Nifty 200. | Databricks, AWS, Telegram |
@@ -61,7 +61,7 @@ bucket, but outbound calls from Lambda are allowed.
 | `stocks-fetch-fred` | 06:00 IST Tue–Sat | The last 21 days for 14 series (late and revised values get corrected). |
 | `stocks-fetch-news` | Every minute 09:00–15:59, every 30 min otherwise (08:00–19:30) IST Mon–Fri | NSE's announcement, results, board-meeting and corporate-action feeds (plus Business Standard markets, RBI and SEBI at most every 4–5 minutes; BSE built but off) to the **news volume**: `latest.jsonl` every run, `snap_HHMM.jsonl` (+ S3 copy under `landing/news/`) at :00/:30 and when new items appear. Kept out of the landing volume so it doesn't trigger a pipeline refresh. |
 | `stocks-sync-volume` | Manual | Copies S3 files that are missing from the volume, after a backfill or a failed push. |
-| `stocks-premarket-brief` | 08:45 IST Mon–Fri | Queries gold tables, reads a few live figures from Yahoo, and sends two Telegram messages: the brief and the technical scanner. |
+| `stocks-premarket-brief` | 08:45 IST Mon–Fri | Saves a pre-open snapshot of 21 world markets from Yahoo to `landing/premarket/` (S3 and the volume), then queries gold tables, reads a few live figures from Yahoo, and sends two Telegram messages: the brief and the technical scanner. |
 
 Long backfills **continue themselves**: when a fetcher nears Lambda's 15-minute limit it re-invokes itself
 with the remaining dates, so one command can load years.
@@ -74,9 +74,9 @@ with the remaining dates, so one command can load years.
 | **2** | Source → fetcher | The fetcher downloads that day's data. API keys come from SSM at runtime. |
 | **3** | Fetcher → S3 | The raw file is written to `landing/<source>/date=YYYY-MM-DD/`. Each fetcher can only *add* files under its own prefix. |
 | **4** | Fetcher → Volume | The same file is pushed to the Databricks volume with the Files API, using a dedicated token from SSM (news goes to its own volume, read at the next refresh). |
-| **5** | Volume → Jobs | The NSE evening file starts `stocks-market-close`; paper-trader's export starts `stocks-trading` (each 5 minutes after the last file, at most every 15 minutes). `stocks-market-morning` runs at 11:15 Tue–Sat (overnight US prices) and `stocks-market-weekend` at 08:00 on Saturdays. |
+| **5** | Volume → Jobs | The NSE evening file starts `stocks-market-close`; paper-trader's export starts `stocks-trading` (each 5 minutes after the last file, at most every 15 minutes). The 08:45 pre-open snapshot starts `stocks-market-preopen` (market only, Mon–Fri); `stocks-market-morning` runs at 11:15 Tue–Sat (overnight US prices) and `stocks-market-weekend` at 08:00 on Saturdays. |
 | **6** | Jobs → Pipelines | `stocks-market` then `stocks-research` (or `stocks-trading`) refresh: Auto Loader reads only new files into bronze; silver and gold recompute. A last task runs `sql/dashboard_summary.sql` for the dashboard's "In plain words" summaries. |
-| **7** | Scheduler → brief | At 08:45 IST the brief Lambda starts. |
+| **7** | Scheduler → brief | At 08:45 IST the brief Lambda starts. It first saves the pre-open Yahoo snapshot to `landing/premarket/`, which starts `stocks-market-preopen` (step 5). |
 | **8** | Brief → SQL warehouse | It runs 4 queries on gold tables (data freshness, what usually follows a US shock, unusual volume, the technical scanner) through the SQL Statement API, and reads India VIX, the Nifty 50 and a few world figures live from Yahoo. If one fails, that section is skipped and the message says so; a source missing the day it should have is left out, never replaced by an older day. |
 | **9** | Brief → Telegram | Two messages are sent through the Telegram Bot API: the brief (takeaways, tables) and the technical scanner (strict picks with indicative levels and a Swing buy button for paper-trader). |
 | **10** | Guardian → Volume | At 15:45 IST paper-trader's guardian Lambda pushes the day's trade journal to `landing/trades/date=YYYY-MM-DD/events.jsonl` and a portfolio snapshot to `landing/portfolio/date=YYYY-MM-DD/portfolio.jsonl` with the same Files API and pusher token. Steps 5–6 then build the trading and portfolio tables. At 23:30 it re-sends the last 4 days' journals, so 👍/👎 ratings given in the evening reach `track_record` overnight. |
@@ -125,6 +125,7 @@ columns are kept as delivered, plus lineage columns (`_source_file`, `_ingested_
 - `trades_raw`: one row per paper-trader journal event (dummy money), explicit schema.
 - `portfolio_raw`, `fundamentals_raw`, `index_members_raw`: paper-trader's daily portfolio snapshot, weekly
   company financials and the Nifty 200 list, explicit schemas.
+- `premarket_raw`: the 08:45 pre-open Yahoo snapshot, one row per world market per file, explicit schema.
 - `news_raw`: one row per news item per snapshot (taken at :00 and :30 and when new items appear), read from
   the news volume.
 
@@ -135,7 +136,8 @@ columns are kept as delivered, plus lineage columns (`_source_file`, `_ingested_
   currency). Most gold tables read only this.
 - `trading_days` is each market's calendar, derived from the data.
 - `fred_daily` de-duplicates FRED; **`global_daily`** combines it with 12 US-listed country ETFs from
-  `us_daily` (listed in `country_etfs`) into one long table of world instruments.
+  `us_daily` (listed in `country_etfs`) into one long table of world instruments. `premarket_quotes` keeps the
+  08:45 Yahoo snapshot apart (newest file per market and date), so the history stays FRED and Massive only.
 - `country_etfs` and `adr_pairs` are small reference lists kept as tables, so the views that join them can
   refresh incrementally.
 - `trade_events` types the paper-trader events and keeps the newest copy of each `event_id`.
@@ -157,7 +159,7 @@ columns are kept as delivered, plus lineage columns (`_source_file`, `_ingested_
 | `unusual_volume` | daily_bars | Which stocks traded ≥ 3× their 20-day average volume? |
 | `nifty_after_us_moves` → `_summary` | daily_bars | What does India do after big US up / down / flat days? |
 | `adr_premium` | daily_bars + adr_pairs + fred_daily (USD/INR) | Are Indian ADRs rich or cheap versus their NSE shares? |
-| `global_markets_daily` → `global_snapshot` | global_daily | How did each world market move (1/5/20 days), and what's the latest? |
+| `global_markets_daily` → `global_snapshot` | global_daily (+ premarket_quotes for the snapshot) | How did each world market move (1/5/20 days), and what's the latest? The snapshot takes the newer of FRED/Massive and the 08:45 Yahoo reading |
 | `india_vs_global` | global_markets_daily + nifty_after_us_moves | Which world markets' moves line up with India's next open? |
 | **`trades`** | trade_events | Each paper trade from entry to exit: net P&L, R multiple |
 | `trading_daily` | trades + trade_events | Each day's activity and P&L, reconciled against the trader's ledger |

@@ -12,11 +12,12 @@ flowchart TB
         MAS["<b>Massive API</b><br/>grouped daily, all US tickers"]
         FREDAPI["<b>FRED API</b><br/>14 global series"]
         NSERSS["<b>News RSS feeds</b><br/>NSE filings · Business Standard · RBI · SEBI"]
+        YAHOO["<b>Yahoo Finance</b><br/>21 world markets, live"]
     end
 
     subgraph AWS["AWS account · free plan · ap-southeast-2 (Sydney)"]
         direction TB
-        SCH["<b>EventBridge Scheduler</b> (Asia/Kolkata)<br/>NSE 19:30 Mon–Fri · Massive 11:00 Tue–Sat · F&amp;O Mon 08:00<br/>FRED 06:00 Tue–Sat · Brief 08:45 Mon–Fri<br/>News every minute 09:00–15:59, every 30 min 08:00–19:30 Mon–Fri"]
+        SCH["<b>EventBridge Scheduler</b> (Asia/Kolkata)<br/>NSE 19:30 Mon–Fri · Massive 11:00 Tue–Sat · F&amp;O Mon 08:00<br/>FRED 06:00 Tue–Sat · Brief + pre-open snapshot 08:45 Mon–Fri<br/>News every minute 09:00–15:59, every 30 min 08:00–19:30 Mon–Fri"]
         subgraph LAMBDAS["Lambda functions (Python 3.13, arm64)"]
             direction LR
             FNSE["stocks-fetch-nse"]
@@ -39,10 +40,10 @@ flowchart TB
         direction TB
         VOL[("<b>Volume</b><br/>stocks.bronze.landing")]
         NVOL[("<b>News volume</b><br/>stocks.bronze.news")]
-        JOB["<b>Jobs</b><br/>market-close: NSE file → market → research<br/>market-morning: 11:15 Tue–Sat → market<br/>market-weekend: Sat 08:00 → market → research<br/>trading: trades file → trading<br/>each then the dashboard summaries"]
+        JOB["<b>Jobs</b><br/>market-close: NSE file → market → research<br/>market-preopen: 08:45 snapshot → market<br/>market-morning: 11:15 Tue–Sat → market<br/>market-weekend: Sat 08:00 → market → research<br/>trading: trades file → trading<br/>each then the dashboard summaries"]
         subgraph PIPE["Lakeflow pipelines (serverless, one runs at a time)"]
             direction LR
-            BR["<b>stocks-market</b><br/>bronze 8 · silver 12 · gold 13<br/>NSE · US · FRED · news · fundamentals"]
+            BR["<b>stocks-market</b><br/>bronze 9 · silver 13 · gold 13<br/>NSE · US · FRED · Yahoo pre-open · news · fundamentals"]
             SI["<b>stocks-research</b><br/>gold 5 (pandas)<br/>scanner · momentum ranks · signal record"]
             GO["<b>stocks-trading</b><br/>bronze 2 · silver 5 · gold 16<br/>journal · portfolio · shadows · models"]
             BR --> SI
@@ -75,12 +76,14 @@ flowchart TB
     NVOL -. "read at the next market run" .-> BR
     SYNC -. "reads" .-> S3
     SYNC -. "push missing" .-> VOL
-    VOL -- "5 · new NSE or trades file" --> JOB
+    VOL -- "5 · new NSE, pre-open or trades file" --> JOB
     JOB -- "6 · run in order" --> PIPE
     PIPE --> WH --> DASH
     SCH -- "7 · invoke" --> PM
     PM -- "8 · SQL Statement API" --> WH
     PM -- "9 · send" --> TG
+    YAHOO -- "08:45 pre-open snapshot" --> PM
+    PM -- "snapshot (S3 + Files API)" --> VOL
     GUARD -- "10 · journal + portfolio (Files API)" --> VOL
     SESS -- "11 · SQL (pre-market context)" --> WH
     NVOL -- "12 · latest.jsonl (Files API)" --> SESS
@@ -98,7 +101,7 @@ flowchart TB
     classDef gold fill:#fef9c3,stroke:#ca8a04,color:#422006
     classDef out fill:#ecfdf5,stroke:#10b981,color:#022c22
     classDef ctrl fill:#f1f5f9,stroke:#475569,color:#0f172a
-    class NSE,MAS,FREDAPI,NSERSS ext
+    class NSE,MAS,FREDAPI,NSERSS,YAHOO ext
     class SCH,FNSE,FFO,FMAS,FFRED,FNEWS,SYNC,PM aws
     class S3,SSM store
     class VOL,NVOL,JOB,WH dbx
