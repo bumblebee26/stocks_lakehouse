@@ -22,7 +22,7 @@ variable "fetchers" {
     needs_fred_key    = bool
   }))
   default = {
-    nse    = { landing_prefixes = ["nse", "nse_delivery", "nse_fo"], needs_massive_key = false, needs_fred_key = false }
+    nse    = { landing_prefixes = ["nse", "nse_delivery", "nse_fo", "nse_indices"], needs_massive_key = false, needs_fred_key = false }
     us     = { landing_prefixes = ["massive"], needs_massive_key = true, needs_fred_key = false }
     global = { landing_prefixes = ["fred"], needs_massive_key = false, needs_fred_key = true }
     news   = { landing_prefixes = ["news"], needs_massive_key = false, needs_fred_key = false }

@@ -52,6 +52,12 @@ FRESHNESS = [("nse_prices", "NSE prices", "NSE"), ("nse_delivery", "NSE delivery
 
 QUERIES = {
     "freshness": "SELECT source, CAST(latest_date AS STRING) AS latest_date FROM stocks.gold.data_freshness",
+    # India VIX from NSE's own index file (19:30 the evening before); Yahoo's ^INDIAVIX is only the backup
+    "india_vix": """
+        SELECT CAST(trade_date AS STRING) AS trade_date, close, change_pct
+        FROM stocks.silver.nse_index_daily WHERE lower(index_name) = 'india vix'
+        ORDER BY trade_date DESC LIMIT 1
+    """,
     "summary": "SELECT * FROM stocks.gold.nifty_after_us_moves_summary",
     "unusual_in": f"""
         SELECT symbol, CAST(trade_date AS STRING) AS trade_date, close, return_pct, volume_ratio
@@ -148,6 +154,20 @@ def freshness(data, expected):
         out[src] = {"label": label, "latest": got, "expected": exp,
                     "fresh": bool(got) and dt.date.fromisoformat(got[:10]) >= exp}
     return out
+
+
+def with_nse_vix(live, data):
+    """India VIX from NSE's index file (gold standard) unless Yahoo has a newer day; Yahoo only as the backup."""
+    rows = data.get("india_vix") or []
+    r = rows[0] if rows else None
+    if not r or r.get("close") is None or not r.get("trade_date"):
+        return live
+    yahoo_row = live.get("^INDIAVIX")
+    if yahoo_row and yahoo_row["date"] > r["trade_date"][:10]:
+        return live
+    change = r.get("change_pct")
+    return {**live, "^INDIAVIX": {"date": r["trade_date"][:10], "close": float(r["close"]),
+                                  "change_pct": float(change) if change is not None else 0.0, "source": "NSE"}}
 
 
 def fresh_live(live, sym, expected_day):
@@ -328,7 +348,7 @@ def build_brief(data, live, expected, fresh, today, failed=()):
             lines.append("None above the threshold.")
         lines.append("")
 
-    lines.append("<i>Sources: NSE (bhavcopy), Yahoo Finance (live quotes, market calendars). "
+    lines.append("<i>Sources: NSE (bhavcopy, India VIX), Yahoo Finance (live quotes, market calendars). "
                  "Tendencies and indicative figures, not advice.</i>")
     return "\n".join(lines)
 
@@ -432,6 +452,7 @@ def handler(event, context):
     snap = save_snapshot(now, bool(event.get("dry_run")))
     data, failed = fetch_all(QUERIES)
     sessions, live = fetch_live(today)
+    live = with_nse_vix(live, data)
     expected = expected_dates(today, sessions)
     fresh = freshness(data, expected)
     brief = build_brief(data, live, expected, fresh, today, failed)
