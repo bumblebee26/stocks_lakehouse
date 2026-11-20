@@ -629,7 +629,7 @@ def custom_trades():
 # Shadow results for the dashboard: what other rules and the shadow models would have done (paper only)
 # ---------------------------------------------------------------------------
 SHADOW_RULE_WORDS = {
-    "current": "current rules", "breakeven": "stop to entry at +1R", "half_and_run": "sell half at +1R",
+    "current": "stop and target only (no early exit)", "breakeven": "stop to entry at +1R", "half_and_run": "sell half at +1R",
     "trailing": "trailing stop", "time_stop": "60-minute time stop", "no_stop": "no stop",
     "wide_1_5": "stop 1.5x wider, same Rs risk", "wide_2": "stop 2x wider, same Rs risk",
     "close_stop": "stop on a 5-min close", "filter": "model: trade filter", "vol_stop": "model: volatility stop",
@@ -641,6 +641,7 @@ SHADOW_RULE_WORDS = {
     "orb15_1_5r": "15-min range, 1.5R target", "orb15_level": "15-min range, target at yesterday's high/low",
     "orb5_retest": "5-min range, wait for the retest", "orb15_retest": "15-min range, wait for the retest",
     "skip_stretched": "skip stretched breakouts",
+    "early_any": "early exit on any close past the line", "early_strict": "early exit on a real break (live from 20 Nov)",
 }
 
 def _rule_label():
