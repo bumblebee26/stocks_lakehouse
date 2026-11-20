@@ -182,6 +182,34 @@ locals {
       ORDER BY total_rs DESC
     SQL
 
+    # Auto-bar ladder and score-sized trades (paper, from 21 Nov): every proposal with a known outcome (placed: the
+    # real result; skipped: what it would have made) at each bar, and sized 0.5x / 1x / 1.5x by its suggestion.
+    intra_bar_ladder = <<-SQL
+      WITH o AS (SELECT suggested_yes_pct AS pct, outcome_rs FROM stocks.gold.proposal_outcomes
+                 WHERE outcome_rs IS NOT NULL AND suggested_yes_pct IS NOT NULL
+                   AND trade_date >= (SELECT min(trade_date) FROM stocks.gold.trading_daily)),
+           bars AS (SELECT explode(array(50, 55, 60, 65, 70)) AS bar)
+      SELECT concat('Take every proposal over ', bar, '%') AS version, CAST(count(o.pct) AS INT) AS trades,
+             round(coalesce(sum(o.outcome_rs), 0), 0) AS total_rs,
+             round(100 * avg(CASE WHEN o.outcome_rs > 0 THEN 1.0 ELSE 0.0 END), 0) AS won_pct
+      FROM bars LEFT JOIN o ON o.pct > bars.bar GROUP BY bar
+      UNION ALL
+      SELECT 'Sized by score (0.5x 55-59%, 1x 60-69%, 1.5x 70%+)' AS version, CAST(count(*) AS INT) AS trades,
+             round(sum(outcome_rs * CASE WHEN pct >= 70 THEN 1.5 WHEN pct >= 60 THEN 1.0 ELSE 0.5 END), 0) AS total_rs,
+             round(100 * avg(CASE WHEN outcome_rs > 0 THEN 1.0 ELSE 0.0 END), 0) AS won_pct
+      FROM o WHERE pct >= 55
+      ORDER BY version
+    SQL
+
+    # Paper fills against the real 1-minute candle of the fill minute (paper-trader fill_check rows, from 21 Nov).
+    intra_fill_check = <<-SQL
+      WITH f AS (SELECT trade_date, symbol, side, str_to_map(note, ';', '=') AS kv FROM stocks.silver.trade_events
+                 WHERE event = 'fill_check' AND trade_date >= (SELECT min(trade_date) FROM stocks.gold.trading_daily))
+      SELECT trade_date, symbol, side, CAST(kv['worse_bps'] AS DOUBLE) AS paper_worse_bps,
+             CASE kv['inside'] WHEN '1' THEN 'yes' WHEN '1.0' THEN 'yes' ELSE 'no' END AS inside_minute_range
+      FROM f ORDER BY trade_date DESC, symbol
+    SQL
+
     intraday_curve = <<-SQL
       SELECT trade_date, round(total_pnl_since_start_rs, 0) AS total_pnl_rs,
              round(total_pnl_since_start_rs - max(total_pnl_since_start_rs) OVER (ORDER BY trade_date), 0) AS below_peak_rs
@@ -657,6 +685,8 @@ locals {
       intraday_kpis        = ["trades", "net_pnl_rs", "win_rate_pct", "profit_factor", "expectancy_r", "win_loss_ratio"]
       intra_lines          = ["trade_date", "line", "kind", "total_rs"]
       intra_board          = ["rule", "kind", "trades", "total_rs", "vs_real_rs", "beat_real_pct"]
+      intra_bar_ladder     = ["version", "trades", "total_rs", "won_pct"]
+      intra_fill_check     = ["trade_date", "symbol", "side", "paper_worse_bps", "inside_minute_range"]
       intraday_curve       = ["trade_date", "total_pnl_rs", "below_peak_rs"]
       intraday_daily_pnl   = ["trade_date", "day_pnl_rs", "result"]
       intraday_setup_chart = ["setup", "net_pnl_rs", "win_rate_pct"]
@@ -835,6 +865,8 @@ locals {
       intra_recent      = { ds = "trading_recent", title = "Latest trades", desc = "Since 18 Nov, newest first.", pos = [0, 25, 12, 7] }
       intra_bt_table    = { ds = "backtest_latest", title = "Backtest details (latest run)", desc = "All rules on the same setups. Worst day = the worst single day's total.", pos = [0, 39, 12, 6] }
       intra_shadow_list = { ds = "shadow_trades_recent", title = "Your trades under other rules (last 14 days)", desc = "Every real trade, what happened, and what each rule or model would have made.", pos = [0, 45, 12, 6] }
+      intra_ladder      = { ds = "intra_bar_ladder", title = "Auto bar and sizing, on every proposal (since 18 Nov)", desc = "Placed trades count as they happened; skipped ones as they would have. Today's bar is 60% (+5 for losing groups).", pos = [0, 55, 6, 6] }
+      intra_fills       = { ds = "intra_fill_check", title = "Paper fills vs the real minute", desc = "Positive bps = the paper fill was worse than that minute's close (stricter than the market).", pos = [6, 55, 6, 6] }
       summary_intraday  = { ds = "summary_intraday", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 51, 12, 4] }
       swing_board       = { ds = "swing_scoreboard", title = "Scoreboard", desc = "Return since each started; vs NIFTYBEES over the same days.", pos = [0, 13, 6, 7] }
       swing_hold        = { ds = "swing_holdings", title = "What each one holds now", desc = "Real pool and shadow pools (paper).", pos = [6, 13, 6, 7] }
@@ -936,6 +968,7 @@ locals {
           local.text.intra_tests, local.chart.intra_backtest, local.chart.intra_bt_trend,
           local.table_widget.intra_bt_table, local.table_widget.intra_shadow_list,
           local.table_widget.summary_intraday,
+          local.table_widget.intra_ladder, local.table_widget.intra_fills,
         ]
       },
       {
