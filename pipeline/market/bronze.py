@@ -19,6 +19,7 @@ _rescued_data instead (schemaEvolutionMode = rescue).
   stocks.bronze.fundamentals_raw             company financials (Saturday)
   stocks.bronze.index_members_raw            Nifty 200 lists
   stocks.bronze.nse_delivery_raw             NSE delivery file
+  stocks.bronze.nse_indices_raw              NSE index closes (India VIX included)
   stocks.bronze.nse_fo_raw                   NSE F&O stock list
   stocks.bronze.premarket_raw                pre-open world-markets snapshot (Yahoo, 08:45 IST Mon-Fri)
 Tables of the research and trading pipelines are never defined here; the three pipelines never run at
@@ -301,6 +302,29 @@ def nse_delivery_raw():
         .option("cloudFiles.partitionColumns", "")
         .schema(DELIVERY_SCHEMA)
         .load(f"{LANDING}/nse_delivery/")
+    )
+
+# NSE index closes (ind_close_all, cleaned by the NSE Lambda), India VIX included.
+# SQL equivalent:
+#   CREATE OR REFRESH STREAMING TABLE stocks.bronze.nse_indices_raw AS
+#   SELECT *, <lineage columns> FROM STREAM read_files('/Volumes/stocks/bronze/landing/nse_indices/',
+#     format => 'json', pathGlobFilter => '*.jsonl', schema => '<INDICES_SCHEMA below>');
+INDICES_SCHEMA = "index_name STRING, open DOUBLE, high DOUBLE, low DOUBLE, close DOUBLE, change_pct DOUBLE"
+
+@dp.table(
+    name="stocks.bronze.nse_indices_raw",
+    comment="Raw NSE index closes per day (every NSE index, India VIX included).",
+    table_properties={"quality": "bronze"},
+)
+def nse_indices_raw():
+    return with_lineage(
+        spark.readStream.format("cloudFiles")  # noqa: F821
+        .option("cloudFiles.format", "json")
+        .option("pathGlobFilter", "*.jsonl")
+        .option("rescuedDataColumn", "_rescued_data")
+        .option("cloudFiles.partitionColumns", "")
+        .schema(INDICES_SCHEMA)
+        .load(f"{LANDING}/nse_indices/")
     )
 
 @dp.table(

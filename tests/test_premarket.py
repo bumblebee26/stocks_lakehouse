@@ -277,5 +277,18 @@ class TelegramSend(unittest.TestCase):
         self.assertEqual(body["reply_markup"]["inline_keyboard"][0][0]["callback_data"], "sw:ABC:1.00:2.00")
 
 
+
+class NseVix(unittest.TestCase):
+    def test_nse_wins_and_yahoo_is_backup(self):
+        data = {"india_vix": [{"trade_date": "2026-11-19", "close": 14.85, "change_pct": 4.58}]}
+        live = premarket.with_nse_vix({}, data)
+        self.assertEqual(live["^INDIAVIX"], {"date": "2026-11-19", "close": 14.85, "change_pct": 4.58,
+                                             "source": "NSE"})
+        yahoo = {"^INDIAVIX": {"date": "2026-11-18", "close": 14.2, "change_pct": 1.0}}
+        self.assertEqual(premarket.with_nse_vix(yahoo, data)["^INDIAVIX"]["source"], "NSE")   # NSE newer or same day
+        newer = {"^INDIAVIX": {"date": "2026-11-20", "close": 15.0, "change_pct": 1.0}}
+        self.assertEqual(premarket.with_nse_vix(newer, data), newer)
+        self.assertEqual(premarket.with_nse_vix(yahoo, {}), yahoo)                             # no NSE row: Yahoo
+
 if __name__ == "__main__":
     unittest.main()

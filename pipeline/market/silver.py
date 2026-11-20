@@ -19,6 +19,7 @@ Data-quality expectations drop bad rows and report counts in the pipeline UI.
   stocks.silver.fundamentals                 company financials, one row per symbol x metric x period (newest fetch wins)
   stocks.silver.index_members                the latest Nifty 200 list: symbol, company, industry
   stocks.silver.nse_delivery                 delivery % per NSE stock per day
+  stocks.silver.nse_index_daily              every NSE index's close per day (India VIX included)
   stocks.silver.fno_symbols                  the latest NSE F&O stock list (with its date)
 
 Tables of the research and trading pipelines are never defined here; the three pipelines never run at
@@ -487,6 +488,25 @@ def nse_delivery():
             .select("trade_date", F.trim("symbol").alias("symbol"), F.trim("series").alias("series"),
                     "deliv_qty", "deliv_per")
             .dropDuplicates(["trade_date", "symbol", "series"]))
+
+# SQL equivalent:
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.silver.nse_index_daily AS
+#   SELECT trade_date, trim(index_name) AS index_name, open, high, low, close, change_pct
+#   FROM (SELECT *, row_number() OVER (PARTITION BY trade_date, trim(index_name)
+#                                      ORDER BY _file_modified_at DESC) AS rn FROM stocks.bronze.nse_indices_raw)
+#   WHERE rn = 1;
+@dp.materialized_view(
+    name="stocks.silver.nse_index_daily",
+    comment="Every NSE index's day from NSE's own index file (India VIX included): open, high, low, close and "
+            "change %. The trader sets its risk per trade from India VIX here, Yahoo only as a backup.",
+    table_properties={"quality": "silver"},
+)
+@dp.expect_or_drop("has_keys", "trade_date IS NOT NULL AND index_name IS NOT NULL AND close IS NOT NULL")
+def nse_index_daily():
+    raw = spark.read.table("stocks.bronze.nse_indices_raw").withColumn("index_name", F.trim("index_name"))  # noqa: F821
+    return latest_file_wins(raw.select("trade_date", "index_name", "open", "high", "low", "close", "change_pct",
+                                       "_source_file", "_file_modified_at"),
+                            ["trade_date", "index_name"]).drop("_source_file", "_file_modified_at")
 
 @dp.materialized_view(
     name="stocks.silver.fno_symbols",

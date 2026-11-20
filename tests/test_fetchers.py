@@ -101,6 +101,25 @@ class NseFetch(unittest.TestCase):
         self.assertEqual(out["results"][0]["delivery"], "written (1 rows)")
         self.assertEqual(self.s3.puts[1]["Key"], "landing/nse_delivery/date=2026-11-06/delivery_20261106.jsonl")
 
+    def test_index_file(self):
+        csv_text = ("Index Name,Index Date,Open Index Value,High Index Value,Low Index Value,Closing Index Value,"
+                    "Points Change,Change(%),Volume,Turnover (Rs. Cr.),P/E,P/B,Div Yield\n"
+                    "Nifty 50,19-11-2026,\"26,100.50\",\"26,210.00\",\"26,050.25\",\"26,180.75\",80.25,0.31,-,-,22.1,3.5,1.2\n"
+                    "India VIX,19-11-2026,14.20,15.10,13.90,14.85,0.65,4.58,-,-,-,-,-\n"
+                    "Broken,19-11-2026,-,-,-,-,-,-,-,-,-,-,-\n")
+        rows = nse.parse_indices(csv_text)
+        self.assertEqual(rows[0], {"index_name": "Nifty 50", "open": 26100.5, "high": 26210.0, "low": 26050.25,
+                                   "close": 26180.75, "change_pct": 0.31})
+        self.assertEqual(rows[1]["close"], 14.85)
+        self.assertEqual(len(rows), 2)                                   # no close: dropped
+        bodies = {"cm": b"PK\x03\x04data", "ind": csv_text.encode(), "sec": b""}
+        with mock.patch.object(nse, "http_get",
+                               side_effect=lambda url, h: bodies["ind" if "ind_close" in url else
+                                                                 "sec" if "sec_" in url else "cm"]):
+            out = nse.handler({"date": "2026-11-19"}, None)
+        self.assertEqual(out["results"][0]["indices"], "written (2 rows, India VIX 14.85)")
+        self.assertIn("landing/nse_indices/date=2026-11-19/indices_20261119.jsonl", [p["Key"] for p in self.s3.puts])
+
     def test_fno_list(self):
         import nse_fo
         text = ("UNDERLYING                    ,SYMBOL    ,NOV-26,DEC-26\n"
