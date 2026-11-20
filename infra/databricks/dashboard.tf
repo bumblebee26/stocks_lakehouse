@@ -201,6 +201,19 @@ locals {
       ORDER BY version
     SQL
 
+    # Selector (paper, from 23 Nov): what its daily picks made vs the fixed rules, per family, and its latest picks.
+    intra_selector = <<-SQL
+      WITH s AS (SELECT trade_date, reasons, str_to_map(note, ';', '=') AS kv FROM stocks.silver.trade_events
+                 WHERE event = 'selector'),
+           fam AS (SELECT explode(array('exit', 'bar', 'entry')) AS family),
+           latest AS (SELECT reasons FROM s ORDER BY trade_date DESC LIMIT 1)
+      SELECT fam.family, CAST(count(s.trade_date) AS INT) AS days,
+             round(sum(CAST(s.kv[concat(fam.family, '_rs')] AS DOUBLE)), 0) AS selector_rs,
+             round(sum(CAST(s.kv[concat(fam.family, '_fixed_rs')] AS DOUBLE)), 0) AS fixed_rs,
+             regexp_extract((SELECT reasons FROM latest), concat(fam.family, ': [^|]*'), 0) AS latest_pick
+      FROM fam LEFT JOIN s ON true GROUP BY fam.family ORDER BY fam.family
+    SQL
+
     # Paper fills against the real 1-minute candle of the fill minute (paper-trader fill_check rows, from 21 Nov).
     intra_fill_check = <<-SQL
       WITH f AS (SELECT trade_date, symbol, side, str_to_map(note, ';', '=') AS kv FROM stocks.silver.trade_events
@@ -687,6 +700,7 @@ locals {
       intra_board          = ["rule", "kind", "trades", "total_rs", "vs_real_rs", "beat_real_pct"]
       intra_bar_ladder     = ["version", "trades", "total_rs", "won_pct"]
       intra_fill_check     = ["trade_date", "symbol", "side", "paper_worse_bps", "inside_minute_range"]
+      intra_selector       = ["family", "days", "selector_rs", "fixed_rs", "latest_pick"]
       intraday_curve       = ["trade_date", "total_pnl_rs", "below_peak_rs"]
       intraday_daily_pnl   = ["trade_date", "day_pnl_rs", "result"]
       intraday_setup_chart = ["setup", "net_pnl_rs", "win_rate_pct"]
@@ -867,6 +881,7 @@ locals {
       intra_shadow_list = { ds = "shadow_trades_recent", title = "Your trades under other rules (last 14 days)", desc = "Every real trade, what happened, and what each rule or model would have made.", pos = [0, 45, 12, 6] }
       intra_ladder      = { ds = "intra_bar_ladder", title = "Auto bar and sizing, on every proposal (since 18 Nov)", desc = "Placed trades count as they happened; skipped ones as they would have. Today's bar is 60% (+5 for losing groups).", pos = [0, 55, 6, 6] }
       intra_fills       = { ds = "intra_fill_check", title = "Paper fills vs the real minute", desc = "Positive bps = the paper fill was worse than that minute's close (stricter than the market).", pos = [6, 55, 6, 6] }
+      intra_select      = { ds = "intra_selector", title = "Selector (paper): picks tomorrow's version from the last 20 days", desc = "Each day scored on results it couldn't see when it picked. Beats the fixed rules for weeks = worth a review; until then it is luck.", pos = [0, 61, 12, 5] }
       summary_intraday  = { ds = "summary_intraday", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 51, 12, 4] }
       swing_board       = { ds = "swing_scoreboard", title = "Scoreboard", desc = "Return since each started; vs NIFTYBEES over the same days.", pos = [0, 13, 6, 7] }
       swing_hold        = { ds = "swing_holdings", title = "What each one holds now", desc = "Real pool and shadow pools (paper).", pos = [6, 13, 6, 7] }
@@ -969,6 +984,7 @@ locals {
           local.table_widget.intra_bt_table, local.table_widget.intra_shadow_list,
           local.table_widget.summary_intraday,
           local.table_widget.intra_ladder, local.table_widget.intra_fills,
+          local.table_widget.intra_select,
         ]
       },
       {
