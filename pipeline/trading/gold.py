@@ -642,6 +642,7 @@ SHADOW_RULE_WORDS = {
     "orb5_retest": "5-min range, wait for the retest", "orb15_retest": "15-min range, wait for the retest",
     "skip_stretched": "skip stretched breakouts",
     "open_2r": "09:15 opening buy, 2R target", "open_eod": "09:15 opening buy, held to 15:10",
+    "fade_2r": "gap fade short, 2R target", "fade_eod": "gap fade short, held to 15:10",
     "early_any": "early exit on any close past the line", "early_strict": "early exit on a real break (live from 20 Nov)",
 }
 
