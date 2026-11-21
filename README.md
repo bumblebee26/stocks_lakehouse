@@ -54,14 +54,14 @@ market breadth, unusual volume, Indian ADR premium vs USD/INR, and a global mark
 | every minute 09:00–15:59, every 30 min otherwise (08:00–19:30) Mon–Fri | Company news: NSE (announcements, results, board meetings, corporate actions) every run; Business Standard markets, RBI and SEBI press releases at most every 4–5 minutes; BSE announcements built but off (`bse_news_enabled`) |
 | 08:45 Mon–Fri | Pre-market brief and the technical scanner to Telegram (India first; US figures live from Yahoo). First the brief saves a pre-open snapshot of 21 world markets from Yahoo to `landing/premarket/` |
 | 15:45 Mon–Fri | paper-trader pushes the day's trade journal to `landing/trades/` and a portfolio snapshot to `landing/portfolio/` |
-| 19:30 Mon–Fri | NSE: today's equities bhavcopy and delivery file |
+| 19:30 Mon–Fri | NSE: today's equities bhavcopy, delivery file and index file (every NSE index, India VIX included) |
 | 23:30 Mon–Fri | paper-trader re-sends the last 4 days' journals, so evening 👍/👎 ratings (`gold.rating_review`) and the 16:10 shadow-model results (`gold.model_backtest`, `gold.shadow_rules_*`) arrive overnight |
 | 07:15 Sat | paper-trader pushes company financials to `landing/fundamentals/` and NSE's Nifty 200 list to `landing/index_members/` |
 
 ## Repository layout
 
 ```
-fetchers/          Lambda code: nse (+ delivery), nse_fo, massive, fred, news, sync, premarket (+ snapshot), yahoo (+ shared helpers). Python stdlib + boto3 only.
+fetchers/          Lambda code: nse (+ delivery, indices), nse_fo, massive, fred, news, sync, premarket (+ snapshot), yahoo (+ shared helpers). Python stdlib + boto3 only.
 pipeline/          Lakeflow pipelines in Python, SQL equivalents in comments:
   market/          bronze.py, silver.py, gold.py: market data in, cleaned, light summaries (37 tables)
   research/        gold.py: technical scanner, momentum ranks, signal record, data freshness (5 tables, pandas)

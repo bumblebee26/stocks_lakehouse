@@ -10,6 +10,7 @@ flowchart LR
         direction TB
         LN["nse/*.csv"]
         LD["nse_delivery/*.jsonl"]
+        LX["nse_indices/*.jsonl<br/><i>India VIX</i>"]
         LO["nse_fo/*.jsonl<br/><i>F&amp;O list, Mondays</i>"]
         LM["massive/*.json"]
         LF["fred/*.json"]
@@ -34,6 +35,7 @@ flowchart LR
         B9["nse_delivery_raw"]
         B10["nse_fo_raw"]
         B11["premarket_raw"]
+        B12["nse_indices_raw"]
     end
 
     subgraph S["🥈 Silver · materialized views"]
@@ -57,6 +59,7 @@ flowchart LR
         S17["fno_symbols<br/><i>latest F&amp;O list</i>"]
         S18["shadow_holdings<br/><i>what the paper pools hold</i>"]
         S19["premarket_quotes<br/><i>pre-open Yahoo snapshot</i>"]
+        S20["<b>nse_index_daily</b><br/><i>India VIX, read by brief + paper-trader</i>"]
     end
 
     subgraph G["🥇 Gold · materialized views"]
@@ -145,6 +148,7 @@ flowchart LR
     S12 --> G22
     LD --> B9 --> S16
     LO --> B10 --> S17
+    LX --> B12 --> S20
     S1 --> G24
     S11 --> G24
     G24 --> G25
@@ -167,7 +171,7 @@ flowchart LR
     classDef bronze fill:#f5e6d3,stroke:#b45309,color:#451a03
     classDef silver fill:#eef2f6,stroke:#64748b,color:#0f172a
     classDef gold fill:#fef9c3,stroke:#ca8a04,color:#422006
-    class LN,LD,LO,LM,LF,LY,LT,LP,LU,LI,LW land
-    class B1,B2,B3,B4,B5,B6,B7,B8,B9,B10,B11 bronze
-    class S1,S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12,S13,S14,S15,S16,S17,S18,S19 silver
+    class LN,LD,LX,LO,LM,LF,LY,LT,LP,LU,LI,LW land
+    class B1,B2,B3,B4,B5,B6,B7,B8,B9,B10,B11,B12 bronze
+    class S1,S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12,S13,S14,S15,S16,S17,S18,S19,S20 silver
     class G1,G2,G3,G4,G5,G6,G7,G8,G9,G10,G11,G12,G13,G14,G15,G16,G17,G18,G19,G20,G21,G22,G23,G24,G25,G26,G27,G28,G29,G30,G31,G32,G33 gold
