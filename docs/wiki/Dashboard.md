@@ -12,3 +12,9 @@ Six pages, the same order on each: tiles → main chart → breakdowns → detai
 | Global markets | Pre-open read: US close, Asia live, rupee, crude, yields, VIX, breadth; which moves line up with India's open |
 
 Money tables count from the 18 Nov 2026 reset; history tables keep everything.
+
+## On your phone
+The same numbers as a mobile app (`app/`): Desk (with the day's story), Intraday, Swing, Long term and Markets
+tabs, refreshed a few minutes after each Databricks job (about 09:10, 11:40, 16:15, 20:30, 23:55, Sat 08:45 IST).
+The link is the CloudFront address plus a secret path, stored in AWS Systems Manager → Parameter Store →
+`/stocks/desk-app-url` (Show decrypted value). Open it on the phone and use "Add to Home Screen".
