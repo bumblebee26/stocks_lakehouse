@@ -14,3 +14,9 @@ variable "noncurrent_version_expiration_days" {
   type        = number
   default     = 30
 }
+
+variable "extra_policy_json" {
+  description = "Optional extra bucket-policy statements (JSON policy document), merged with the TLS-only deny."
+  type        = string
+  default     = null
+}
