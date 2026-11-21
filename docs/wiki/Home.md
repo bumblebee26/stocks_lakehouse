@@ -1,5 +1,7 @@
 # stocks_lakehouse wiki
 
+📝 Project write-up on LinkedIn: <https://lnkd.in/p/deDTKYeT>
+
 The **research desk** behind [paper-trader](https://github.com/bumblebee26/paper-trader): AWS Lambdas fetch market
 data on schedules, three Databricks pipelines turn it into bronze → silver → gold tables, and a dashboard, an 08:45
 Telegram brief and a technical scanner read from them. The paper trader reads the gold tables before every session

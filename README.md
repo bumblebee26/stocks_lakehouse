@@ -1,5 +1,7 @@
 # stocks-lakehouse
 
+📝 Project write-up on LinkedIn: <https://lnkd.in/p/deDTKYeT>
+
 A multi-market stock lakehouse on **AWS + Databricks**, built on a **medallion architecture**
 (bronze → silver → gold), fully deployed with **Terraform** and **GitHub Actions**.
 
