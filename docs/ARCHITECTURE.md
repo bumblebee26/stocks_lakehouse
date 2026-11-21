@@ -17,7 +17,7 @@ snapshot back at 15:45 IST, and sends company financials every Saturday. How the
 
 | Component | What it does |
 |---|---|
-| **Fetcher Lambdas** | One per source (NSE bhavcopy + delivery, NSE F&O list, Massive, FRED, news). Download one day (or a date range) and write the raw file to S3, then push the same file to the Databricks volume. NSE zips are unzipped on the way into the volume. |
+| **Fetcher Lambdas** | One per source (NSE bhavcopy + delivery + index file, NSE F&O list, Massive, FRED, news). Download one day (or a date range) and write the raw file to S3, then push the same file to the Databricks volume. NSE zips are unzipped on the way into the volume. |
 | **S3 landing bucket** | The permanent, untouched raw archive. Private, encrypted, versioned, HTTPS-only. |
 | **Databricks volume** | The copy the pipeline reads. Same folder layout as S3. |
 | **News volume** | `/Volumes/stocks/bronze/news/`: the news Lambda writes `latest.jsonl` (read directly by paper-trader) every minute 09:00–15:59 IST and every 30 minutes otherwise (08:00–19:30), plus a snapshot at :00/:30 and when new items appear. Kept out of the landing volume so news doesn't trigger a pipeline run each time; `stocks-market` picks it up at its next run. |
@@ -76,7 +76,7 @@ undone and removes the spend limit.
 | Identity | Can | Cannot |
 |---|---|---|
 | You (`aws login` → `AccountFullAccessRole`) | Everything in the project | — |
-| `stocks-fetch-nse-role` | `PutObject` to `landing/nse/*`, `landing/nse_delivery/*`, `landing/nse_fo/*`, read Databricks push config | Read/list/delete S3, other prefixes |
+| `stocks-fetch-nse-role` | `PutObject` to `landing/nse/*`, `landing/nse_delivery/*`, `landing/nse_fo/*`, `landing/nse_indices/*`, read Databricks push config | Read/list/delete S3, other prefixes |
 | `stocks-fetch-us-role` | `PutObject` to `landing/massive/*`, read Massive key + push config | Same |
 | `stocks-fetch-global-role` | `PutObject` to `landing/fred/*`, read FRED key + push config | Same |
 | `stocks-fetch-news-role` | `PutObject` to `landing/news/*`, read push config | Same |

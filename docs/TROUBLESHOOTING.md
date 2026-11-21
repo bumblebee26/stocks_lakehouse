@@ -200,7 +200,10 @@ outright: a missing table only drops its section, and the message says "⚠️ U
 ### Message says "⚠️ ... hasn't arrived ... left out" or "⚠️ Not available this morning: ..."
 
 A source doesn't have the day it should have (NSE prices, NSE delivery % or the scanner), or a live Yahoo
-figure (India VIX, S&P 500, Nasdaq, Brent, USD/INR) couldn't be read. That part is left out on purpose; an older
+figure (S&P 500, Nasdaq, Brent, USD/INR) couldn't be read. India VIX comes from NSE's own index file
+(`stocks.silver.nse_index_daily`) first and Yahoo only as the backup; if neither has the last session, it is left
+out and paper-trader uses its cautious risk (0.75%). The NSE log line `written (N rows, India VIX ...)` shows
+whether the index file and India VIX landed. That part is left out on purpose; an older
 day is never used in its place. For NSE data, check the `stocks-fetch-nse` log and the `stocks-market-close` runs;
 `stocks.gold.data_freshness` shows the day each source has.
 
