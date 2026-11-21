@@ -3,7 +3,7 @@
 # Source code lives in ../../pipeline/<pipeline>/*.py and is uploaded to your workspace home folder, so
 # `terraform apply` after a code change redeploys it.
 #
-#   market    market data in, cleaned, and the light market summaries (35 tables)
+#   market    market data in, cleaned, and the light market summaries (37 tables)
 #   research  the heavy daily research: technical scanner, momentum ranks, signal record (5 tables, pandas)
 #   trading   the paper-trader's journal and portfolio exports and everything built on them (23 tables)
 #
