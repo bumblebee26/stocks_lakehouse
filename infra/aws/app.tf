@@ -101,10 +101,11 @@ resource "aws_cloudfront_function" "app_path" {
 }
 
 resource "aws_cloudfront_distribution" "app" {
-  enabled         = true
-  comment         = "NSE Paper Trading Desk mobile app"
-  price_class     = "PriceClass_200" # includes India
-  is_ipv6_enabled = true
+  enabled             = true
+  comment             = "NSE Paper Trading Desk mobile app"
+  price_class         = "PriceClass_200" # includes India
+  is_ipv6_enabled     = true
+  default_root_object = "index.html"
 
   origin {
     domain_name              = "${local.app_bucket_name}.s3.${var.aws_region}.amazonaws.com"
@@ -113,12 +114,13 @@ resource "aws_cloudfront_distribution" "app" {
   }
 
   default_cache_behavior {
-    target_origin_id       = "app"
-    viewer_protocol_policy = "redirect-to-https"
-    allowed_methods        = ["GET", "HEAD"]
-    cached_methods         = ["GET", "HEAD"]
-    compress               = true
-    cache_policy_id        = "83da9c7e-98b4-4e11-a168-04f0df8e2c65" # managed: UseOriginCacheControlHeaders
+    target_origin_id           = "app"
+    viewer_protocol_policy     = "redirect-to-https"
+    allowed_methods            = ["GET", "HEAD"]
+    cached_methods             = ["GET", "HEAD"]
+    compress                   = true
+    cache_policy_id            = "83da9c7e-98b4-4e11-a168-04f0df8e2c65" # managed: UseOriginCacheControlHeaders
+    response_headers_policy_id = "67f7725c-6f97-4210-82d7-5512b31e9d03" # managed: SecurityHeadersPolicy
 
     function_association {
       event_type   = "viewer-request"
