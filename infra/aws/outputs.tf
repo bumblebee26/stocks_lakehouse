@@ -28,8 +28,3 @@ output "fetcher_function_names" {
 output "schedules_enabled" {
   value = var.schedules_enabled
 }
-
-output "desk_app_url_parameter" {
-  description = "SSM parameter holding the desk mobile app's link (SecureString)."
-  value       = aws_ssm_parameter.app_url.name
-}
