@@ -1,5 +1,5 @@
 """MARKET pipeline (stocks-market): market data in, cleaned, and the light market summaries. Runs after the NSE evening
-file (job stocks-market-close, then the research pipeline), after the 08:45 IST pre-open snapshot Mon-Fri (job
+file (job stocks-market-close, then the research pipeline), after the 08:30 IST pre-open snapshot Mon-Fri (job
 stocks-market-preopen), at 11:15 IST Tue-Sat (job stocks-market-morning: US prices, FRED, the F&O list) and on
 Saturday at 08:00 (job stocks-market-weekend: fundamentals, the Nifty 200 list).
 
@@ -340,7 +340,7 @@ def global_daily():
     return fred.select(*GLOBAL_COLUMNS).unionByName(etfs.select(*GLOBAL_COLUMNS))
 
 # ---------------------------------------------------------------------------
-# Pre-open snapshot (Yahoo, 08:45 IST Mon-Fri), de-duplicated: the newest file wins per instrument and date
+# Pre-open snapshot (Yahoo, 08:30 IST Mon-Fri), de-duplicated: the newest file wins per instrument and date
 # ---------------------------------------------------------------------------
 # Kept apart from global_daily, so the history (and india_vs_global) stays FRED and Massive only; the dashboard
 # reads it through gold.global_snapshot, which takes the newer reading per instrument.
@@ -358,7 +358,7 @@ def global_daily():
 #         FROM stocks.bronze.premarket_raw) WHERE rn = 1;
 @dp.materialized_view(
     name="stocks.silver.premarket_quotes",
-    comment="Pre-open world-markets snapshot from Yahoo (08:45 IST Mon-Fri), one row per instrument per date: "
+    comment="Pre-open world-markets snapshot from Yahoo (08:30 IST Mon-Fri), one row per instrument per date: "
             "value, Yahoo's own 1/5/20-session changes, and reading = live (session still trading) or close.",
     table_properties={"quality": "silver"},
 )

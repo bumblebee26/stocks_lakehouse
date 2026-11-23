@@ -58,7 +58,7 @@ variable "pipeline_development_mode" {
 }
 
 variable "job_trigger" {
-  description = "How the market-close, market-preopen and trading jobs start: \"file_arrival\" (when their files land in the volume) or \"schedule\" (fixed times: 20:15, 08:50, and 15:55/23:55 IST Mon-Fri)."
+  description = "How the market-close, market-preopen and trading jobs start: \"file_arrival\" (when their files land in the volume) or \"schedule\" (fixed times: 20:15, 08:35, and 15:55/23:55 IST Mon-Fri)."
   type        = string
   default     = "file_arrival"
 

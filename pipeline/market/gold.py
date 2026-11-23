@@ -1,5 +1,5 @@
 """MARKET pipeline (stocks-market): market data in, cleaned, and the light market summaries. Runs after the NSE evening
-file (job stocks-market-close, then the research pipeline), after the 08:45 IST pre-open snapshot Mon-Fri (job
+file (job stocks-market-close, then the research pipeline), after the 08:30 IST pre-open snapshot Mon-Fri (job
 stocks-market-preopen), at 11:15 IST Tue-Sat (job stocks-market-morning: US prices, FRED, the F&O list) and on
 Saturday at 08:00 (job stocks-market-weekend: fundamentals, the Nifty 200 list).
 
@@ -361,10 +361,10 @@ def global_markets_daily():
         .withColumn("change_20d_pct", (F.col("value") / F.lag("value", 20).over(w) - 1) * 100)
     )
 
-# Latest reading per instrument: the newest of FRED/Massive (global_markets_daily) and the 08:45 IST Yahoo snapshot
+# Latest reading per instrument: the newest of FRED/Massive (global_markets_daily) and the 08:30 IST Yahoo snapshot
 # (silver.premarket_quotes); on the same date FRED/Massive wins. Yahoo rows carry Yahoo's own changes, so a reading
 # never mixes two sources (Brent: FRED has spot, Yahoo the front-month future). source is 'Yahoo live' for a session
-# still trading at 08:45 IST (Asia, futures, currencies) and 'Yahoo' for a finished one.
+# still trading at 08:30 IST (Asia, futures, currencies) and 'Yahoo' for a finished one.
 #
 # SQL equivalent:
 #   CREATE OR REFRESH MATERIALIZED VIEW stocks.gold.global_snapshot AS
@@ -384,9 +384,9 @@ SNAPSHOT_COLUMNS = ["instrument", "name", "region", "asset_class", "unit", "sour
 
 @dp.materialized_view(
     name="stocks.gold.global_snapshot",
-    comment="Latest reading per global instrument (FRED/Massive or the 08:45 IST Yahoo snapshot, whichever is newer; "
+    comment="Latest reading per global instrument (FRED/Massive or the 08:30 IST Yahoo snapshot, whichever is newer; "
             "FRED/Massive on a tie), with its changes and as-of date. source 'Yahoo live' = that market was still "
-            "trading at 08:45 IST.",
+            "trading at 08:30 IST.",
     table_properties={"quality": "gold"},
 )
 def global_snapshot():
