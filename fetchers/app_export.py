@@ -8,7 +8,7 @@ blanks the app. The app (app/index.html) is served by CloudFront from the same s
 
 Event: {} normally; {"dry_run": true} returns the payload without writing it.
 
-From 24 Nov it also adds five years of daily closes from Yahoo for the app's charts that have no lakehouse table:
+From 24 Nov it also adds Yahoo's full daily history (weekly before the last five years) for the app's charts that have no lakehouse table:
 USD/INR (Markets tab) and Accenture, NYSE: ACN (Desk tab). A failed fetch keeps the previous series.
 
 From 24 Nov the Markets tab also shows Mumbai petrol, diesel and CNG prices (dataset fuel_mumbai), read on every
@@ -72,6 +72,20 @@ def run_all(queries, previous, query=None):
     return datasets, failed
 
 
+def thin_old(rows, years=5):
+    """Full history for the app's "All" range, kept light: daily for the last `years` years, one close per week
+    (the week's last) before that."""
+    if not rows:
+        return rows
+    last = dt.date.fromisoformat(rows[-1]["date"])
+    cut = last.replace(year=last.year - years).isoformat()
+    old, recent = [r for r in rows if r["date"] < cut], [r for r in rows if r["date"] >= cut]
+    weekly = {}
+    for r in old:
+        weekly[dt.date.fromisoformat(r["date"]).isocalendar()[:2]] = r
+    return [weekly[k] for k in sorted(weekly)] + recent
+
+
 def yahoo_series(previous, fetch=None):
     """{dataset: {fields, rows, label}} for YAHOO_SERIES and the names that failed (those keep the previous rows)."""
     if fetch is None:
@@ -82,8 +96,8 @@ def yahoo_series(previous, fetch=None):
     out, failed = {}, []
     for name, (sym, label) in YAHOO_SERIES.items():
         try:
-            bars, _ = fetch(sym, "5y")
-            rows = [{"date": b["date"], "close": round(float(b["close"]), 4)} for b in bars if b.get("close")]
+            bars, _ = fetch(sym, "max")
+            rows = thin_old([{"date": b["date"], "close": round(float(b["close"]), 4)} for b in bars if b.get("close")])
             if not rows:
                 raise ValueError("no closes")
             out[name] = {"fields": ["date", "close"], "rows": rows, "label": label}

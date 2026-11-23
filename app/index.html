@@ -65,6 +65,12 @@ svg.chart { width: 100%; height: 140px; display: block; touch-action: pan-y }
 .lg.real { font-weight: 700; border-color: var(--fg) }
 .lg[aria-pressed="true"] { background: var(--card); border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset }
 svg.chart.hl polyline { opacity: .15 }
+.rng { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; background: var(--soft); border-radius: 10px; padding: 3px; margin: 2px 0 6px }
+.rng button { min-height: 34px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font: 600 12px inherit; font-family: inherit }
+.rng button[aria-pressed="true"] { background: var(--card); color: var(--fg); box-shadow: 0 1px 2px rgba(0,0,0,.08) }
+.rng button:disabled { opacity: .35 }
+.chg { font-size: 13px; margin: 0 2px 4px; color: var(--muted) }
+.chg b { color: var(--fg) }
 svg.chart.hl polyline.on { opacity: 1; stroke-width: 3.5 }
 .sug .row .r { font-weight: 600; font-size: 13px }
 .sug a { color: var(--accent); text-decoration: none; font-weight: 600 }
@@ -160,6 +166,35 @@ function cursorOff(e) {
   svg.parentNode.querySelector(".tip").hidden = true;
 }
 
+// Range chips on every chart (24 Nov): 1D = yesterday and today, then 1W, 1M, 1Y, 5Y, All. Remembered per chart.
+const RANGES = [["1D", null], ["1W", 7], ["1M", 30], ["1Y", 365], ["5Y", 1826], ["All", null]];
+let RANGE = {};
+try { RANGE = JSON.parse(localStorage.getItem("range") || "{}") || {}; } catch (e) {}
+function daysBack(iso, n) { const d = new Date(iso + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() - n); return d.toISOString().slice(0, 10); }
+function clipTo(series, r) {
+  const dates = [...new Set(series.flatMap((s) => s.points.map((p) => p[0])))].sort();
+  const keep = r[0] === "1D" ? ((d) => dates.slice(-2).includes(d)) : r[0] === "All" ? (() => true) : ((d) => d >= daysBack(dates.at(-1), r[1]));
+  return series.map((s) => ({ ...s, points: s.points.filter((p) => keep(p[0])) }));
+}
+const nDates = (series) => new Set(series.flatMap((s) => s.points.map((p) => p[0]))).size;
+function ranged(key, series, defaultRange = "All") {
+  // -> {series (clipped), chips (html), range}; chips with under two days of data are greyed out
+  const ok = RANGES.map((r) => nDates(clipTo(series, r)) >= 2);
+  let pick = RANGE[key] || defaultRange;
+  if (!ok[RANGES.findIndex((r) => r[0] === pick)]) pick = "All";
+  const chips = `<div class="rng" role="group" aria-label="Time range">${RANGES.map((r, i) => `<button type="button" data-rng="${key}" data-v="${r[0]}"`
+    + ` aria-pressed="${r[0] === pick}"${ok[i] ? "" : " disabled"}>${r[0]}</button>`).join("")}</div>`;
+  return { series: clipTo(series, RANGES.find((r) => r[0] === pick)), chips, range: pick };
+}
+function changeLine(s, range, kind) {
+  // "1M: +2.3%" (values) or "1M: real +Rs 1,240" (P&L in rupees), from the first to the last point shown
+  if (!s || s.points.length < 2) return "";
+  const a = s.points[0][1], b = s.points.at(-1)[1];
+  const label = range === "1D" ? `${s.points[0][0]} → ${s.points.at(-1)[0]}` : range;
+  if (kind === "rs") return `<p class="chg"><b>${esc(label)}</b> · ${esc(s.name)} <span class="${cls(b - a)}">${rs(b - a, true)}</span></p>`;
+  return `<p class="chg"><b>${esc(label)}</b> · ${esc(s.name)} <span class="${cls(b - a)}">${pct(a ? (b / a - 1) * 100 : null, true)}</span></p>`;
+}
+
 const PALETTE = ["#2563a6", "#b4560b", "#6a4fb9", "#1f6a40", "#a3311f", "#0e7c86", "#8a6d00", "#c0368c", "#4b5563"];
 function thin(points, max = 260) {   // keep long series light on a phone: every nth point, always the last
   if (points.length <= max) return points;
@@ -172,19 +207,24 @@ function plChart(rows, o) {
   rows.filter((r) => num(r[o.y]) != null && keep(o.key, o.kindOf(r))).forEach((r) => {
     (by[r[o.line]] = by[r[o.line]] || { kind: o.kindOf(r), points: [] }).points.push([String(r[o.x]).slice(0, 10), num(r[o.y])]);
   });
+  Object.values(by).forEach((v) => v.points.sort((a, b) => (a[0] < b[0] ? -1 : 1)));
+  const rg = ranged(o.key + "_pl", Object.keys(by).map((n) => ({ name: n, points: by[n].points })));
+  rg.series.forEach((sr) => { by[sr.name].points = sr.points; });
+  Object.keys(by).forEach((n) => { if (!by[n].points.length) delete by[n]; });
   // the real line always, then the 5 best and the 2 worst by their latest value (so better-than-real shadows show)
-  const last = (n) => by[n].points.reduce((m, p) => (p[0] > m[0] ? p : m))[1];
+  const last = (n) => by[n].points.at(-1)[1];
   const real = Object.keys(by).filter((n) => by[n].kind === "real");
   const rest = Object.keys(by).filter((n) => by[n].kind !== "real").sort((a, b) => last(b) - last(a));
   const best = rest.slice(0, 5), worst = rest.slice(5).slice(-2);
   const names = [...real, ...best, ...worst];
   const total = Object.keys(by).length;
   const series = names.map((n, i) => ({ name: n, real: by[n].kind === "real", color: by[n].kind === "real" ? "var(--fg)" : PALETTE[i % PALETTE.length],
-    dash: by[n].kind === "benchmark", points: by[n].points.sort((a, b) => (a[0] < b[0] ? -1 : 1)) }));
+    dash: by[n].kind === "benchmark", points: by[n].points }));
   const css = getComputedStyle(document.documentElement);
   series.forEach((s) => { if (s.color === "var(--fg)") s.color = css.getPropertyValue("--fg").trim(); });
   const note = total > names.length ? `<p class="note">Showing ${real.length ? "real + " : ""}the 5 best and the 2 worst of ${total} lines.</p>` : "";
-  return series.length ? lineChart(series, o.label, (v) => (Math.abs(v) >= 1000 ? "Rs " + Math.round(v).toLocaleString("en-IN") : "Rs " + Math.round(v))) + note
+  const head = rg.chips + changeLine(series.find((x) => x.real) || series[0], rg.range, "rs");
+  return series.length ? head + lineChart(series, o.label, (v) => (Math.abs(v) >= 1000 ? "Rs " + Math.round(v).toLocaleString("en-IN") : "Rs " + Math.round(v))) + note
     : '<p class="muted">No lines for this choice yet.</p>';
 }
 
@@ -209,7 +249,8 @@ function desk() {
   const pv = rows("portfolio_vs_nifty");
   const s = (name, color, dash) => ({ name, color, dash, points: pv.filter((r) => r.series === name).map((r) => [r.snapshot_date, num(r.index_value)]) });
   const css = getComputedStyle(document.documentElement);
-  const chart = lineChart([{ ...s("Your portfolio", css.getPropertyValue("--accent").trim()), real: true }, s("NIFTYBEES (index)", css.getPropertyValue("--nb").trim(), true)], "Portfolio vs NIFTYBEES");
+  const rg = ranged("desk", [{ ...s("Your portfolio", css.getPropertyValue("--accent").trim()), real: true }, s("NIFTYBEES (index)", css.getPropertyValue("--nb").trim(), true)]);
+  const chart = rg.chips + changeLine(rg.series[0], rg.range) + lineChart(rg.series, "Portfolio vs NIFTYBEES");
   const dec = rows("desk_decisions").map((d) => `<div class="row"><div class="n"><b>${esc(d.symbol)} · ${esc(d.setup)}</b><span>${esc(d.time)} · ${esc(d.decision)} · score ${esc(d.score)} · you ${d.you && d.you !== "–" ? esc(d.you) : "not rated"}</span></div><div class="r ${arrowCls(d.result) || (String(d.result).includes("−") ? "down" : String(d.result).includes("+") ? "up" : "muted")}">${esc(d.result)}</div></div>`).join("") || '<p class="muted">No proposals on the latest day.</p>';
   const board = rows("desk_board").slice(0, 8).map((r) => `<div class="row"><div class="n"><b>${esc(r.strategy)}</b><span>${esc(r.kind)} · ${esc(r.return_since_start)}</span></div><div class="r ${arrowCls(r.vs_niftybees)}">${esc(r.vs_niftybees)}</div></div>`).join("");
   return story() + `
@@ -311,7 +352,7 @@ function markets() {
     <div class="tile"><span class="l">USD/INR · Brent</span><span class="v">${esc(k.usd_inr)} · $${esc(k.brent_usd)}</span></div>
   </div>
   ${fuel()}
-  <section class="card"><h3>USD/INR, past 5 years</h3>${series5y("usdinr_5y", "USD/INR")}</section>
+  <section class="card"><h3>USD/INR</h3>${series5y("usdinr_5y", "USD/INR")}</section>
   <section class="card"><h3>Today's read</h3>${read || '<p class="muted">No data yet.</p>'}</section>
   <section class="card"><h3>World moves</h3>${moves || '<p class="muted">No data yet.</p>'}</section>`;
 }
@@ -319,19 +360,22 @@ function markets() {
 function series5y(name, label) {
   const r = rows(name);
   if (r.length < 2) return '<p class="muted">Appears after the next export.</p>';
-  const pts = thin(r.map((x) => [x.date, num(x.close)]));
-  const last = num(r.at(-1).close), y1 = r.find((x) => x.date >= dateBack(r.at(-1).date, 1)), first = num(r[0].close);
+  const rg = ranged(name, [{ name: label, points: r.map((x) => [x.date, num(x.close)]) }], "5Y");
+  const pts = thin(rg.series[0].points);
+  const last = num(r.at(-1).close), y1 = r.find((x) => x.date >= dateBack(r.at(-1).date, 1)), y5 = r.find((x) => x.date >= dateBack(r.at(-1).date, 5));
+  const first = y5 && num(y5.close);
   const css = getComputedStyle(document.documentElement);
   const ch = (a) => (a ? ((last / a - 1) * 100) : null);
   return `<div class="tiles"><div class="tile"><span class="l">Latest (${esc(r.at(-1).date)})</span><span class="v">${last.toFixed(2)}</span></div>
     <div class="tile"><span class="l">1 year · 5 years</span><span class="v"><span class="${cls(ch(y1 && num(y1.close)))}">${pct(ch(y1 && num(y1.close)), true)}</span> · <span class="${cls(ch(first))}">${pct(ch(first), true)}</span></span></div></div>`
-    + lineChart([{ name: label, color: css.getPropertyValue("--accent").trim(), points: pts }], label + ", past 5 years", (v) => v.toFixed(2));
+    + rg.chips + changeLine(rg.series[0], rg.range)
+    + lineChart([{ name: label, color: css.getPropertyValue("--accent").trim(), points: pts }], label, (v) => v.toFixed(2));
 }
 function dateBack(iso, years) { const d = new Date(iso); d.setFullYear(d.getFullYear() - years); return d.toISOString().slice(0, 10); }
 
 function custom() {
   const ds = (D.datasets || {}).acn_5y || {};
-  return `<section class="card"><h3>${esc(ds.label || "Accenture (NYSE: ACN)")}, past 5 years</h3>${series5y("acn_5y", "Accenture")}
+  return `<section class="card"><h3>${esc(ds.label || "Accenture (NYSE: ACN)")}</h3>${series5y("acn_5y", "Accenture")}
     <p class="note">Daily closes in US dollars from Yahoo Finance, refreshed with each export.</p></section>`;
 }
 
@@ -355,6 +399,12 @@ document.querySelector("nav").addEventListener("click", (e) => {
 ["pointerdown", "pointermove"].forEach((t) => document.getElementById("main").addEventListener(t, cursor));
 ["pointerleave", "pointercancel"].forEach((t) => document.getElementById("main").addEventListener(t, cursorOff, true));
 document.getElementById("main").addEventListener("click", (e) => {
+  const rb = e.target.closest("button[data-rng]");
+  if (rb) {
+    RANGE[rb.dataset.rng] = rb.dataset.v;
+    try { localStorage.setItem("range", JSON.stringify(RANGE)); } catch (err) {}
+    render(); return;
+  }
   const lg = e.target.closest("button[data-lg]");
   if (lg) {   // tap a line's chip to highlight it; tap again to show all
     const on = lg.getAttribute("aria-pressed") !== "true";
