@@ -31,3 +31,13 @@ skip-check:
   # with read-only IAM elsewhere, and its key exists only in the main-only "production" environment.
   - CKV_AWS_356
   - CKV2_AWS_40
+  # Mobile app CloudFront (the only distribution): a static page of dummy-money numbers behind a
+  # secret path; everything else returns 404. Skipped at the owner's request (PR #67).
+  - CKV_AWS_310   # origin failover: one static S3 origin
+  - CKV_AWS_86    # access logging: logs would record the secret path
+  - CKV_AWS_174   # TLS 1.2 minimum: needs a custom domain and certificate
+  - CKV2_AWS_42   # custom SSL certificate: uses the default *.cloudfront.net certificate
+  - CKV_AWS_68    # WAF: ~$6-8/month
+  - CKV2_AWS_47   # WAF Log4j rule: no WAF, and no Java behind it
+  - CKV_AWS_374   # geo restriction
+  - CKV2_AWS_32   # response headers policy (the managed SecurityHeadersPolicy is attached)

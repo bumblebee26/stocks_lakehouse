@@ -71,6 +71,8 @@ resource "aws_s3_bucket_lifecycle_configuration" "this" {
 
 # Reject any request that is not made over HTTPS.
 data "aws_iam_policy_document" "tls_only" {
+  source_policy_documents = var.extra_policy_json == null ? [] : [var.extra_policy_json]
+
   statement {
     sid     = "DenyInsecureTransport"
     effect  = "Deny"
