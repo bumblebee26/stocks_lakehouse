@@ -4,10 +4,13 @@
 #   app/ (index.html, manifest, icon)  ->  s3://<app bucket>/app/
 #   Lambda app-export, a few minutes after each Databricks job: runs the dashboard's own SQL
 #   (config/queries.json, rendered by the databricks stack) -> app/data/desk.json
-#   CloudFront (HTTPS, origin access control): a viewer-request function serves /<secret path>/... from app/ and
-#   answers 404 to anything else; the bucket stays private.
+#   Served by one of two front doors, chosen by var.app_use_cloudfront:
+#     false (now): a Lambda function URL (fetchers/app_web.py) reads app/ from the bucket. Used while AWS has
+#       CloudFront blocked on the account (23 Nov 2026: "Your account must be verified").
+#     true: CloudFront (HTTPS, origin access control); a viewer-request function serves /<secret path>/... from app/.
+#   Either way only /<secret path>/<app file> is served, anything else is 404, and the bucket stays private.
 #
-# The link is the CloudFront address plus a random 32-character path, stored in SSM as a SecureString
+# The link is the front door's address plus a random 32-character path, stored in SSM as a SecureString
 # (/<prefix>/desk-app-url: AWS console -> Systems Manager -> Parameter Store -> Show decrypted value). The path is
 # marked sensitive, so it never appears in the public plan or Actions logs. To revoke the link, replace
 # terraform_data.app_path (terraform apply -replace=terraform_data.app_path): a new path is made.
@@ -43,6 +46,8 @@ resource "terraform_data" "app_path" {
 }
 
 data "aws_iam_policy_document" "app_bucket_cloudfront" {
+  count = var.app_use_cloudfront ? 1 : 0
+
   statement {
     sid       = "CloudFrontReadsTheAppPathOnly"
     effect    = "Allow"
@@ -57,7 +62,7 @@ data "aws_iam_policy_document" "app_bucket_cloudfront" {
     condition {
       test     = "StringEquals"
       variable = "AWS:SourceArn"
-      values   = [aws_cloudfront_distribution.app.arn]
+      values   = [aws_cloudfront_distribution.app[0].arn]
     }
   }
 }
@@ -68,7 +73,7 @@ module "app_bucket" {
   bucket_name                        = local.app_bucket_name
   noncurrent_version_expiration_days = 7
   force_destroy                      = true
-  extra_policy_json                  = data.aws_iam_policy_document.app_bucket_cloudfront.json
+  extra_policy_json                  = var.app_use_cloudfront ? data.aws_iam_policy_document.app_bucket_cloudfront[0].json : null
 }
 
 resource "aws_s3_object" "app_files" {
@@ -83,6 +88,8 @@ resource "aws_s3_object" "app_files" {
 }
 
 resource "aws_cloudfront_origin_access_control" "app" {
+  count = var.app_use_cloudfront ? 1 : 0
+
   name                              = "${var.name_prefix}-desk-app"
   description                       = "CloudFront reads the desk app bucket (private)."
   origin_access_control_origin_type = "s3"
@@ -93,6 +100,8 @@ resource "aws_cloudfront_origin_access_control" "app" {
 # Serves /<secret path>/... from app/ in the bucket; everything else is 404. Runs at the edge (CloudFront
 # Functions: 2 million invocations a month are free).
 resource "aws_cloudfront_function" "app_path" {
+  count = var.app_use_cloudfront ? 1 : 0
+
   name    = "${var.name_prefix}-desk-app-path"
   runtime = "cloudfront-js-2.0"
   comment = "Secret path -> app/ (desk app)"
@@ -101,6 +110,8 @@ resource "aws_cloudfront_function" "app_path" {
 }
 
 resource "aws_cloudfront_distribution" "app" {
+  count = var.app_use_cloudfront ? 1 : 0
+
   enabled             = true
   comment             = "NSE Paper Trading Desk mobile app"
   price_class         = "PriceClass_200" # includes India
@@ -110,7 +121,7 @@ resource "aws_cloudfront_distribution" "app" {
   origin {
     domain_name              = "${local.app_bucket_name}.s3.${var.aws_region}.amazonaws.com"
     origin_id                = "app"
-    origin_access_control_id = aws_cloudfront_origin_access_control.app.id
+    origin_access_control_id = aws_cloudfront_origin_access_control.app[0].id
   }
 
   default_cache_behavior {
@@ -124,7 +135,7 @@ resource "aws_cloudfront_distribution" "app" {
 
     function_association {
       event_type   = "viewer-request"
-      function_arn = aws_cloudfront_function.app_path.arn
+      function_arn = aws_cloudfront_function.app_path[0].arn
     }
   }
 
@@ -257,9 +268,119 @@ resource "aws_scheduler_schedule" "app_export" {
   }
 }
 
+locals {
+  app_base_url = var.app_use_cloudfront ? "https://${aws_cloudfront_distribution.app[0].domain_name}" : trimsuffix(aws_lambda_function_url.app_web[0].function_url, "/")
+}
+
 resource "aws_ssm_parameter" "app_url" {
   name        = "/${var.name_prefix}/desk-app-url"
-  description = "The desk mobile app's link (CloudFront address + secret path). Anyone with it can open the app."
+  description = "The desk mobile app's link (address + secret path). Anyone with it can open the app."
   type        = "SecureString"
-  value       = "https://${aws_cloudfront_distribution.app.domain_name}/${local.app_path}/"
+  value       = "${local.app_base_url}/${local.app_path}/"
+}
+
+# ---------------------------------------------------------------------------
+# Lambda function URL front door (var.app_use_cloudfront = false). Free tier: 1 million requests a month.
+# ---------------------------------------------------------------------------
+
+locals {
+  app_web_function_name = "${var.name_prefix}-app-web"
+}
+
+resource "aws_iam_role" "app_web" {
+  count = var.app_use_cloudfront ? 0 : 1
+
+  name               = "${var.name_prefix}-app-web-role"
+  description        = "Desk app web server: read the app's files from its bucket."
+  assume_role_policy = data.aws_iam_policy_document.lambda_trust.json
+}
+
+resource "aws_iam_role_policy_attachment" "app_web_logs" {
+  count = var.app_use_cloudfront ? 0 : 1
+
+  role       = aws_iam_role.app_web[0].name
+  policy_arn = "arn:${local.partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy" "app_web" {
+  count = var.app_use_cloudfront ? 0 : 1
+
+  name = "app-web"
+  role = aws_iam_role.app_web[0].id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid      = "ReadAppFilesOnly"
+      Effect   = "Allow"
+      Action   = "s3:GetObject"
+      Resource = "${module.app_bucket.arn}/app/*"
+    }]
+  })
+}
+
+resource "aws_cloudwatch_log_group" "app_web" {
+  count = var.app_use_cloudfront ? 0 : 1
+
+  name              = "/aws/lambda/${local.app_web_function_name}"
+  retention_in_days = var.log_retention_days
+}
+
+resource "aws_lambda_function" "app_web" {
+  count = var.app_use_cloudfront ? 0 : 1
+
+  function_name = local.app_web_function_name
+  description   = "Desk mobile app: serves /<secret path>/<app file> from the private bucket; 404 otherwise."
+  role          = aws_iam_role.app_web[0].arn
+
+  runtime       = var.lambda_python_runtime
+  architectures = ["arm64"]
+  handler       = "app_web.handler"
+  timeout       = 10
+  memory_size   = 128
+
+  filename         = data.archive_file.fetchers.output_path
+  source_code_hash = data.archive_file.fetchers.output_base64sha256
+
+  environment {
+    variables = {
+      APP_BUCKET = module.app_bucket.id
+      APP_PREFIX = "app"
+      APP_PATH   = local.app_path # sensitive: hidden in the plan and Actions logs
+    }
+  }
+
+  depends_on = [
+    aws_cloudwatch_log_group.app_web,
+    aws_iam_role_policy_attachment.app_web_logs,
+    aws_iam_role_policy.app_web,
+  ]
+}
+
+resource "aws_lambda_function_url" "app_web" {
+  count = var.app_use_cloudfront ? 0 : 1
+
+  function_name      = aws_lambda_function.app_web[0].function_name
+  authorization_type = "NONE" # a phone can't sign requests; the secret path is the key
+}
+
+# A public (NONE) function URL needs both statements (AWS, Oct 2025); InvokeFunction is limited to calls that
+# come through the URL.
+resource "aws_lambda_permission" "app_web_url" {
+  count = var.app_use_cloudfront ? 0 : 1
+
+  statement_id           = "FunctionURLAllowPublicAccess"
+  action                 = "lambda:InvokeFunctionUrl"
+  function_name          = aws_lambda_function.app_web[0].function_name
+  principal              = "*"
+  function_url_auth_type = "NONE"
+}
+
+resource "aws_lambda_permission" "app_web_invoke" {
+  count = var.app_use_cloudfront ? 0 : 1
+
+  statement_id             = "FunctionURLInvokeAllowPublicAccess"
+  action                   = "lambda:InvokeFunction"
+  function_name            = aws_lambda_function.app_web[0].function_name
+  principal                = "*"
+  invoked_via_function_url = true
 }
