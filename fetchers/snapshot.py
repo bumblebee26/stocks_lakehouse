@@ -1,13 +1,13 @@
 """Pre-open snapshot of the world markets, saved to the lakehouse before NSE opens.
 
-Written by the 08:45 IST brief (premarket.py) to landing/premarket/date=YYYY-MM-DD/yahoo_HHMM.jsonl. Its arrival
+Written by the 08:30 IST brief (premarket.py) to landing/premarket/date=YYYY-MM-DD/yahoo_HHMM.jsonl. Its arrival
 starts the stocks-market-preopen job (market pipeline, then the dashboard summaries), so the Global markets page
 is current by about 09:00 instead of waiting for Massive (~10:30 IST) and FRED (a day or more later).
 
 One JSON line per instrument: its latest Yahoo daily candle and the changes Yahoo's own candles give (1, 5 and 20
 sessions), so a reading never mixes two sources. Instruments FRED also carries keep FRED's id (SP500, DEXINUS...)
 and the dashboard shows whichever reading is newer; on the same date FRED wins. `reading` is 'live' for a session
-still trading (Tokyo, Seoul, Hong Kong and Shanghai are open at 08:45 IST; futures and currencies trade overnight)
+still trading (Tokyo, Seoul, Hong Kong and Shanghai are open at 08:30 IST; futures and currencies trade overnight)
 and 'close' for a finished one.
 """
 

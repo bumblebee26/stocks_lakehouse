@@ -23,7 +23,7 @@ covers the base view above, the full [architecture](docs/ARCHITECTURE_DIAGRAMS.m
 | Daily raw data (NSE, US, global) | S3 `landing/` + Databricks volume | Every trading day |
 | Bronze, silver and gold tables | Unity Catalog `stocks.*` | Refreshed when new files land |
 | Dashboard "NSE Paper Trading Desk" (pages Desk, Intraday, Swing, Long term (each with a real / shadow Show filter), Your calls, Global markets) | Databricks workspace | Always current; summaries rebuilt after every refresh |
-| Pre-market brief | Your Telegram | 08:45 IST, Mon–Fri |
+| Pre-market brief | Your Telegram | 08:30 IST, Mon–Fri |
 | Paper-trading analysis ([paper-trader](https://github.com/bumblebee26/paper-trader)) | `stocks.gold.trad*` tables + dashboard pages "Desk" and "Intraday" (tiles: net P&L, win rate, profit factor, expectancy, win/loss ratio; real vs shadow lines, daily P&L, by setup and hour) | After the 15:45 IST export |
 | Dummy portfolio and holdings | `stocks.gold.portfolio_daily`, `stocks.gold.holdings_latest` + dashboard page "Desk" (value, return vs NIFTYBEES, today's decisions, track record by setup, holdings) | After the 15:45 IST export |
 | Your own trades from Telegram ([paper-trader](https://github.com/bumblebee26/paper-trader)) | `stocks.gold.custom_trades` (intraday and pool trades you placed, marked custom) | After each export |
@@ -48,11 +48,11 @@ market breadth, unusual volume, Indian ADR premium vs USD/INR, and a global mark
 | 06:00 Tue–Sat | FRED: global indices, FX, VIX, oil, rates (rolling 21-day window) |
 | ~19:35 Mon–Fri | Databricks job `stocks-market-close` (when the NSE file lands): pipelines `stocks-market` then `stocks-research`, then the dashboard summaries |
 | ~15:50, ~23:35 Mon–Fri | Databricks job `stocks-trading` (when paper-trader's export lands): pipeline `stocks-trading`, then the dashboard summaries |
-| ~08:50 Mon–Fri | Databricks job `stocks-market-preopen` (when the 08:45 pre-open snapshot lands): market pipeline, then the dashboard summaries, so Global markets is current by about 09:00 |
+| ~08:35 Mon–Fri | Databricks job `stocks-market-preopen` (when the 08:30 pre-open snapshot lands): market pipeline, then the dashboard summaries, so Global markets is current by about 09:00 |
 | 11:15 Tue–Sat | Databricks job `stocks-market-morning`: market pipeline (the overnight US prices and FRED), then the dashboard summaries |
 | 08:00 Sat | Databricks job `stocks-market-weekend`: market and research (fundamentals, Nifty 200 list) |
 | every minute 09:00–15:59, every 30 min otherwise (08:00–19:30) Mon–Fri | Company news: NSE (announcements, results, board meetings, corporate actions) every run; Business Standard markets, RBI and SEBI press releases at most every 4–5 minutes; BSE announcements built but off (`bse_news_enabled`) |
-| 08:45 Mon–Fri | Pre-market brief and the technical scanner to Telegram (India first; US figures live from Yahoo). First the brief saves a pre-open snapshot of 21 world markets from Yahoo to `landing/premarket/` |
+| 08:30 Mon–Fri | Pre-market brief and the technical scanner to Telegram (India first; US figures live from Yahoo). First the brief saves a pre-open snapshot of 21 world markets from Yahoo to `landing/premarket/` |
 | 15:45 Mon–Fri | paper-trader pushes the day's trade journal to `landing/trades/` and a portfolio snapshot to `landing/portfolio/` |
 | 19:30 Mon–Fri | NSE: today's equities bhavcopy, delivery file and index file (every NSE index, India VIX included) |
 | 23:30 Mon–Fri | paper-trader re-sends the last 4 days' journals, so evening 👍/👎 ratings (`gold.rating_review`) and the 16:10 shadow-model results (`gold.model_backtest`, `gold.shadow_rules_*`) arrive overnight |

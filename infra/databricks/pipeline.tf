@@ -14,7 +14,7 @@
 #   job stocks-market-close    when the NSE evening file lands (landing/nse/, ~19:30 IST Mon-Fri):
 #                              market -> research -> dashboard summary. Picks up everything else that landed during
 #                              the day too (US prices, FRED, the F&O list).
-#   job stocks-market-preopen  when the 08:45 IST brief saves its Yahoo snapshot (landing/premarket/, Mon-Fri):
+#   job stocks-market-preopen  when the 08:30 IST brief saves its Yahoo snapshot (landing/premarket/, Mon-Fri):
 #                              market -> dashboard summary, so Global markets is current by about 09:00, before
 #                              NSE opens (added 18 Nov). The newest reading wins; FRED and Massive replace it later.
 #   job stocks-market-morning  11:15 IST Tue-Sat: market -> dashboard summary (the overnight US prices that land at
@@ -269,7 +269,7 @@ resource "databricks_job" "market_morning" {
 
 resource "databricks_job" "market_preopen" {
   name                = "${var.name_prefix}-market-preopen"
-  description         = "When the 08:45 IST pre-open snapshot lands (landing/premarket/, Mon-Fri): market pipeline, then the dashboard summaries, so Global markets is current before NSE opens. Managed by Terraform."
+  description         = "When the 08:30 IST pre-open snapshot lands (landing/premarket/, Mon-Fri): market pipeline, then the dashboard summaries, so Global markets is current before NSE opens. Managed by Terraform."
   max_concurrent_runs = 1
 
   task {
@@ -312,12 +312,12 @@ resource "databricks_job" "market_preopen" {
     }
   }
 
-  # Fallback if file-arrival triggers aren't available: 08:50 IST Mon-Fri
+  # Fallback if file-arrival triggers aren't available: 08:35 IST Mon-Fri
   dynamic "schedule" {
     for_each = var.job_trigger == "schedule" ? [1] : []
 
     content {
-      quartz_cron_expression = "0 50 8 ? * MON-FRI"
+      quartz_cron_expression = "0 35 8 ? * MON-FRI"
       timezone_id            = "Asia/Kolkata"
       pause_status           = "UNPAUSED"
     }

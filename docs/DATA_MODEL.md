@@ -17,7 +17,7 @@ Same layout in S3 (`s3://stocks-lakehouse-landing-<account-id>/landing/`) and in
 | `nse_fo/date=YYYY-MM-DD/fno_symbols.jsonl` | NSE's F&O stock list (`fo_mktlots.csv`, index rows dropped), Mondays 08:00 IST | NDJSON |
 | `massive/date=YYYY-MM-DD/grouped_daily_YYYYMMDD.json` | Massive grouped daily, all US tickers | JSON |
 | `fred/date=YYYY-MM-DD/fred_<start>_<end>.json` | FRED observations for a date range | NDJSON |
-| `premarket/date=YYYY-MM-DD/yahoo_HHMM.jsonl` | Pre-open world-markets snapshot from Yahoo (21 markets: latest daily candle and Yahoo's own 1/5/20-session changes), written by the 08:45 IST brief Mon–Fri; a new file starts `stocks-market-preopen` | NDJSON |
+| `premarket/date=YYYY-MM-DD/yahoo_HHMM.jsonl` | Pre-open world-markets snapshot from Yahoo (21 markets: latest daily candle and Yahoo's own 1/5/20-session changes), written by the 08:30 IST brief Mon–Fri; a new file starts `stocks-market-preopen` | NDJSON |
 | `trades/date=YYYY-MM-DD/events.jsonl` | Paper-trader journal (dummy money), pushed 15:45 IST by `stocks-trader-guardian` (volume; S3 copy in the trader's own bucket) | NDJSON |
 | `index_members/date=YYYY-MM-DD/nifty200.jsonl` | NSE's Nifty 200 list (symbol, company, industry, ISIN), pushed weekly with the fundamentals (volume only) | NDJSON |
 | `portfolio/date=YYYY-MM-DD/portfolio.jsonl` | Paper-trader pools (capital, cash, equity) and holdings (qty, cost, last price, value, P&L), pushed daily at 15:45 IST with the journal (volume only) | NDJSON |
@@ -77,7 +77,7 @@ Each new file is read once. Every bronze table has these lineage columns: `_sour
 | `silver.country_etfs` | ticker | Reference list of the 12 country ETFs: `symbol`, `name`, `region` (from `COUNTRY_ETFS` in `silver.py`) | — |
 | `silver.adr_pairs` | ADR | Reference list of Indian ADRs: `adr`, `nse_symbol`, `shares_per_adr` (from `ADR_PAIRS` in `gold.py`) | — |
 | `silver.global_daily` | instrument × date | `instrument`, `name`, `region`, `asset_class`, `unit`, `source` (`FRED`/`Massive`), `obs_date`, `value`. FRED series + 12 country ETFs. | — |
-| `silver.premarket_quotes` | instrument × date | The pre-open Yahoo snapshot, newest file per instrument and date: value, Yahoo's own 1/5/20-session changes, `reading` (`live` = that market was still trading at 08:45 IST). Kept out of `global_daily`, so history and `india_vs_global` stay FRED and Massive only | instrument, date and value present |
+| `silver.premarket_quotes` | instrument × date | The pre-open Yahoo snapshot, newest file per instrument and date: value, Yahoo's own 1/5/20-session changes, `reading` (`live` = that market was still trading at 08:30 IST). Kept out of `global_daily`, so history and `india_vs_global` stay FRED and Massive only | instrument, date and value present |
 
 Reference lists (`country_etfs`, `adr_pairs`) are pipeline tables rather than inline lists so the views that
 join them read only Delta sources and can refresh incrementally.
@@ -97,7 +97,7 @@ For NSE, `series = 'EQ'` is the main board. Gold uses `EQ` only.
 | `gold.nifty_after_us_moves_summary` | US move bucket | On average, after big US up/down/flat days | `sessions`, `avg_india_gap_pct`, `pct_india_up_days`, `pct_gap_same_direction_as_us`, `corr_us_return_india_gap` |
 | `gold.adr_premium` | ADR × day | Are Indian ADRs (INFY, WIT, HDB, IBN, RDY) rich or cheap vs their NSE shares? | `implied_inr_per_usd`, `relative_premium_pct`, `fx_inr_per_usd`, `fx_date`, `fx_premium_pct` |
 | `gold.global_markets_daily` | instrument × date | Global instruments with changes | `change_abs`, `change_pct`, `change_5d_pct`, `change_20d_pct` |
-| `gold.global_snapshot` | instrument | The latest reading of every global instrument: the newer of FRED/Massive and the 08:45 Yahoo snapshot (FRED/Massive on the same date) | same, latest row only; `source` `Yahoo live` when that market was still trading at 08:45 IST |
+| `gold.global_snapshot` | instrument | The latest reading of every global instrument: the newer of FRED/Massive and the 08:30 Yahoo snapshot (FRED/Massive on the same date) | same, latest row only; `source` `Yahoo live` when that market was still trading at 08:30 IST |
 | `gold.india_vs_global` | instrument | Which global moves line up with India's next open? | `sessions`, `corr_with_india_gap`, `corr_with_india_return`, `pct_same_direction_gap` |
 | `gold.trades` | paper trade | Each dummy-money trade from entry to exit | `entry_price`, `exit_price`, `exit_reason`, `status`, `net_pnl_rs`, `fees_rs`, `r_multiple`, `holding_minutes`, `entry_hour`, `is_win` |
 | `gold.trading_daily` | day | How did the day go, and does it match the ledger? | `proposals`, `rejected`, `expired`, `trades_opened`, `trades_closed`, `win_rate_pct`, `net_pnl_rs`, `end_balance_rs`, `reconciliation_diff_rs`, `reconciliation` |
@@ -172,7 +172,7 @@ previous close ÷ our last close, applied when more than 3% off 1). The maths is
 | DEXINUS, DEXJPUS, DEXUSEU, DEXUSUK, DEXCHUS, DTWEXBGS | EWZ Brazil, EEM Emerging markets, INDA India |
 | DCOILBRENTEU, DCOILWTICO, DGS10 | |
 
-The 08:45 pre-open snapshot reads the 13 FRED instruments above from Yahoo under the same ids (Brent and WTI as
+The 08:30 pre-open snapshot reads the 13 FRED instruments above from Yahoo under the same ids (Brent and WTI as
 front-month futures), plus Kospi, Hang Seng, Shanghai Composite, DAX, FTSE 100, S&P 500 futures, gold and India VIX.
 `gold.global_snapshot` shows whichever reading is newer.
 

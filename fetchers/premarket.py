@@ -1,4 +1,4 @@
-"""Pre-market brief for the Indian session, sent to Telegram at 08:45 IST Mon-Fri, as two messages.
+"""Pre-market brief for the Indian session, sent to Telegram at 08:30 IST Mon-Fri, as two messages.
 
 1) The brief, India first:
   Data check        each source's date against the date it should have (from the market's own calendar: the

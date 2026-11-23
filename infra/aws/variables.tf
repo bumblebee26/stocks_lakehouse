@@ -85,7 +85,7 @@ variable "news_enabled" {
 
 # ----- Pre-market brief -------------------------------------------------------
 variable "premarket_enabled" {
-  description = "Send the pre-market brief to Telegram at 08:45 IST Mon-Fri. Leave false until a dry run looks right."
+  description = "Send the pre-market brief to Telegram at 08:30 IST Mon-Fri. Leave false until a dry run looks right."
   type        = bool
   default     = false
 }

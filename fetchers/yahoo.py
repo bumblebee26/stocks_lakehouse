@@ -1,6 +1,6 @@
 """Live quotes and daily candles from Yahoo Finance's public chart API (no key).
 
-Used by the morning brief for the few figures it needs at 08:45 IST, straight from the market (the Massive free
+Used by the morning brief for the few figures it needs at 08:30 IST, straight from the market (the Massive free
 plan only releases a US day at ~10:30 IST, and FRED a day or two later), and for the calendar: the dates of an
 index's own daily candles show which sessions actually happened, so holidays need no list.
 """

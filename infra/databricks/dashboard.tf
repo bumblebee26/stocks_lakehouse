@@ -1036,10 +1036,10 @@ locals {
       calls_list        = { ds = "rating_trades", title = "Every rated proposal (newest first)", desc = "Your rating, what the trader did, the outcome and whether your call was right.", pos = [0, 17, 12, 9] }
       calls_summary     = { ds = "rating_summary", title = "By decision", desc = "Taken = the real result; skipped = what it would have made.", pos = [0, 26, 12, 6] }
       mk_read           = { ds = "market_read", title = "Today's read", desc = "Written from the tables below with fixed rules (not AI), each evening and again by about 09:00 IST from the pre-open snapshot. Past patterns, not predictions.", pos = [0, 2, 12, 5] }
-      mk_world          = { ds = "world_moves", title = "Around the world", desc = "Last move, and over the last 5 and 20 sessions. Newest reading wins: the 08:45 IST Yahoo snapshot or FRED/Massive; live = that market is still trading.", pos = [0, 10, 7, 12] }
+      mk_world          = { ds = "world_moves", title = "Around the world", desc = "Last move, and over the last 5 and 20 sessions. Newest reading wins: the 08:30 IST Yahoo snapshot or FRED/Massive; live = that market is still trading.", pos = [0, 10, 7, 12] }
       mk_us_after       = { ds = "us_after_moves", title = "What the Nifty did after the US moved", desc = "Since 2023. The open follows the US more than the close does.", pos = [0, 22, 6, 6] }
       mk_unusual        = { ds = "unusual_latest", title = "Unusual volume, latest session", desc = "Stocks trading far above their 20-day average volume.", pos = [0, 28, 6, 6] }
-      details_global    = { ds = "global_latest", title = "Every global instrument: latest reading", desc = "FRED series, US-listed country ETFs and the 08:45 IST Yahoo snapshot (source column).", pos = [0, 41, 12, 8] }
+      details_global    = { ds = "global_latest", title = "Every global instrument: latest reading", desc = "FRED series, US-listed country ETFs and the 08:30 IST Yahoo snapshot (source column).", pos = [0, 41, 12, 8] }
       details_ivg       = { ds = "india_vs_global", title = "India's next open vs global moves", desc = "Correlation over all sessions; same direction = how often the gap matched the global move.", pos = [0, 49, 12, 7] }
       details_adr       = { ds = "adr_latest", title = "Indian ADRs vs NSE shares", desc = "Premium vs the pair's median, and vs USD/INR.", pos = [0, 56, 12, 5] }
       summary_overview  = { ds = "summary_overview", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 61, 12, 4] }

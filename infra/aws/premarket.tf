@@ -1,5 +1,5 @@
 # Pre-market brief: queries the gold tables via Databricks SQL and sends a
-# Telegram message at 08:45 IST, Monday-Friday. First it saves the pre-open Yahoo
+# Telegram message at 08:30 IST, Monday-Friday. First it saves the pre-open Yahoo
 # snapshot to landing/premarket/, which starts the stocks-market-preopen Databricks job.
 #
 # Telegram settings are created as placeholders; set the real values yourself
@@ -130,10 +130,10 @@ resource "aws_iam_role_policy" "scheduler_invoke_premarket" {
 
 resource "aws_scheduler_schedule" "premarket" {
   name        = local.premarket_function_name
-  description = "Pre-market brief to Telegram, 08:45 IST Mon-Fri."
+  description = "Pre-market brief to Telegram, 08:30 IST Mon-Fri."
   state       = var.premarket_enabled ? "ENABLED" : "DISABLED"
 
-  schedule_expression          = "cron(45 8 ? * MON-FRI *)"
+  schedule_expression          = "cron(30 8 ? * MON-FRI *)"
   schedule_expression_timezone = "Asia/Kolkata"
 
   flexible_time_window {
