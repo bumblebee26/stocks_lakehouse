@@ -60,6 +60,16 @@ class Export(unittest.TestCase):
         fuel = body["datasets"]["fuel_mumbai"]["rows"]
         self.assertEqual([r["item"] for r in fuel], ["Petrol", "Diesel", "CNG"])
 
+    def test_old_history_is_weekly(self):
+        import datetime as dt
+        days = [dt.date(2015, 1, 1) + dt.timedelta(days=i) for i in range(0, 4400)]
+        rows = app_export.thin_old([{"date": d.isoformat(), "close": 1.0} for d in days])
+        cut = (days[-1].replace(year=days[-1].year - 5)).isoformat()
+        old = [r for r in rows if r["date"] < cut]
+        self.assertLess(len(old), len([d for d in days if d.isoformat() < cut]) / 6)   # about one a week
+        self.assertEqual(len([r for r in rows if r["date"] >= cut]), len([d for d in days if d.isoformat() >= cut]))
+        self.assertEqual(rows[-1]["date"], days[-1].isoformat())
+
     def test_fuel_prices_from_the_page_within_the_band(self):
         page = ("<a>Petrol cars from ₹5.99 Lakh</a><h2>Petrol Price in Mumbai</h2><td>&#8377; 111.50</td>"
                 "<h2>Diesel</h2> <span>₹97.90/L</span><p>CNG price today: Rs. 9150</p>")
