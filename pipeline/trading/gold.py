@@ -630,7 +630,7 @@ def custom_trades():
 # ---------------------------------------------------------------------------
 SHADOW_RULE_WORDS = {
     "current": "fixed 2R target (no early exit)", "breakeven": "stop to entry at +1R", "half_and_run": "sell half at +1R",
-    "trailing": "trailing stop (goes live at 15 trades if ahead)", "time_stop": "60-minute time stop", "no_stop": "no stop",
+    "trailing": "trailing stop", "time_stop": "60-minute time stop", "no_stop": "no stop",
     "wide_1_5": "stop 1.5x wider, same Rs risk", "wide_2": "stop 2x wider, same Rs risk",
     "close_stop": "stop on a 5-min close", "filter": "model: trade filter", "vol_stop": "model: volatility stop",
     "early_cut": "model: early cut", "let_run": "model: let winners run", "combined": "models combined",
