@@ -111,7 +111,7 @@ or emergencies.
 
 | Source | Coverage | History available | Cost |
 |---|---|---|---|
-| NSE UDiFF bhavcopy | All NSE cash-market securities | From 8 Jul 2024 (format change) | Free |
+| NSE UDiFF bhavcopy | All NSE cash-market securities | From 8 Jul 2024; 2019 to 5 Jul 2024 from the older format, converted to the same columns (one-off backfill, 24 Nov 2026) | Free |
 | Massive grouped daily | All US stocks and ETFs | Rolling 2 years on the free Basic plan | Free (API key) |
 | NSE RSS feeds | Company announcements, financial results, board meetings, corporate actions | What the feeds carry at each fetch (every minute in market hours, every 30 minutes otherwise) | Free |
 | Yahoo Finance fundamentals (fetched by paper-trader) | Annual and quarterly financials for NSE's Nifty 200 list (plus the trader's watchlist) | 4 fiscal years and recent quarters | Free |

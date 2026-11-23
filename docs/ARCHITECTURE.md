@@ -64,7 +64,7 @@ undone and removes the spend limit.
 | Quirk | Design decision |
 |---|---|
 | NSE files are `.csv.zip`; Spark reads gzip but not zip | S3 keeps the original zip; the Lambda pushes an **unzipped `.csv`** to the volume. |
-| NSE changed to the UDiFF format on 8 Jul 2024 | History starts 8 Jul 2024; older files use different URLs and columns. |
+| NSE changed to the UDiFF format on 8 Jul 2024 | The fetcher reads the older format before 8 Jul 2024 and converts it to UDiFF's columns (`nse.legacy_to_udiff`), so history from 2019 lands the same way (one-off backfill on 24 Nov 2026). |
 | Massive bars contain fields `T` (ticker) and `t` (timestamp); Delta column names are case-insensitive | Bronze stores `results` as **raw JSON text**; silver renames `t` → `ts` before parsing. |
 | Massive free plan keeps 2 years and is rate limited | Backfills wait 13 seconds per day; history starts ~2 years back. |
 | FRED revises recent values; exchange rates are published weekly | Each FRED run fetches a **rolling 21-day window**; silver keeps the latest file's value. |

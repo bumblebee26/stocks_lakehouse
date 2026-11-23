@@ -11,7 +11,13 @@ Lands at: landing/nse/date=YYYY-MM-DD/bhavcopy_cm_YYYYMMDD.csv.zip (the original
           landing/nse_indices/date=YYYY-MM-DD/indices_YYYYMMDD.jsonl (index_name, open, high, low, close,
           change_pct)
 The delivery and index files are optional: if one isn't there, the bhavcopy still lands and that part is missing.
+
+Before 8 Jul 2024 NSE published the older bhavcopy format (from 24 Nov 2026, for multi-year backtests):
+  https://nsearchives.nseindia.com/content/historical/EQUITIES/<YYYY>/<MON>/cm<DD><MON><YYYY>bhav.csv.zip
+  (archives.nseindia.com as the fallback). It is converted to UDiFF's columns (legacy_to_udiff) so the pipeline reads
+  every day the same way; the file lands under the same name, with Rmks = "legacy bhavcopy".
 """
+import zipfile
 import csv
 import io
 import json
@@ -25,6 +31,19 @@ IST = ZoneInfo("Asia/Kolkata")
 URL = "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_{d:%Y%m%d}_F_0000.csv.zip"
 DELIVERY_URL = "https://nsearchives.nseindia.com/products/content/sec_bhavdata_full_{d:%d%m%Y}.csv"
 INDICES_URL = "https://nsearchives.nseindia.com/content/indices/ind_close_all_{d:%d%m%Y}.csv"
+UDIFF_START = dt.date(2024, 7, 8)
+LEGACY_URLS = (
+    "https://nsearchives.nseindia.com/content/historical/EQUITIES/{y}/{mon}/cm{dd}{mon}{y}bhav.csv.zip",
+    "https://archives.nseindia.com/content/historical/EQUITIES/{y}/{mon}/cm{dd}{mon}{y}bhav.csv.zip",
+)
+UDIFF_COLUMNS = ["TradDt", "BizDt", "Sgmt", "Src", "FinInstrmTp", "FinInstrmId", "ISIN", "TckrSymb", "SctySrs",
+                 "XpryDt", "FininstrmActlXpryDt", "StrkPric", "OptnTp", "FinInstrmNm", "OpnPric", "HghPric", "LwPric",
+                 "ClsPric", "LastPric", "PrvsClsgPric", "UndrlygPric", "SttlmPric", "OpnIntrst", "ChngInOpnIntrst",
+                 "TtlTradgVol", "TtlTrfVal", "TtlNbOfTxsExctd", "SsnId", "NewBrdLotQty", "Rmks", "Rsvd1", "Rsvd2",
+                 "Rsvd3", "Rsvd4"]
+LEGACY_MAP = {"TckrSymb": "SYMBOL", "SctySrs": "SERIES", "ISIN": "ISIN", "OpnPric": "OPEN", "HghPric": "HIGH",
+              "LwPric": "LOW", "ClsPric": "CLOSE", "LastPric": "LAST", "PrvsClsgPric": "PREVCLOSE",
+              "TtlTradgVol": "TOTTRDQTY", "TtlTrfVal": "TOTTRDVAL", "TtlNbOfTxsExctd": "TOTALTRADES"}
 
 # NSE rejects requests that don't look like a browser.
 HEADERS = {
@@ -43,9 +62,56 @@ def default_date():
     return dt.datetime.now(IST).date()
 
 
+def legacy_to_udiff(csv_text, trade_date):
+    """The pre-8 Jul 2024 bhavcopy (SYMBOL, SERIES, OPEN, ... TOTALTRADES, ISIN) as UDiFF-column CSV text."""
+    out = io.StringIO()
+    w = csv.DictWriter(out, fieldnames=UDIFF_COLUMNS, lineterminator="\n")
+    w.writeheader()
+    for r in csv.DictReader(io.StringIO(csv_text)):
+        r = {k.strip(): (v or "").strip() for k, v in r.items() if k}
+        if not r.get("SYMBOL"):
+            continue
+        row = {c: "" for c in UDIFF_COLUMNS}
+        row.update(TradDt=trade_date.isoformat(), BizDt=trade_date.isoformat(), Sgmt="CM", Src="NSE",
+                   Rmks="legacy bhavcopy")
+        row.update({u: r.get(old, "") for u, old in LEGACY_MAP.items()})
+        w.writerow(row)
+    return out.getvalue()
+
+
+def fetch_legacy(trade_date):
+    """The older format, converted and zipped like the UDiFF file. Raises NotFound if neither archive has it."""
+    mon = trade_date.strftime("%b").upper()
+    last = None
+    for url in LEGACY_URLS:
+        try:
+            body = http_get(url.format(y=trade_date.year, mon=mon, dd=f"{trade_date.day:02d}"), HEADERS)
+        except NotFound as err:
+            last = err
+            continue
+        if not body.startswith(b"PK"):
+            continue
+        with zipfile.ZipFile(io.BytesIO(body)) as z:
+            text = z.read(z.namelist()[0]).decode("utf-8", errors="replace")
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            z.writestr(f"BhavCopy_NSE_CM_0_0_0_{trade_date:%Y%m%d}_F_0000.csv", legacy_to_udiff(text, trade_date))
+        return buf.getvalue()
+    raise last or NotFound(f"no legacy bhavcopy for {trade_date}")
+
+
 def fetch_one(trade_date):
     if trade_date.weekday() >= 5:
         return {"date": trade_date.isoformat(), "status": "skipped_weekend"}
+    if trade_date < UDIFF_START:
+        try:
+            body = fetch_legacy(trade_date)
+        except NotFound:
+            log.warning("No legacy NSE bhavcopy for %s (holiday)", trade_date)
+            return {"date": trade_date.isoformat(), "status": "no_file"}
+        key = put_landing("nse", trade_date, f"bhavcopy_cm_{trade_date:%Y%m%d}.csv.zip", body, "application/zip")
+        return {"date": trade_date.isoformat(), "status": "written", "key": key, "bytes": len(body), "legacy": True,
+                "delivery": fetch_delivery(trade_date), "indices": fetch_indices(trade_date)}
 
     try:
         body = http_get(URL.format(d=trade_date), HEADERS)

@@ -609,7 +609,7 @@ locals {
   # Every strategy (real pools and shadow pools) in one shape: label, group, start, latest return, NIFTYBEES over the
   # same days (from the pool's first snapshot to its latest), and the difference.
   strategy_label_sql = <<-SQL
-    CASE pool WHEN 'intraday' THEN 'Intraday (real)' WHEN 'swing' THEN 'Swing (real: held in NIFTYBEES)'
+    CASE pool WHEN 'intraday' THEN 'Intraday (real)' WHEN 'swing' THEN 'Swing (real, auto: momentum + news)'
               WHEN 'long_term' THEN 'Long-term (real: cash until buying starts)'
               WHEN 'swing_shadow' THEN 'Swing shadow: news breakouts' WHEN 'swing_tech_shadow' THEN 'Swing shadow: technical scanner'
               WHEN 'long_term_shadow' THEN 'Long-term shadow: quality picks'
@@ -818,7 +818,7 @@ locals {
       intra_r        = { ds = "intraday_kpis", field = "expectancy_r", title = "Average R per trade", desc = "Above 0 = an edge after costs", pos = [6, 3] }
       intra_pf       = { ds = "intraday_kpis", field = "profit_factor", title = "Profit factor", desc = "Gains / losses; above 1 makes money", pos = [8, 3] }
       intra_wl       = { ds = "intraday_kpis", field = "win_loss_ratio", title = "Average win / average loss", desc = "How big wins are next to losses", pos = [10, 3] }
-      swing_real     = { ds = "swing_kpis", field = "real_value_rs", title = "Real pool (Rs)", desc = "Held in NIFTYBEES while new rules are tested", pos = [0, 3] }
+      swing_real     = { ds = "swing_kpis", field = "real_value_rs", title = "Real pool (Rs)", desc = "Auto mode: momentum + news; idle cash in NIFTYBEES", pos = [0, 3] }
       swing_pnl      = { ds = "swing_kpis", field = "real_pnl_rs", title = "Real P&L (Rs)", desc = "Value minus starting capital, after costs", pos = [2, 3] }
       swing_return   = { ds = "swing_kpis", field = "real_return_pct", title = "Real pool return (%)", desc = "Since 18 Nov", pos = [4, 3] }
       swing_trades   = { ds = "swing_kpis", field = "real_trades", title = "Trades placed (real)", desc = "Buys and sells since 18 Nov; shadows: scoreboard", pos = [6, 3] }
@@ -991,7 +991,7 @@ locals {
       desk_details   = { lines = ["### Details"], pos = [0, 20, 12, 1] }
       intra_title    = { lines = ["## Intraday", "Real pool Rs 40,000 since 18 Nov. Shadow lines replay your real trades under other exit rules and the shadow models; the opening-range test trades on paper."], pos = [0, 0, 8, 3] }
       intra_tests    = { lines = ["### Model tests on ~200 stocks (paper)"], pos = [0, 32, 12, 1] }
-      swing_title    = { lines = ["## Swing", "Real pool Rs 60,000 (held in NIFTYBEES while new rules are tested) vs four shadow strategies on paper, same costs. Not advice."], pos = [0, 0, 8, 3] }
+      swing_title    = { lines = ["## Swing", "Real pool Rs 60,000 in auto mode from 24 Nov (momentum + news rules; idle cash in NIFTYBEES) vs four shadow strategies on paper, same costs. Not advice."], pos = [0, 0, 8, 3] }
       lt_title       = { lines = ["## Long term", "Real pool Rs 1 lakh in cash until the 18 Dec go/no-go review, vs three shadow strategies on paper. Company quality refreshed every Saturday. Not advice."], pos = [0, 0, 8, 3] }
       calls_title    = { lines = ["## Your calls", "Your 👍/👎 against what really happened, for your own learning: ratings never train the trader. All history; under 30 rated is too early to judge."], pos = [0, 0, 12, 3] }
       markets_title  = { lines = ["## Global markets: what matters for India's next open", "US, Asia, Europe, the rupee, crude, yields and the fear gauge, plus what the NSE did under the surface."], pos = [0, 0, 12, 2] }
