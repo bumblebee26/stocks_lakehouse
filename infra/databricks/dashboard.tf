@@ -966,8 +966,8 @@ locals {
       intra_bt_trend = { ds = "backtest_trend", type = "line", x = "run_date", xt = "temporal", y = "vs_current_r", color = "rule", title = "Is each edge holding up? (R vs current, by run day)", desc = "A line that stays above 0 run after run is a rule worth reviewing for go-live.", pos = [6, 33, 6, 6] }
       swing_curve    = { ds = "swing_returns", type = "line", x = "snapshot_date", xt = "temporal", y = "return_pct", color = "strategy", title = "Return since each started (%)", desc = "Real pool, the four shadows (news breakouts, scanner, momentum + news, momentum top 3) and NIFTYBEES. Use Show to pick.", pos = [0, 6, 6, 7] }
       lt_curve       = { ds = "longterm_returns", type = "line", x = "snapshot_date", xt = "temporal", y = "return_pct", color = "strategy", title = "Return since each started (%)", desc = "Real pool, the three shadows (quality picks, momentum top 15, momentum top 5) and NIFTYBEES. Use Show to pick.", pos = [0, 6, 6, 7] }
-      swing_pnl      = { ds = "swing_returns", type = "line", x = "snapshot_date", xt = "temporal", y = "pnl_rs", color = "strategy", title = "Profit / loss since each started (Rs)", desc = "Same lines in rupees: value minus starting cash, after costs. Use Show to pick.", pos = [6, 6, 6, 7] }
-      lt_pnl         = { ds = "longterm_returns", type = "line", x = "snapshot_date", xt = "temporal", y = "pnl_rs", color = "strategy", title = "Profit / loss since each started (Rs)", desc = "Same lines in rupees: value minus starting cash, after costs. Use Show to pick.", pos = [6, 6, 6, 7] }
+      swing_pnl_rs   = { ds = "swing_returns", type = "line", x = "snapshot_date", xt = "temporal", y = "pnl_rs", color = "strategy", title = "Profit / loss since each started (Rs)", desc = "Same lines in rupees: value minus starting cash, after costs. Use Show to pick.", pos = [6, 6, 6, 7] }
+      lt_pnl_rs      = { ds = "longterm_returns", type = "line", x = "snapshot_date", xt = "temporal", y = "pnl_rs", color = "strategy", title = "Profit / loss since each started (Rs)", desc = "Same lines in rupees: value minus starting cash, after costs. Use Show to pick.", pos = [6, 6, 6, 7] }
       mk_usdinr      = { ds = "usdinr_history", type = "line", x = "obs_date", xt = "temporal", y = "usd_inr", color = null, title = "USD/INR, past 5 years (rupees per dollar)", desc = "FRED daily reference rate (published weekly, so the last few days can lag). Up = weaker rupee.", pos = [0, 34, 12, 6] }
       quality_dots   = { ds = "quality_scatter", type = "scatter", x = "roce_pct", xt = "quantitative", y = "pe", color = "tests", title = "Quality vs price: return on capital (%) against P/E (excl. banks)", desc = "Further right = more profitable; lower = cheaper. Bottom right is the sweet spot.", pos = [0, 44, 12, 7] }
       calls_trend    = { ds = "calls_weekly", type = "line", x = "week", xt = "temporal", y = "right_pct", color = "series", title = "Calls right, week by week (%)", desc = "Above the coin-flip line = your instinct adds something.", pos = [0, 11, 7, 6] }
@@ -1135,7 +1135,7 @@ locals {
           local.text.swing_title, local.show_filter.swing_show,
           local.counter.swing_real, local.counter.swing_pnl, local.counter.swing_return, local.counter.swing_trades,
           local.table_widget.swing_best_card,
-          local.chart.swing_curve, local.chart.swing_pnl, local.table_widget.swing_suggest,
+          local.chart.swing_curve, local.chart.swing_pnl_rs, local.table_widget.swing_suggest,
           local.table_widget.swing_board, local.table_widget.swing_hold, local.table_widget.swing_trades,
           local.table_widget.swing_scan, local.table_widget.swing_mom, local.table_widget.swing_signals,
         ]
@@ -1149,7 +1149,7 @@ locals {
           local.text.lt_title, local.show_filter.lt_show,
           local.counter.lt_real, local.counter.lt_pnl, local.counter.lt_return, local.counter.lt_trades,
           local.table_widget.lt_best_card,
-          local.chart.lt_curve, local.chart.lt_pnl, local.table_widget.lt_suggest,
+          local.chart.lt_curve, local.chart.lt_pnl_rs, local.table_widget.lt_suggest,
           local.table_widget.lt_board, local.table_widget.lt_hold, local.table_widget.lt_trades,
           local.table_widget.quality_top, local.chart.quality_dots, local.table_widget.summary_quality,
         ]
