@@ -11,40 +11,34 @@ Event: {} normally; {"dry_run": true} returns the payload without writing it.
 From 24 Nov it also adds five years of daily closes from Yahoo for the app's charts that have no lakehouse table:
 USD/INR (Markets tab) and Accenture, NYSE: ACN (Desk tab). A failed fetch keeps the previous series.
 
-From 24 Nov the Markets tab also shows Mumbai fuel and EV-charging rates (dataset fuel_mumbai). There is no free
-official feed, so the rates live in FUEL_MUMBAI below with the date and source of each; to update them without a
-code change, put the same list as JSON in the app bucket at config/fuel_mumbai.json (it wins when present).
+From 24 Nov the Markets tab also shows Mumbai petrol, diesel and CNG prices (dataset fuel_mumbai), read on every
+export from one source, CarDekho's Mumbai fuel page (all three on one page; prices revise at 6 a.m.). A new price is
+accepted only within 15% of the last good one; otherwise, or if the page fails, the last good price stays with its
+date (the starting values are from 15-16 Nov 2026).
 """
 
 import datetime as dt
 import json
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor
 
 import boto3
 
 import databricks_sql
-from common import log
+from common import http_get, log
 
 IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
 QUERIES_KEY = "config/queries.json"
 WORKERS = 4
 # app dataset -> (Yahoo symbol, label); five years of daily closes as rows {date, close}
 YAHOO_SERIES = {"usdinr_5y": ("INR=X", "USD/INR"), "acn_5y": ("ACN", "Accenture (NYSE: ACN, USD)")}
-FUEL_KEY = "config/fuel_mumbai.json"
+FUEL_URL = "https://www.cardekho.com/fuel-price-in-mumbai-city"
+FUEL_SOURCE = "CarDekho"
 FUEL_FIELDS = ["item", "rate", "unit", "as_of", "source"]
-FUEL_MUMBAI = [
-    {"item": "Petrol", "rate": "111.21", "unit": "Rs / litre", "as_of": "2026-11-16",
-     "source": "HDFC Sky daily fuel prices"},
-    {"item": "Diesel", "rate": "97.83", "unit": "Rs / litre", "as_of": "2026-11-16",
-     "source": "HDFC Sky daily fuel prices"},
-    {"item": "CNG", "rate": "91.50", "unit": "Rs / kg", "as_of": "2026-11-15",
-     "source": "Mahanagar Gas revision (Oneindia)"},
-    {"item": "EV charging, public fast (Tata Power, Jio-bp, ChargeZone)", "rate": "18 to 25", "unit": "Rs / kWh",
-     "as_of": "2026-11", "source": "MyMotor Mumbai charging list"},
-    {"item": "EV charging, MSEDCL public chargers", "rate": "11.50 to 17", "unit": "Rs / kWh", "as_of": "2026-11",
-     "source": "MyMotor Mumbai charging list"},
-]
+FUEL_UNITS = {"Petrol": "Rs / litre", "Diesel": "Rs / litre", "CNG": "Rs / kg"}
+FUEL_START = {"Petrol": (111.21, "2026-11-16"), "Diesel": (97.83, "2026-11-16"), "CNG": (91.50, "2026-11-15")}
+FUEL_BAND = 0.15
 
 
 def _s3():
@@ -100,12 +94,45 @@ def yahoo_series(previous, fetch=None):
     return out, failed
 
 
-def fuel_rates(s3, bucket):
-    """The fuel_mumbai dataset: config/fuel_mumbai.json in the app bucket if present, else FUEL_MUMBAI."""
-    rows = load_previous(s3, bucket, FUEL_KEY) or FUEL_MUMBAI
-    if not isinstance(rows, list):
-        rows = FUEL_MUMBAI
-    return {"fields": FUEL_FIELDS, "rows": [{f: r.get(f) for f in FUEL_FIELDS} for r in rows]}
+def parse_fuel(html):
+    """{fuel: [prices]} from the page text: every rupee amount just after the fuel's name (e.g. "CNG ... ₹91.5"),
+    in page order. Menus and car prices can match too, so fuel_rates takes the first one near the last good price."""
+    text = re.sub(r"<[^>]+>", " ", html)
+    text = re.sub(r"&#8377;|&#x20[bB]9;", "₹", text)
+    text = re.sub(r"\s+", " ", text)
+    out = {}
+    for fuel in FUEL_UNITS:
+        pattern = fuel + r"\b[^₹]{0,160}?(?:₹|Rs\.?)\s*([0-9]{2,3}(?:\.[0-9]{1,2})?)"
+        out[fuel] = [float(v) for v in re.findall(pattern, text, flags=re.I)]
+    return out
+
+
+def fuel_rates(previous, fetch=None, today=None):
+    """The fuel_mumbai dataset and whether anything failed. Each price keeps its last good value and date unless the
+    page gives one within FUEL_BAND of it."""
+    today = today or dt.datetime.now(IST).date().isoformat()
+    prev_rows = (((previous or {}).get("datasets") or {}).get("fuel_mumbai") or {}).get("rows") or []
+    old = {r["item"]: r for r in prev_rows if r.get("item") in FUEL_UNITS}
+    try:
+        html = (fetch or (lambda: http_get(FUEL_URL, headers={"User-Agent": "Mozilla/5.0"}, retries=2)))()
+        got = parse_fuel(html.decode("utf-8", "replace") if isinstance(html, bytes) else html)
+    except Exception as err:  # noqa: BLE001 - keep the last good prices
+        log.error("Fuel prices failed: %s", err)
+        got = {}
+    rows, bad = [], False
+    for fuel, unit in FUEL_UNITS.items():
+        last = old.get(fuel) or {"rate": f"{FUEL_START[fuel][0]:.2f}", "as_of": FUEL_START[fuel][1],
+                                 "source": FUEL_SOURCE}
+        near = [v for v in got.get(fuel, []) if abs(v / float(last["rate"]) - 1) <= FUEL_BAND]
+        if near:
+            last = {"rate": f"{near[0]:.2f}", "as_of": today, "source": FUEL_SOURCE}
+        else:
+            bad = True
+            log.error("No %s price within 15%% of %s on the page (found %s); kept the last one", fuel,
+                      last["rate"], got.get(fuel))
+        rows.append({"item": fuel, "rate": last["rate"], "unit": unit, "as_of": last["as_of"],
+                     "source": last["source"]})
+    return {"fields": FUEL_FIELDS, "rows": rows}, bad
 
 
 def handler(event, context):
@@ -118,7 +145,8 @@ def handler(event, context):
     datasets, failed = run_all(queries, previous)
     series, series_failed = yahoo_series(previous)
     datasets.update(series)
-    datasets["fuel_mumbai"] = fuel_rates(s3, bucket)
+    datasets["fuel_mumbai"], fuel_failed = fuel_rates(previous)
+    failed += ["fuel_mumbai"] if fuel_failed else []
     failed += series_failed
     payload = {"updated_at": dt.datetime.now(IST).strftime("%Y-%m-%d %H:%M"), "datasets": datasets,
                "failed": failed}

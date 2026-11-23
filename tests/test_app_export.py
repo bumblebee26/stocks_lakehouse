@@ -48,29 +48,45 @@ class Export(unittest.TestCase):
         with mock.patch.dict(os.environ, {"APP_BUCKET": "b", "APP_PREFIX": "abc123"}), \
              mock.patch.object(app_export, "_s3", return_value=s3), \
              mock.patch.object(app_export.databricks_sql, "query", return_value=[{"x": 1.0}]), \
-             mock.patch.object(app_export, "yahoo_series", return_value=({}, [])):
+             mock.patch.object(app_export, "yahoo_series", return_value=({}, [])), \
+             mock.patch.object(app_export, "http_get", side_effect=RuntimeError("offline")):
             out = app_export.handler({}, None)
         self.assertTrue(out["written"])
         put = s3.puts[0]
         self.assertEqual(put["Key"], "abc123/data/desk.json")
         body = json.loads(put["Body"])
         self.assertEqual(set(body["datasets"]), set(QUERIES) | {"fuel_mumbai"})
-        self.assertEqual(body["failed"], [])
+        self.assertEqual(body["failed"], ["fuel_mumbai"])
         fuel = body["datasets"]["fuel_mumbai"]["rows"]
-        self.assertEqual([r["item"] for r in fuel[:3]], ["Petrol", "Diesel", "CNG"])
+        self.assertEqual([r["item"] for r in fuel], ["Petrol", "Diesel", "CNG"])
 
-    def test_fuel_rates_from_the_bucket_win(self):
-        own = [{"item": "Petrol", "rate": "105.00", "unit": "Rs / litre", "as_of": "2026-12-01", "source": "you"}]
-        s3 = FakeS3({app_export.FUEL_KEY: json.dumps(own).encode()})
-        self.assertEqual(app_export.fuel_rates(s3, "b")["rows"], own)
-        self.assertEqual(app_export.fuel_rates(FakeS3({}), "b")["rows"][0]["item"], "Petrol")
+    def test_fuel_prices_from_the_page_within_the_band(self):
+        page = ("<a>Petrol cars from ₹5.99 Lakh</a><h2>Petrol Price in Mumbai</h2><td>&#8377; 111.50</td>"
+                "<h2>Diesel</h2> <span>₹97.90/L</span><p>CNG price today: Rs. 9150</p>")
+        ds, bad = app_export.fuel_rates({}, fetch=lambda: page.encode(), today="2026-11-24")
+        rows = {r["item"]: r for r in ds["rows"]}
+        self.assertEqual((rows["Petrol"]["rate"], rows["Petrol"]["as_of"]), ("111.50", "2026-11-24"))
+        self.assertEqual(rows["Diesel"]["rate"], "97.90")
+        self.assertEqual((rows["CNG"]["rate"], rows["CNG"]["as_of"]), ("91.50", "2026-11-15"))  # 915 rejected
+        self.assertTrue(bad)
+
+    def test_fuel_page_down_keeps_the_last_good_prices(self):
+        prev = {"datasets": {"fuel_mumbai": {"rows": [{"item": "Petrol", "rate": "112.00", "unit": "Rs / litre",
+                                                       "as_of": "2026-11-20", "source": "CarDekho"}]}}}
+
+        def down():
+            raise RuntimeError("blocked")
+        ds, bad = app_export.fuel_rates(prev, fetch=down)
+        self.assertEqual((ds["rows"][0]["rate"], ds["rows"][0]["as_of"]), ("112.00", "2026-11-20"))
+        self.assertTrue(bad)
 
     def test_dry_run_writes_nothing(self):
         s3 = FakeS3({"config/queries.json": json.dumps(QUERIES).encode()})
         with mock.patch.dict(os.environ, {"APP_BUCKET": "b", "APP_PREFIX": "p"}), \
              mock.patch.object(app_export, "_s3", return_value=s3), \
              mock.patch.object(app_export.databricks_sql, "query", return_value=[]), \
-             mock.patch.object(app_export, "yahoo_series", return_value=({}, [])):
+             mock.patch.object(app_export, "yahoo_series", return_value=({}, [])), \
+             mock.patch.object(app_export, "fuel_rates", return_value=({"fields": [], "rows": []}, False)):
             out = app_export.handler({"dry_run": True}, None)
         self.assertFalse(out["written"])
         self.assertEqual(s3.puts, [])
