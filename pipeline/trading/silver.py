@@ -10,6 +10,7 @@ Data-quality expectations drop bad rows and report counts in the pipeline UI.
   stocks.silver.portfolio_holdings           paper-trader holdings per day
   stocks.silver.shadow_pools                 paper-trader shadow pools per day (rules tested on paper; never in portfolio totals)
   stocks.silver.shadow_holdings              what each shadow pool holds per day
+  stocks.silver.pool_trades                  every buy and sell in the swing and long-term pools, real and shadow
 
 Reads market tables (NIFTYBEES closes in stocks.silver.nse_eq_daily, the Nifty 200 list) as plain
 tables; they are at most a day old, which is fine for the portfolio and shadow comparisons.
@@ -152,3 +153,36 @@ def shadow_holdings():
     return (_latest_portfolio_file().filter("record_type = 'shadow_holding'")
             .select("snapshot_date", "pool", "symbol", "sector", "qty", "avg_cost", "last_price", "value", "pnl",
                     F.to_date("opened").alias("opened")))
+
+
+# SQL equivalent:
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.silver.pool_trades (
+#     CONSTRAINT has_trade EXPECT (trade_id IS NOT NULL AND pool IS NOT NULL AND symbol IS NOT NULL) ON VIOLATION DROP ROW,
+#     CONSTRAINT buy_or_sell EXPECT (side IN ('BUY', 'SELL')) ON VIOLATION DROP ROW
+#   ) AS
+#   SELECT trade_id, to_timestamp(timestamp_ist) AS trade_ts, to_date(timestamp_ist) AS trade_date, pool, kind,
+#          CASE event WHEN 'bought' THEN 'BUY' WHEN 'sold' THEN 'SELL' END AS side, symbol, qty, price, value_rs,
+#          fees_rs, pnl_rs, cash_after, reason, note
+#   FROM stocks.bronze.pool_trades_raw          -- newest file per trade_id wins; from the 18 Nov ledger reset
+@dp.materialized_view(
+    name="stocks.silver.pool_trades",
+    comment="Every buy and sell in the paper-trader delivery pools (swing, long_term and their shadow pools), one row "
+            "per trade: side, quantity, price, value, fees, realized P&L on sells, reason (dummy Rs).",
+    table_properties={"quality": "silver"},
+)
+@dp.expect_all_or_drop({
+    "has_trade": "trade_id IS NOT NULL AND pool IS NOT NULL AND symbol IS NOT NULL",
+    "buy_or_sell": "side IN ('BUY', 'SELL')",
+})
+def pool_trades():
+    raw = spark.read.table("stocks.bronze.pool_trades_raw")  # noqa: F821
+    typed = raw.select(
+        "trade_id",
+        F.to_timestamp("timestamp_ist", "yyyy-MM-dd HH:mm:ss").alias("trade_ts"),
+        F.to_date(F.substring("timestamp_ist", 1, 10)).alias("trade_date"),
+        "pool", "kind",
+        F.when(F.col("event") == "bought", "BUY").when(F.col("event") == "sold", "SELL").alias("side"),
+        "symbol", "qty", "price", "value_rs", "fees_rs", "pnl_rs", "cash_after", "reason", "note",
+        "_file_modified_at",
+    )
+    return since_ledger_start(latest_file_wins(typed, ["trade_id"])).drop("_file_modified_at")

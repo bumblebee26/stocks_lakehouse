@@ -295,6 +295,22 @@ locals {
       ${replace(local.pool_board_sql, "__GRP__", "Long-term")}
     SQL
 
+    swing_best = <<-SQL
+      ${replace(local.pool_best_sql, "__GRP__", "Swing")}
+    SQL
+
+    longterm_best = <<-SQL
+      ${replace(local.pool_best_sql, "__GRP__", "Long-term")}
+    SQL
+
+    swing_trades = <<-SQL
+      ${replace(local.pool_trades_sql, "__GRP__", "Swing")}
+    SQL
+
+    longterm_trades = <<-SQL
+      ${replace(local.pool_trades_sql, "__GRP__", "Long-term")}
+    SQL
+
     swing_returns = <<-SQL
       SELECT snapshot_date, strategy, kind, return_pct FROM (${local.strategy_returns_sql}) WHERE grp IN ('Swing', 'Benchmark')
     SQL
@@ -614,6 +630,9 @@ locals {
     WITH d AS (${local.strategy_daily_sql}),
          nb AS (SELECT trade_date, close FROM stocks.silver.nse_eq_daily WHERE symbol = 'NIFTYBEES' AND series = 'EQ'),
          span AS (SELECT pool, kind, min(snapshot_date) AS start_date, max(snapshot_date) AS last_date FROM d GROUP BY pool, kind),
+         tr AS (SELECT pool, count(*) AS trades, count_if(side = 'BUY') AS buys, count_if(side = 'SELL') AS sells,
+                       sum(coalesce(pnl_rs, 0)) AS realized_rs
+                FROM stocks.silver.pool_trades GROUP BY pool),
          latest AS (SELECT d.pool, d.equity, d.capital FROM d JOIN span s ON d.pool = s.pool AND d.snapshot_date = s.last_date),
          nb_span AS (
            SELECT s.pool,
@@ -624,11 +643,13 @@ locals {
            GROUP BY s.pool)
     SELECT ${replace(local.strategy_group_sql, "pool", "s.pool")} AS grp,
            ${replace(local.strategy_label_sql, "pool", "s.pool")} AS strategy,
-           s.kind, s.start_date, s.last_date, round(l.equity, 0) AS value_rs,
+           s.kind, s.start_date, s.last_date, round(l.equity, 0) AS value_rs, round(l.equity - l.capital, 0) AS pnl_rs,
+           CAST(coalesce(t.trades, 0) AS INT) AS trades, CAST(coalesce(t.buys, 0) AS INT) AS buys,
+           CAST(coalesce(t.sells, 0) AS INT) AS sells, round(coalesce(t.realized_rs, 0), 0) AS realized_rs,
            round((l.equity / l.capital - 1) * 100, 2) AS return_pct,
            round((n.nb_last / n.nb_start - 1) * 100, 2) AS niftybees_pct,
            round((l.equity / l.capital - 1) * 100 - (n.nb_last / n.nb_start - 1) * 100, 2) AS vs_niftybees_pct
-    FROM span s JOIN latest l ON l.pool = s.pool LEFT JOIN nb_span n ON n.pool = s.pool
+    FROM span s JOIN latest l ON l.pool = s.pool LEFT JOIN nb_span n ON n.pool = s.pool LEFT JOIN tr t ON t.pool = s.pool
   SQL
 
   strategy_returns_sql = <<-SQL
@@ -658,25 +679,58 @@ locals {
   # One pool group (__GRP__ = Swing or Long-term): its scoreboard, with a NIFTYBEES row over the real pool's days.
   pool_board_sql = <<-SQL
     WITH s AS (SELECT * FROM (${local.strategy_scoreboard_sql}) WHERE grp = '__GRP__')
-    SELECT strategy, initcap(kind) AS kind, start_date AS since, value_rs, return_pct,
+    SELECT strategy, initcap(kind) AS kind, start_date AS since, value_rs, pnl_rs, return_pct, trades,
            ${replace(local.signed_pts_sql, "__V__", "vs_niftybees_pct")} AS vs_niftybees
     FROM s
     UNION ALL
     SELECT 'NIFTYBEES (same days as the real pool)' AS strategy, 'NIFTYBEES' AS kind, start_date AS since,
-           CAST(NULL AS DOUBLE) AS value_rs, niftybees_pct AS return_pct, '–' AS vs_niftybees
+           CAST(NULL AS DOUBLE) AS value_rs, CAST(NULL AS DOUBLE) AS pnl_rs, niftybees_pct AS return_pct,
+           CAST(NULL AS INT) AS trades, '–' AS vs_niftybees
     FROM s WHERE kind = 'real'
     ORDER BY return_pct DESC
   SQL
 
   # One pool group's headline tiles: the real pool, the best shadow, NIFTYBEES, and how many shadows beat it.
   pool_kpis_sql = <<-SQL
+    SELECT * EXCEPT (best_shadow_raw), concat(upper(substr(best_shadow_raw, 1, 1)), substr(best_shadow_raw, 2)) AS best_shadow
+    FROM (
     WITH s AS (SELECT * FROM (${local.strategy_scoreboard_sql}) WHERE grp = '__GRP__')
     SELECT max(CASE WHEN kind = 'real' THEN value_rs END)        AS real_value_rs,
+           max(CASE WHEN kind = 'real' THEN pnl_rs END)          AS real_pnl_rs,
            max(CASE WHEN kind = 'real' THEN return_pct END)      AS real_return_pct,
+           max(CASE WHEN kind = 'real' THEN trades END)          AS real_trades,
+           CAST(sum(CASE WHEN kind = 'shadow' THEN trades ELSE 0 END) AS INT) AS shadow_trades,
            max(CASE WHEN kind = 'shadow' THEN return_pct END)    AS best_shadow_pct,
+           max_by(CASE WHEN kind = 'shadow' THEN regexp_replace(strategy, '^(Swing|Long-term) shadow: ', '') END,
+                  CASE WHEN kind = 'shadow' THEN return_pct END) AS best_shadow_raw,
+           max_by(CASE WHEN kind = 'shadow' THEN value_rs END, CASE WHEN kind = 'shadow' THEN return_pct END) AS best_shadow_value_rs,
+           max_by(CASE WHEN kind = 'shadow' THEN pnl_rs END, CASE WHEN kind = 'shadow' THEN return_pct END) AS best_shadow_pnl_rs,
            max(CASE WHEN kind = 'real' THEN niftybees_pct END)   AS niftybees_pct,
            CAST(count_if(kind = 'shadow' AND vs_niftybees_pct > 0) AS INT) AS shadows_beating
     FROM s
+    )
+  SQL
+
+  # One pool group's "best shadow vs NIFTYBEES" card: which shadow leads, its value, P&L and return, and NIFTYBEES.
+  pool_best_sql = <<-SQL
+    WITH k AS (${local.pool_kpis_sql})
+    SELECT 'Best shadow' AS line, coalesce(best_shadow, 'none yet') AS strategy, best_shadow_value_rs AS value_rs,
+           best_shadow_pnl_rs AS pnl_rs, ${replace(local.signed_pct_sql, "__V__", "best_shadow_pct")} AS return_pct
+    FROM k
+    UNION ALL
+    SELECT 'Bar to beat', 'NIFTYBEES, same days', CAST(NULL AS DOUBLE), CAST(NULL AS DOUBLE),
+           ${replace(local.signed_pct_sql, "__V__", "niftybees_pct")}
+    FROM k
+  SQL
+
+  # One pool group's buys and sells (last 30 days), real and shadow; newest first.
+  pool_trades_sql = <<-SQL
+    SELECT trade_date, ${local.strategy_label_sql} AS strategy, initcap(kind) AS kind, side, symbol,
+           CAST(qty AS INT) AS qty, round(price, 2) AS price, round(value_rs, 0) AS value_rs,
+           round(pnl_rs, 0) AS pnl_rs, reason
+    FROM stocks.silver.pool_trades
+    WHERE ${local.strategy_group_sql} = '__GRP__' AND trade_date >= date_sub(current_date(), 30)
+    ORDER BY trade_ts DESC
   SQL
 
   # Helpers to keep widget definitions short.
@@ -709,10 +763,14 @@ locals {
       backtest_latest      = ["rule", "trades", "total_r", "vs_current_r", "avg_r", "win_pct", "days_up_pct", "worst_day_r", "days", "run_date"]
       backtest_trend       = ["run_date", "rule", "vs_current_r"]
       shadow_trades_recent = ["trade_date", "symbol", "side", "setup", "test", "rule", "actual_rs", "would_have_made_rs", "vs_actual_rs"]
-      swing_kpis           = ["real_value_rs", "real_return_pct", "best_shadow_pct", "niftybees_pct", "shadows_beating"]
-      longterm_kpis        = ["real_value_rs", "real_return_pct", "best_shadow_pct", "niftybees_pct", "shadows_beating"]
-      swing_scoreboard     = ["strategy", "kind", "since", "value_rs", "return_pct", "vs_niftybees"]
-      longterm_scoreboard  = ["strategy", "kind", "since", "value_rs", "return_pct", "vs_niftybees"]
+      swing_kpis           = ["real_value_rs", "real_pnl_rs", "real_return_pct", "real_trades", "shadow_trades", "best_shadow", "best_shadow_value_rs", "best_shadow_pnl_rs", "best_shadow_pct", "niftybees_pct", "shadows_beating"]
+      longterm_kpis        = ["real_value_rs", "real_pnl_rs", "real_return_pct", "real_trades", "shadow_trades", "best_shadow", "best_shadow_value_rs", "best_shadow_pnl_rs", "best_shadow_pct", "niftybees_pct", "shadows_beating"]
+      swing_scoreboard     = ["strategy", "kind", "since", "value_rs", "pnl_rs", "return_pct", "trades", "vs_niftybees"]
+      longterm_scoreboard  = ["strategy", "kind", "since", "value_rs", "pnl_rs", "return_pct", "trades", "vs_niftybees"]
+      swing_best           = ["line", "strategy", "value_rs", "pnl_rs", "return_pct"]
+      longterm_best        = ["line", "strategy", "value_rs", "pnl_rs", "return_pct"]
+      swing_trades         = ["trade_date", "strategy", "kind", "side", "symbol", "qty", "price", "value_rs", "pnl_rs", "reason"]
+      longterm_trades      = ["trade_date", "strategy", "kind", "side", "symbol", "qty", "price", "value_rs", "pnl_rs", "reason"]
       swing_returns        = ["snapshot_date", "strategy", "kind", "return_pct"]
       longterm_returns     = ["snapshot_date", "strategy", "kind", "return_pct"]
       swing_holdings       = ["strategy", "kind", "symbol", "sector", "qty", "avg_cost", "last_price", "value_rs", "pnl_rs", "pnl_pct", "opened"]
@@ -760,14 +818,14 @@ locals {
       intra_r        = { ds = "intraday_kpis", field = "expectancy_r", title = "Average R per trade", desc = "Above 0 = an edge after costs", pos = [6, 3] }
       intra_pf       = { ds = "intraday_kpis", field = "profit_factor", title = "Profit factor", desc = "Gains / losses; above 1 makes money", pos = [8, 3] }
       intra_wl       = { ds = "intraday_kpis", field = "win_loss_ratio", title = "Average win / average loss", desc = "How big wins are next to losses", pos = [10, 3] }
-      swing_real     = { ds = "swing_kpis", field = "real_value_rs", title = "Real pool (Rs)", desc = "Held in NIFTYBEES while new rules are tested", pos = [0, 3], w = 3 }
-      swing_return   = { ds = "swing_kpis", field = "real_return_pct", title = "Real pool return (%)", desc = "Since 18 Nov", pos = [3, 3], w = 3 }
-      swing_best     = { ds = "swing_kpis", field = "best_shadow_pct", title = "Best shadow (%)", desc = "Which one: see the scoreboard", pos = [6, 3], w = 3 }
-      swing_nifty    = { ds = "swing_kpis", field = "niftybees_pct", title = "NIFTYBEES, same days (%)", desc = "The bar to beat", pos = [9, 3], w = 3 }
-      lt_real        = { ds = "longterm_kpis", field = "real_value_rs", title = "Real pool (Rs)", desc = "Cash until the 18 Dec go/no-go review", pos = [0, 3], w = 3 }
-      lt_return      = { ds = "longterm_kpis", field = "real_return_pct", title = "Real pool return (%)", desc = "Since 18 Nov", pos = [3, 3], w = 3 }
-      lt_best        = { ds = "longterm_kpis", field = "best_shadow_pct", title = "Best shadow (%)", desc = "Which one: see the scoreboard", pos = [6, 3], w = 3 }
-      lt_nifty       = { ds = "longterm_kpis", field = "niftybees_pct", title = "NIFTYBEES, same days (%)", desc = "The bar to beat", pos = [9, 3], w = 3 }
+      swing_real     = { ds = "swing_kpis", field = "real_value_rs", title = "Real pool (Rs)", desc = "Held in NIFTYBEES while new rules are tested", pos = [0, 3] }
+      swing_pnl      = { ds = "swing_kpis", field = "real_pnl_rs", title = "Real P&L (Rs)", desc = "Value minus starting capital, after costs", pos = [2, 3] }
+      swing_return   = { ds = "swing_kpis", field = "real_return_pct", title = "Real pool return (%)", desc = "Since 18 Nov", pos = [4, 3] }
+      swing_trades   = { ds = "swing_kpis", field = "real_trades", title = "Trades placed (real)", desc = "Buys and sells since 18 Nov; shadows: scoreboard", pos = [6, 3] }
+      lt_real        = { ds = "longterm_kpis", field = "real_value_rs", title = "Real pool (Rs)", desc = "Cash until the 18 Dec go/no-go review", pos = [0, 3] }
+      lt_pnl         = { ds = "longterm_kpis", field = "real_pnl_rs", title = "Real P&L (Rs)", desc = "Value minus starting capital, after costs", pos = [2, 3] }
+      lt_return      = { ds = "longterm_kpis", field = "real_return_pct", title = "Real pool return (%)", desc = "Since 18 Nov", pos = [4, 3] }
+      lt_trades      = { ds = "longterm_kpis", field = "real_trades", title = "Trades placed (real)", desc = "Buys and sells since 18 Nov; shadows: scoreboard", pos = [6, 3] }
       calls_right    = { ds = "calls_kpis", field = "calls_right_pct", title = "Your calls right (%)", desc = "A coin flip gets 50", pos = [0, 3] }
       calls_liked    = { ds = "calls_kpis", field = "liked_avg_r", title = "When you liked it (avg R)", desc = "Average result per proposal", pos = [2, 3] }
       calls_disliked = { ds = "calls_kpis", field = "disliked_avg_r", title = "When you disliked it (avg R)", desc = "Average result per proposal", pos = [4, 3] }
@@ -802,8 +860,8 @@ locals {
   show_filter = {
     for k, f in {
       intra_show = { datasets = ["intra_lines", "intra_board"], desc = "Real · Exit rules · Models · Opening-range test. Pick any; none picked = all." }
-      swing_show = { datasets = ["swing_returns", "swing_scoreboard", "swing_holdings"], desc = "Real · Shadow · NIFTYBEES. Pick any; none picked = all." }
-      lt_show    = { datasets = ["longterm_returns", "longterm_scoreboard", "longterm_holdings"], desc = "Real · Shadow · NIFTYBEES. Pick any; none picked = all." }
+      swing_show = { datasets = ["swing_returns", "swing_scoreboard", "swing_holdings", "swing_trades"], desc = "Real · Shadow · NIFTYBEES. Pick any; none picked = all." }
+      lt_show    = { datasets = ["longterm_returns", "longterm_scoreboard", "longterm_holdings", "longterm_trades"], desc = "Real · Shadow · NIFTYBEES. Pick any; none picked = all." }
       } : k => {
       widget = {
         name = k
@@ -837,7 +895,7 @@ locals {
       intra_bt_trend = { ds = "backtest_trend", type = "line", x = "run_date", xt = "temporal", y = "vs_current_r", color = "rule", title = "Is each edge holding up? (R vs current, by run day)", desc = "A line that stays above 0 run after run is a rule worth reviewing for go-live.", pos = [6, 33, 6, 6] }
       swing_curve    = { ds = "swing_returns", type = "line", x = "snapshot_date", xt = "temporal", y = "return_pct", color = "strategy", title = "Return since each started (%)", desc = "Real pool, the four shadows (news breakouts, scanner, momentum + news, momentum top 3) and NIFTYBEES. Use Show to pick.", pos = [0, 6, 12, 7] }
       lt_curve       = { ds = "longterm_returns", type = "line", x = "snapshot_date", xt = "temporal", y = "return_pct", color = "strategy", title = "Return since each started (%)", desc = "Real pool, the three shadows (quality picks, momentum top 15, momentum top 5) and NIFTYBEES. Use Show to pick.", pos = [0, 6, 12, 7] }
-      quality_dots   = { ds = "quality_scatter", type = "scatter", x = "roce_pct", xt = "quantitative", y = "pe", color = "tests", title = "Quality vs price: return on capital (%) against P/E (excl. banks)", desc = "Further right = more profitable; lower = cheaper. Bottom right is the sweet spot.", pos = [0, 30, 12, 7] }
+      quality_dots   = { ds = "quality_scatter", type = "scatter", x = "roce_pct", xt = "quantitative", y = "pe", color = "tests", title = "Quality vs price: return on capital (%) against P/E (excl. banks)", desc = "Further right = more profitable; lower = cheaper. Bottom right is the sweet spot.", pos = [0, 37, 12, 7] }
       calls_trend    = { ds = "calls_weekly", type = "line", x = "week", xt = "temporal", y = "right_pct", color = "series", title = "Calls right, week by week (%)", desc = "Above the coin-flip line = your instinct adds something.", pos = [0, 11, 7, 6] }
       calls_setup    = { ds = "calls_by_setup", type = "bar", x = "setup", xt = "categorical", y = "right_pct", color = null, title = "Where your instinct is strongest (% right)", desc = "Setups with 3 or more rated proposals. 50 = a coin flip.", pos = [7, 11, 5, 6] }
       mk_follow      = { ds = "india_vs_global", type = "bar", x = "name", xt = "categorical", y = "corr_with_india_gap", color = "region", title = "Who India's open follows (correlation)", desc = "How closely each market's last move matched the Nifty's next open. Near +1 = same way; 0 = no link; below 0 = opposite.", pos = [7, 10, 5, 12] }
@@ -885,13 +943,17 @@ locals {
       summary_intraday  = { ds = "summary_intraday", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 51, 12, 4] }
       swing_board       = { ds = "swing_scoreboard", title = "Scoreboard", desc = "Return since each started; vs NIFTYBEES over the same days.", pos = [0, 13, 6, 7] }
       swing_hold        = { ds = "swing_holdings", title = "What each one holds now", desc = "Real pool and shadow pools (paper).", pos = [6, 13, 6, 7] }
-      swing_scan        = { ds = "scanner_today", title = "Today's technical scanner (Nifty 200)", desc = "Strict picks and near-misses. Indicative levels, never a guaranteed return.", pos = [0, 20, 12, 7] }
-      swing_mom         = { ds = "momentum_top", title = "Momentum ranks (Nifty 200)", desc = "What the momentum shadows buy from: swing top 12 and long-term top 30. Past strength only.", pos = [0, 27, 12, 8] }
-      swing_signals     = { ds = "scanner_record", title = "How each scanner signal did afterwards", desc = "Average return 5, 10 and 20 trading days later, and how often it beat NIFTYBEES. Past results only.", pos = [0, 35, 12, 7] }
+      swing_best_card   = { ds = "swing_best", title = "Best shadow vs the bar to beat", desc = "Which shadow leads, its value and P&L, and NIFTYBEES over the real pool's days.", pos = [8, 3, 4, 3] }
+      swing_trades      = { ds = "swing_trades", title = "Trades placed (last 30 days)", desc = "Every buy and sell, real pool and shadows, after costs. P&L is realized on sells.", pos = [0, 20, 12, 7] }
+      swing_scan        = { ds = "scanner_today", title = "Today's technical scanner (Nifty 200)", desc = "Strict picks and near-misses. Indicative levels, never a guaranteed return.", pos = [0, 27, 12, 7] }
+      swing_mom         = { ds = "momentum_top", title = "Momentum ranks (Nifty 200)", desc = "What the momentum shadows buy from: swing top 12 and long-term top 30. Past strength only.", pos = [0, 34, 12, 8] }
+      swing_signals     = { ds = "scanner_record", title = "How each scanner signal did afterwards", desc = "Average return 5, 10 and 20 trading days later, and how often it beat NIFTYBEES. Past results only.", pos = [0, 42, 12, 7] }
       lt_board          = { ds = "longterm_scoreboard", title = "Scoreboard", desc = "Return since each started; vs NIFTYBEES over the same days.", pos = [0, 13, 6, 7] }
       lt_hold           = { ds = "longterm_holdings", title = "What each one holds now", desc = "Real pool and shadow pools (paper).", pos = [6, 13, 6, 7] }
-      quality_top       = { ds = "longterm_picks", title = "This week's quality picks (max 2 per industry) and the next 20", desc = "Eligible Nifty 200 companies; score = 100 x quality + growth bonus - price penalty. Shadow mode: nothing real is bought yet.", pos = [0, 20, 12, 10] }
-      summary_quality   = { ds = "summary_quality", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 37, 12, 4] }
+      lt_best_card      = { ds = "longterm_best", title = "Best shadow vs the bar to beat", desc = "Which shadow leads, its value and P&L, and NIFTYBEES over the real pool's days.", pos = [8, 3, 4, 3] }
+      lt_trades         = { ds = "longterm_trades", title = "Trades placed (last 30 days)", desc = "Every buy and sell, real pool and shadows, after costs. P&L is realized on sells.", pos = [0, 20, 12, 7] }
+      quality_top       = { ds = "longterm_picks", title = "This week's quality picks (max 2 per industry) and the next 20", desc = "Eligible Nifty 200 companies; score = 100 x quality + growth bonus - price penalty. Shadow mode: nothing real is bought yet.", pos = [0, 27, 12, 10] }
+      summary_quality   = { ds = "summary_quality", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 44, 12, 4] }
       calls_matrix      = { ds = "calls_matrix", title = "Your rating vs what happened", desc = "Count · total Rs · whether your call was right. Skipped proposals count by what they would have made.", pos = [0, 6, 5, 5] }
       calls_vs_trader   = { ds = "calls_vs_trader", title = "You vs the trader", desc = "Where you disagreed shows what following you would have changed (ratings still never train it).", pos = [5, 6, 7, 5] }
       calls_list        = { ds = "rating_trades", title = "Every rated proposal (newest first)", desc = "Your rating, what the trader did, the outcome and whether your call was right.", pos = [0, 17, 12, 9] }
@@ -994,9 +1056,10 @@ locals {
         layoutVersion = "GRID_V1"
         layout = [
           local.text.swing_title, local.show_filter.swing_show,
-          local.counter.swing_real, local.counter.swing_return, local.counter.swing_best, local.counter.swing_nifty,
+          local.counter.swing_real, local.counter.swing_pnl, local.counter.swing_return, local.counter.swing_trades,
+          local.table_widget.swing_best_card,
           local.chart.swing_curve,
-          local.table_widget.swing_board, local.table_widget.swing_hold,
+          local.table_widget.swing_board, local.table_widget.swing_hold, local.table_widget.swing_trades,
           local.table_widget.swing_scan, local.table_widget.swing_mom, local.table_widget.swing_signals,
         ]
       },
@@ -1007,9 +1070,10 @@ locals {
         layoutVersion = "GRID_V1"
         layout = [
           local.text.lt_title, local.show_filter.lt_show,
-          local.counter.lt_real, local.counter.lt_return, local.counter.lt_best, local.counter.lt_nifty,
+          local.counter.lt_real, local.counter.lt_pnl, local.counter.lt_return, local.counter.lt_trades,
+          local.table_widget.lt_best_card,
           local.chart.lt_curve,
-          local.table_widget.lt_board, local.table_widget.lt_hold,
+          local.table_widget.lt_board, local.table_widget.lt_hold, local.table_widget.lt_trades,
           local.table_widget.quality_top, local.chart.quality_dots, local.table_widget.summary_quality,
         ]
       },

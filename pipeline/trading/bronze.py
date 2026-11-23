@@ -12,6 +12,7 @@ _rescued_data instead (schemaEvolutionMode = rescue).
 
   stocks.bronze.trades_raw                   paper-trader journal exports
   stocks.bronze.portfolio_raw                paper-trader portfolio snapshots
+  stocks.bronze.pool_trades_raw              paper-trader pool buys and sells (swing, long-term, shadows)
 Reads market tables (NIFTYBEES closes in stocks.silver.nse_eq_daily, the Nifty 200 list) as plain
 tables; they are at most a day old, which is fine for the portfolio and shadow comparisons.
 """
@@ -115,4 +116,36 @@ def portfolio_raw():
         .option("cloudFiles.partitionColumns", "")
         .schema(PORTFOLIO_SCHEMA)
         .load(f"{LANDING}/portfolio/")
+    )
+
+
+# ---------------------------------------------------------------------------
+# Paper-trader pool trades: every buy and sell in the delivery pools (real swing and long-term, and the shadow
+# pools), pushed with the journal (15:45 and 23:30 IST; the last 4 days each time, so a day can arrive again).
+# ---------------------------------------------------------------------------
+# SQL equivalent:
+#   CREATE OR REFRESH STREAMING TABLE stocks.bronze.pool_trades_raw AS
+#   SELECT *, <lineage columns> FROM STREAM read_files('/Volumes/stocks/bronze/landing/pool_trades/',
+#     format => 'json', pathGlobFilter => '*.jsonl', schema => '<POOL_TRADES_SCHEMA below>');
+POOL_TRADES_SCHEMA = (
+    "trade_id STRING, pool STRING, kind STRING, timestamp_ist STRING, event STRING, symbol STRING, qty DOUBLE, "
+    "price DOUBLE, fees_rs DOUBLE, value_rs DOUBLE, pnl_rs DOUBLE, cash_after DOUBLE, reason STRING, note STRING"
+)
+
+
+@dp.table(
+    name="stocks.bronze.pool_trades_raw",
+    comment="Raw paper-trader pool trades (dummy money): buys and sells in the swing and long-term pools, real and "
+            "shadow, one row per trade per daily file.",
+    table_properties={"quality": "bronze"},
+)
+def pool_trades_raw():
+    return with_lineage(
+        spark.readStream.format("cloudFiles")  # noqa: F821
+        .option("cloudFiles.format", "json")
+        .option("pathGlobFilter", "*.jsonl")
+        .option("rescuedDataColumn", "_rescued_data")
+        .option("cloudFiles.partitionColumns", "")
+        .schema(POOL_TRADES_SCHEMA)
+        .load(f"{LANDING}/pool_trades/")
     )
