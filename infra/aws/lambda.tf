@@ -207,7 +207,8 @@ resource "aws_scheduler_schedule" "news_live" {
 # One-off backfill (24 Nov 2026, approved by the owner): NSE's older bhavcopy format from 2019 to the day before
 # UDiFF began (8 Jul 2024), for multi-year swing and long-term backtests. First run 23 Nov 22:00 stopped near late
 # 2020: the chain of self-invocations hit AWS's recursive-loop limit (~16 hops). Resumed from 2 Nov 2020 at 01:45 IST
-# on 24 Nov with a 15-minute timeout (~80 days a run, ~9 runs), after
+# on 24 Nov with a 15-minute timeout, stopped again by the same protection at 02:17; restarted at 03:00 with
+# loop detection off for this function (below), after
 # the day's 19:30 fetch; the Lambda continues itself until the range is done (~2 hours, 2 s between files). To run
 # it again, change the time and apply.
 resource "aws_scheduler_schedule" "nse_history_backfill" {
@@ -215,7 +216,7 @@ resource "aws_scheduler_schedule" "nse_history_backfill" {
   description = "One-off: NSE bhavcopy 2020-11-02 to 2024-07-05 (older format, converted to UDiFF columns); resumes the 23 Nov run."
   state       = var.schedules_enabled ? "ENABLED" : "DISABLED"
 
-  schedule_expression          = "at(2026-11-24T01:45:00)"
+  schedule_expression          = "at(2026-11-24T03:00:00)"
   schedule_expression_timezone = "Asia/Kolkata"
 
   flexible_time_window {
@@ -232,4 +233,13 @@ resource "aws_scheduler_schedule" "nse_history_backfill" {
       maximum_event_age_in_seconds = 3600
     }
   }
+}
+
+# The NSE fetcher continues long backfills by invoking itself (common.run_dates). AWS stopped that chain as a
+# "recursive loop" on 23-24 Nov 2026 (Health event AWS_LAMBDA_RUNAWAY_TERMINATION_NOTIFICATION), so at the owner's
+# decision loop detection is off for this one function. The chain is bounded: each hop passes only the remaining
+# dates of a fixed range and stops at its end.
+resource "aws_lambda_function_recursion_config" "nse" {
+  function_name  = aws_lambda_function.fetcher["nse"].function_name
+  recursive_loop = "Allow"
 }
