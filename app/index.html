@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#0f151b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Trading Desk">
+<title>Trading Desk</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<style>
+/* NSE Paper Trading Desk, mobile. Layout A+B: tab bar app, the Desk tab opens with the day's story.
+   Data: data/desk.json, written by the app-export Lambda after each Databricks job. Dummy money only. */
+:root {
+  --bg: #f4f6f8; --card: #ffffff; --fg: #16202a; --muted: #57636f; --line: #dfe4e9; --soft: #edf1f4;
+  --accent: #2563a6; --up: #1f6a40; --down: #a3311f; --nb: #8a96a2; --chip: #e3f2e9; --chip-fg: #1f6a40;
+}
+@media (prefers-color-scheme: dark) { :root {
+  --bg: #0f151b; --card: #161e26; --fg: #e5eaef; --muted: #9ba7b3; --line: #2b3641; --soft: #1d2731;
+  --accent: #75aee9; --up: #71c797; --down: #ff8a7a; --nb: #7d8995; --chip: #15301f; --chip-fg: #71c797;
+} }
+* { box-sizing: border-box }
+html, body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif; -webkit-text-size-adjust: 100% }
+header { position: sticky; top: 0; z-index: 2; background: var(--bg); padding: calc(env(safe-area-inset-top) + 14px) 16px 10px; display: flex; justify-content: space-between; align-items: center; gap: 10px }
+header .t { display: flex; flex-direction: column }
+header .t b { font-size: 12px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted) }
+header .t span { font-size: 13px; color: var(--muted) }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end }
+.chip { font-size: 12px; font-weight: 600; padding: 5px 9px; border-radius: 999px; background: var(--soft); color: var(--muted); white-space: nowrap }
+.chip.on { background: var(--chip); color: var(--chip-fg) }
+main { padding: 0 14px calc(env(safe-area-inset-bottom) + 86px); display: flex; flex-direction: column; gap: 12px; max-width: 640px; margin: 0 auto }
+h2 { font-size: 22px; margin: 4px 2px 0 }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px }
+.card h3 { font-size: 14px; margin: 0 0 8px }
+.story h1 { font-size: 22px; line-height: 1.2; margin: 2px 0 8px }
+.story p { margin: 6px 0; color: var(--fg) }
+.story .when { font-size: 12px; color: var(--muted) }
+.big { font-size: 34px; font-weight: 700; letter-spacing: -.01em; font-variant-numeric: tabular-nums }
+.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px }
+.tile { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; min-width: 0 }
+.tile .l { font-size: 12px; color: var(--muted) }
+.tile .v { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; overflow-wrap: anywhere }
+.up { color: var(--up) } .down { color: var(--down) } .muted { color: var(--muted) }
+.row { display: flex; justify-content: space-between; align-items: center; gap: 12px; min-height: 46px; border-top: 1px solid var(--soft); padding: 6px 0 }
+.row:first-of-type { border-top: 0 }
+.row .n { display: flex; flex-direction: column; min-width: 0 }
+.row .n b { font-size: 14px; font-weight: 600 }
+.row .n span { font-size: 12px; color: var(--muted) }
+.row .r { font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap }
+.seg { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); background: var(--soft); border-radius: 10px; padding: 3px }
+.seg button { min-height: 40px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font: 600 13px inherit; font-family: inherit }
+.seg button[aria-pressed="true"] { background: var(--card); color: var(--fg) }
+svg.chart { width: 100%; height: 120px; display: block }
+.legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); flex-wrap: wrap }
+.note { font-size: 12px; color: var(--muted); margin: 6px 2px 0 }
+nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 3; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); background: var(--card); border-top: 1px solid var(--line); padding: 4px 4px calc(env(safe-area-inset-bottom) + 6px) }
+nav button { min-height: 50px; border: 0; background: none; color: var(--muted); font: 600 12px inherit; font-family: inherit; border-top: 3px solid transparent }
+nav button[aria-current="page"] { color: var(--accent); border-top-color: var(--accent) }
+.err { border-color: var(--down) }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+</style>
+</head>
+<body>
+<header>
+  <div class="t"><b>NSE Paper Trading Desk</b><span id="updated">Loading…</span></div>
+  <div class="chips" id="chips"></div>
+</header>
+<main id="main" aria-live="polite"></main>
+<nav aria-label="Sections">
+  <button type="button" data-tab="desk" aria-current="page">Desk</button>
+  <button type="button" data-tab="intraday">Intraday</button>
+  <button type="button" data-tab="swing">Swing</button>
+  <button type="button" data-tab="long">Long</button>
+  <button type="button" data-tab="markets">Markets</button>
+</nav>
+<script>
+"use strict";
+let D = {};
+let tab = "desk";
+let show = { swing: "both", long: "both", intraday: "both" };
+try { tab = localStorage.getItem("tab") || "desk"; } catch (e) {}
+
+const rows = (n) => ((D.datasets || {})[n] || {}).rows || [];
+const one = (n) => rows(n)[0] || {};
+const esc = (s) => String(s == null ? "–" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const num = (v) => (v == null || v === "" || isNaN(Number(v)) ? null : Number(v));
+const rs = (v, sign) => { const n = num(v); if (n == null) return "–"; const s = "Rs " + Math.abs(Math.round(n)).toLocaleString("en-IN"); return sign ? (n < 0 ? "−" : "+") + s : (n < 0 ? "−" : "") + s; };
+const pct = (v, sign) => { const n = num(v); if (n == null) return "–"; return (sign && n > 0 ? "+" : n < 0 ? "−" : "") + Math.abs(n).toFixed(2) + "%"; };
+const cls = (v) => { const n = num(v); return n == null ? "" : n > 0 ? "up" : n < 0 ? "down" : ""; };
+const arrowCls = (s) => (String(s).startsWith("▲") ? "up" : String(s).startsWith("▼") ? "down" : "");
+
+function lineChart(series, label) {
+  // series: [{name, color, dash, points: [[x(date string), y]]}]
+  const all = series.flatMap((s) => s.points.map((p) => p[1]));
+  if (all.length < 2) return '<p class="muted">Not enough days yet.</p>';
+  const dates = [...new Set(series.flatMap((s) => s.points.map((p) => p[0])))].sort();
+  const lo = Math.min(...all), hi = Math.max(...all), pad = (hi - lo) * 0.1 || 1;
+  const W = 340, H = 110, x = (d) => (dates.indexOf(d) / Math.max(dates.length - 1, 1)) * W;
+  const y = (v) => H - ((v - lo + pad) / (hi - lo + 2 * pad)) * H;
+  const lines = series.map((s) => `<polyline fill="none" stroke="${s.color}" stroke-width="${s.dash ? 2 : 3}" ${s.dash ? 'stroke-dasharray="5 4"' : ""} points="${s.points.map((p) => x(p[0]).toFixed(1) + "," + y(p[1]).toFixed(1)).join(" ")}"/>`).join("");
+  const legend = series.map((s) => `<span style="color:${s.color}">${s.dash ? "┅" : "━"} ${esc(s.name)}</span>`).join("");
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}">${lines}</svg><div class="legend">${legend}</div>`;
+}
+
+function story() {
+  const k = one("desk_kpis"), dec = rows("desk_decisions");
+  const today = num(k.today_pnl_rs), since = num(k.since_reset_pct);
+  const placed = dec.filter((d) => String(d.decision).includes("Placed"));
+  const skipped = dec.filter((d) => String(d.decision).startsWith("–"));
+  const savedBy = skipped.filter((d) => String(d.result).includes("−")).length;
+  const head = today == null ? "Today's desk" : today > 0 ? "A green day" : today < 0 ? "A red day" : "A flat day";
+  const parts = [];
+  if (today != null) parts.push(`Today ${rs(today, true)}; ${pct(since, true)} since 18 Nov.`);
+  if (placed.length) parts.push(`${placed.length} trade${placed.length > 1 ? "s" : ""} placed: ${placed.map((d) => `${esc(d.symbol)} ${esc(d.result)}`).join(", ")}.`);
+  if (skipped.length) parts.push(`${skipped.length} skipped${savedBy ? `, ${savedBy} of them would have lost` : ""}.`);
+  const best = rows("intra_board").filter((r) => r.kind !== "Real" && num(r.vs_real_rs) != null).sort((a, b) => b.vs_real_rs - a.vs_real_rs)[0];
+  if (best) parts.push(`Best shadow so far: ${esc(best.rule)} (${rs(best.vs_real_rs, true)} vs real).`);
+  return `<section class="card story"><span class="when">${esc(one("desk_status").as_of)}</span><h1>${head}</h1>${parts.map((p) => `<p>${p}</p>`).join("")}</section>`;
+}
+
+function desk() {
+  const k = one("desk_kpis");
+  const pv = rows("portfolio_vs_nifty");
+  const s = (name, color, dash) => ({ name, color, dash, points: pv.filter((r) => r.series === name).map((r) => [r.snapshot_date, num(r.index_value)]) });
+  const css = getComputedStyle(document.documentElement);
+  const chart = lineChart([s("Your portfolio", css.getPropertyValue("--accent").trim()), s("NIFTYBEES (index)", css.getPropertyValue("--nb").trim(), true)], "Portfolio vs NIFTYBEES");
+  const dec = rows("desk_decisions").map((d) => `<div class="row"><div class="n"><b>${esc(d.symbol)} · ${esc(d.setup)}</b><span>${esc(d.time)} · ${esc(d.decision)} · score ${esc(d.score)}</span></div><div class="r ${arrowCls(d.result) || (String(d.result).includes("−") ? "down" : String(d.result).includes("+") ? "up" : "muted")}">${esc(d.result)}</div></div>`).join("") || '<p class="muted">No proposals on the latest day.</p>';
+  const board = rows("desk_board").slice(0, 8).map((r) => `<div class="row"><div class="n"><b>${esc(r.strategy)}</b><span>${esc(r.kind)} · ${esc(r.return_since_start)}</span></div><div class="r ${arrowCls(r.vs_niftybees)}">${esc(r.vs_niftybees)}</div></div>`).join("");
+  return story() + `
+  <section class="card"><span class="muted" style="font-size:13px">Whole dummy portfolio</span><div class="big">${rs(k.portfolio_rs)}</div>
+    <div class="${cls(k.since_reset_pct)}" style="font-weight:600">${pct(k.since_reset_pct, true)} since 18 Nov</div>${chart}</section>
+  <div class="tiles">
+    <div class="tile"><span class="l">Today's P&amp;L</span><span class="v ${cls(k.today_pnl_rs)}">${rs(k.today_pnl_rs, true)}</span></div>
+    <div class="tile"><span class="l">Trades, latest day</span><span class="v">${esc(k.trades_today)}</span></div>
+    <div class="tile"><span class="l">Proposals judged</span><span class="v">${esc(k.proposals)}</span></div>
+    <div class="tile"><span class="l">Your calls right</span><span class="v">${k.calls_right_pct == null ? "–" : esc(k.calls_right_pct) + "%"}</span></div>
+  </div>
+  <section class="card"><h3>Today's decisions</h3>${dec}</section>
+  <section class="card"><h3>Every strategy vs NIFTYBEES</h3>${board || '<p class="muted">No data yet.</p>'}</section>`;
+}
+
+function seg(key) {
+  const opts = [["real", "Real"], ["shadow", "Shadows"], ["both", "Both"]];
+  return `<div class="seg" role="group" aria-label="Show">${opts.map(([v, l]) => `<button type="button" data-seg="${key}" data-v="${v}" aria-pressed="${show[key] === v}">${l}</button>`).join("")}</div>`;
+}
+const keep = (key, kind) => show[key] === "both" || (show[key] === "real" ? /real|niftybees/i.test(kind) : !/^real$/i.test(kind));
+
+function intraday() {
+  const k = one("intraday_kpis");
+  const board = rows("intra_board").filter((r) => keep("intraday", r.kind === "Real" ? "real" : "shadow"))
+    .map((r) => `<div class="row"><div class="n"><b>${esc(r.rule)}</b><span>${esc(r.kind)} · ${esc(r.trades)} trades · ${rs(r.total_rs, true)}</span></div><div class="r ${cls(r.vs_real_rs)}">${r.vs_real_rs == null ? "" : rs(r.vs_real_rs, true)}</div></div>`).join("");
+  const ladder = rows("intra_bar_ladder").map((r) => `<div class="row"><div class="n"><b>${esc(r.version)}</b><span>${esc(r.trades)} trades · ${r.won_pct == null ? "–" : esc(r.won_pct) + "% won"}</span></div><div class="r ${cls(r.total_rs)}">${rs(r.total_rs, true)}</div></div>`).join("");
+  const sel = rows("intra_selector").map((r) => `<div class="row"><div class="n"><b>${esc(r.family)}</b><span>${esc(r.latest_pick)}</span></div><div class="r ${cls(num(r.selector_rs) - num(r.fixed_rs))}">${rs(r.selector_rs, true)}<br><span class="muted" style="font-weight:500">fixed ${rs(r.fixed_rs, true)}</span></div></div>`).join("");
+  return `<h2>Intraday</h2>
+  <div class="tiles">
+    <div class="tile"><span class="l">P&amp;L since 18 Nov</span><span class="v ${cls(k.net_pnl_rs)}">${rs(k.net_pnl_rs, true)}</span></div>
+    <div class="tile"><span class="l">Trades · win rate</span><span class="v">${esc(k.trades)} · ${k.win_rate_pct == null ? "–" : esc(k.win_rate_pct) + "%"}</span></div>
+    <div class="tile"><span class="l">Average R a trade</span><span class="v ${cls(k.expectancy_r)}">${esc(k.expectancy_r)}</span></div>
+    <div class="tile"><span class="l">Profit factor</span><span class="v">${esc(k.profit_factor)}</span></div>
+  </div>
+  ${seg("intraday")}
+  <section class="card"><h3>Real vs every shadow (same trades)</h3>${board || '<p class="muted">No data yet.</p>'}<p class="note">Right column: what it would have made vs the real result.</p></section>
+  <section class="card"><h3>Auto bar and sizing (every proposal)</h3>${ladder || '<p class="muted">No data yet.</p>'}</section>
+  <section class="card"><h3>Selector (paper)</h3>${sel || '<p class="muted">Starts after Monday\'s day report.</p>'}</section>`;
+}
+
+function pool(title, kpiName, boardName, key) {
+  const k = one(kpiName);
+  const board = rows(boardName).filter((r) => keep(key, r.kind)).map((r) => `<div class="row"><div class="n"><b>${esc(r.strategy)}</b><span>${esc(r.kind)} · since ${esc(r.since)}${r.value_rs == null ? "" : " · " + rs(r.value_rs)}</span></div><div class="r"><span class="${cls(r.return_pct)}">${pct(r.return_pct, true)}</span><br><span class="${arrowCls(r.vs_niftybees)}" style="font-weight:500;font-size:12px">${esc(r.vs_niftybees)}</span></div></div>`).join("");
+  return `<h2>${title}</h2>
+  <div class="tiles">
+    <div class="tile"><span class="l">Real pool</span><span class="v">${rs(k.real_value_rs)}</span></div>
+    <div class="tile"><span class="l">Real return</span><span class="v ${cls(k.real_return_pct)}">${pct(k.real_return_pct, true)}</span></div>
+    <div class="tile"><span class="l">Best shadow</span><span class="v ${cls(k.best_shadow_pct)}">${pct(k.best_shadow_pct, true)}</span></div>
+    <div class="tile"><span class="l">NIFTYBEES · shadows ahead</span><span class="v">${pct(k.niftybees_pct, true)} · ${esc(k.shadows_beating)}</span></div>
+  </div>
+  ${seg(key)}
+  <section class="card"><h3>Scoreboard</h3>${board || '<p class="muted">No data yet.</p>'}</section>`;
+}
+
+function markets() {
+  const k = one("markets_kpis");
+  const read = rows("market_read").map((r) => `<div class="row"><div class="n"><b>${esc(r.topic)}</b><span style="color:var(--fg);font-size:14px">${esc(r.what_the_data_says)}</span></div></div>`).join("");
+  const moves = rows("world_moves").map((r) => `<div class="row"><div class="n"><b>${esc(r.market)}</b><span>${esc(r.type)} · ${esc(r.as_of)}</span></div><div class="r"><span class="${arrowCls(r.last_move)}">${esc(r.last_move)}</span><br><span class="muted" style="font-weight:500;font-size:12px">5d ${esc(r.over_5)}</span></div></div>`).join("");
+  return `<h2>Global markets</h2>
+  <div class="tiles">
+    <div class="tile"><span class="l">S&amp;P 500</span><span class="v ${cls(k.sp500_pct)}">${pct(k.sp500_pct, true)}</span></div>
+    <div class="tile"><span class="l">Nasdaq</span><span class="v ${cls(k.nasdaq_pct)}">${pct(k.nasdaq_pct, true)}</span></div>
+    <div class="tile"><span class="l">Nikkei</span><span class="v ${cls(k.nikkei_pct)}">${pct(k.nikkei_pct, true)}</span></div>
+    <div class="tile"><span class="l">USD/INR · Brent</span><span class="v">${esc(k.usd_inr)} · $${esc(k.brent_usd)}</span></div>
+  </div>
+  <section class="card"><h3>Today's read</h3>${read || '<p class="muted">No data yet.</p>'}</section>
+  <section class="card"><h3>World moves</h3>${moves || '<p class="muted">No data yet.</p>'}</section>`;
+}
+
+function render() {
+  const st = one("desk_status");
+  document.getElementById("chips").innerHTML = [st.auto_mode, st.india_vix, st.risk].filter((c) => c && c !== "–")
+    .map((c) => `<span class="chip ${String(c).includes("ON") ? "on" : ""}">${esc(c)}</span>`).join("");
+  document.getElementById("updated").textContent = D.updated_at ? `Updated ${D.updated_at} IST` + ((D.failed || []).length ? " · some parts older" : "") : "No data yet";
+  const view = { desk, intraday, swing: () => pool("Swing", "swing_kpis", "swing_scoreboard", "swing"),
+                 long: () => pool("Long term", "longterm_kpis", "longterm_scoreboard", "long"), markets }[tab] || desk;
+  document.getElementById("main").innerHTML = view() + '<p class="note">Dummy money only. Not investment advice.</p>';
+  document.querySelectorAll("nav button").forEach((b) => b.setAttribute("aria-current", b.dataset.tab === tab ? "page" : "false"));
+}
+
+document.querySelector("nav").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-tab]"); if (!b) return;
+  tab = b.dataset.tab; try { localStorage.setItem("tab", tab); } catch (err) {}
+  render(); window.scrollTo(0, 0);
+});
+document.getElementById("main").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-seg]"); if (!b) return;
+  show[b.dataset.seg] = b.dataset.v; render();
+});
+
+async function load() {
+  try {
+    const r = await fetch("data/desk.json", { cache: "no-cache" });
+    if (!r.ok) throw new Error(r.status);
+    D = await r.json();
+  } catch (err) {
+    document.getElementById("main").innerHTML = '<section class="card err"><h3>Couldn\'t load the data</h3><p class="muted">It appears after the next export (about 09:10, 11:40, 16:15 or 20:30 IST). Pull down to retry.</p></section>';
+    document.getElementById("updated").textContent = "Offline or not exported yet";
+    return;
+  }
+  render();
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
+load();
+</script>
+</body>
+</html>
