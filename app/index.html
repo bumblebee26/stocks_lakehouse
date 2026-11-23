@@ -156,13 +156,19 @@ function plChart(rows, o) {
   rows.filter((r) => num(r[o.y]) != null && keep(o.key, o.kindOf(r))).forEach((r) => {
     (by[r[o.line]] = by[r[o.line]] || { kind: o.kindOf(r), points: [] }).points.push([String(r[o.x]).slice(0, 10), num(r[o.y])]);
   });
-  const names = Object.keys(by).sort((a, b) => (by[a].kind === "real" ? -1 : 0) - (by[b].kind === "real" ? -1 : 0)
-    || Math.abs(by[b].points.at(-1)[1]) - Math.abs(by[a].points.at(-1)[1])).slice(0, o.max || 8);
+  // the real line always, then the 5 best and the 2 worst by their latest value (so better-than-real shadows show)
+  const last = (n) => by[n].points.reduce((m, p) => (p[0] > m[0] ? p : m))[1];
+  const real = Object.keys(by).filter((n) => by[n].kind === "real");
+  const rest = Object.keys(by).filter((n) => by[n].kind !== "real").sort((a, b) => last(b) - last(a));
+  const best = rest.slice(0, 5), worst = rest.slice(5).slice(-2);
+  const names = [...real, ...best, ...worst];
+  const total = Object.keys(by).length;
   const series = names.map((n, i) => ({ name: n, color: by[n].kind === "real" ? "var(--fg)" : PALETTE[i % PALETTE.length],
     dash: by[n].kind === "benchmark", points: by[n].points.sort((a, b) => (a[0] < b[0] ? -1 : 1)) }));
   const css = getComputedStyle(document.documentElement);
   series.forEach((s) => { if (s.color === "var(--fg)") s.color = css.getPropertyValue("--fg").trim(); });
-  return series.length ? lineChart(series, o.label, (v) => (Math.abs(v) >= 1000 ? "Rs " + Math.round(v).toLocaleString("en-IN") : "Rs " + Math.round(v)))
+  const note = total > names.length ? `<p class="note">Showing ${real.length ? "real + " : ""}the 5 best and the 2 worst of ${total} lines.</p>` : "";
+  return series.length ? lineChart(series, o.label, (v) => (Math.abs(v) >= 1000 ? "Rs " + Math.round(v).toLocaleString("en-IN") : "Rs " + Math.round(v))) + note
     : '<p class="muted">No lines for this choice yet.</p>';
 }
 
@@ -227,7 +233,7 @@ function intraday() {
   ${seg("intraday")}
   <section class="card"><h3>P&amp;L since 18 Nov</h3>${plChart(rows("intra_lines"), { key: "intraday", x: "trade_date", y: "total_rs", line: "line",
     kindOf: (r) => (r.kind === "Real" ? "real" : "shadow"), label: "Intraday P&L, real and shadows", max: 8 })}
-    <p class="note">Bold line = real. Shadows replay the same trades; the opening-range test is its own paper trades. Top 8 lines shown.</p></section>
+    <p class="note">Bold line = real. Shadows replay the same trades; the opening-range test is its own paper trades.</p></section>
   <section class="card"><h3>Real vs every shadow (same trades)</h3>${board || '<p class="muted">No data yet.</p>'}<p class="note">Right column: what it would have made vs the real result.</p></section>
   <section class="card"><h3>Auto bar and sizing (every proposal)</h3>${ladder || '<p class="muted">No data yet.</p>'}</section>
   <section class="card"><h3>Selector (paper)</h3>${sel || '<p class="muted">Starts after Monday\'s day report.</p>'}</section>`;
