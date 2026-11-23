@@ -66,6 +66,15 @@ locals {
       ORDER BY proposed_at
     SQL
 
+    # Each real pool: value now, P&L since 18 Nov (value minus starting cash), return (Desk and the phone app).
+    desk_pools = <<-SQL
+      SELECT CASE grp WHEN 'Intraday' THEN 'Intraday' WHEN 'Swing' THEN 'Swing' ELSE 'Long term' END AS pool,
+             value_rs, pnl_rs, return_pct, start_date AS since, last_date AS as_of
+      FROM (${local.strategy_scoreboard_sql})
+      WHERE kind = 'real'
+      ORDER BY CASE grp WHEN 'Intraday' THEN 1 WHEN 'Swing' THEN 2 ELSE 3 END
+    SQL
+
     desk_board = <<-SQL
       SELECT strategy, initcap(kind) AS kind,
              ${replace(local.signed_pct_sql, "__V__", "return_pct")} AS return_since_start,
@@ -312,11 +321,11 @@ locals {
     SQL
 
     swing_returns = <<-SQL
-      SELECT snapshot_date, strategy, kind, return_pct FROM (${local.strategy_returns_sql}) WHERE grp IN ('Swing', 'Benchmark')
+      SELECT snapshot_date, strategy, kind, return_pct, pnl_rs FROM (${local.strategy_returns_sql}) WHERE grp IN ('Swing', 'Benchmark')
     SQL
 
     longterm_returns = <<-SQL
-      SELECT snapshot_date, strategy, kind, return_pct FROM (${local.strategy_returns_sql}) WHERE grp IN ('Long-term', 'Benchmark')
+      SELECT snapshot_date, strategy, kind, return_pct, pnl_rs FROM (${local.strategy_returns_sql}) WHERE grp IN ('Long-term', 'Benchmark')
     SQL
 
     swing_holdings = <<-SQL
@@ -655,11 +664,11 @@ locals {
   strategy_returns_sql = <<-SQL
     WITH d AS (${local.strategy_daily_sql})
     SELECT snapshot_date, ${local.strategy_label_sql} AS strategy, ${local.strategy_group_sql} AS grp, initcap(kind) AS kind,
-           round((equity / capital - 1) * 100, 2) AS return_pct
+           round((equity / capital - 1) * 100, 2) AS return_pct, round(equity - capital, 0) AS pnl_rs
     FROM d
     UNION ALL
     SELECT snapshot_date, 'NIFTYBEES (since the portfolio started)' AS strategy, 'Benchmark' AS grp, 'NIFTYBEES' AS kind,
-           round(nifty_index - 100, 2) AS return_pct
+           round(nifty_index - 100, 2) AS return_pct, CAST(NULL AS DOUBLE) AS pnl_rs
     FROM stocks.gold.portfolio_daily WHERE nifty_index IS NOT NULL
   SQL
 
@@ -741,6 +750,7 @@ locals {
       desk_setups          = ["setup", "win_rate", "avg_r", "proposals"]
       desk_decisions       = ["time", "symbol", "setup", "score", "reviewer", "decision", "you", "result"]
       desk_board           = ["strategy", "kind", "return_since_start", "vs_niftybees"]
+      desk_pools           = ["pool", "value_rs", "pnl_rs", "return_pct", "since", "as_of"]
       portfolio_vs_nifty   = ["snapshot_date", "series", "index_value"]
       portfolio_drawdown   = ["snapshot_date", "drawdown_pct"]
       allocation_pool      = ["pool", "value_rs"]
@@ -771,8 +781,8 @@ locals {
       longterm_best        = ["line", "strategy", "value_rs", "pnl_rs", "return_pct"]
       swing_trades         = ["trade_date", "strategy", "kind", "side", "symbol", "qty", "price", "value_rs", "pnl_rs", "reason"]
       longterm_trades      = ["trade_date", "strategy", "kind", "side", "symbol", "qty", "price", "value_rs", "pnl_rs", "reason"]
-      swing_returns        = ["snapshot_date", "strategy", "kind", "return_pct"]
-      longterm_returns     = ["snapshot_date", "strategy", "kind", "return_pct"]
+      swing_returns        = ["snapshot_date", "strategy", "kind", "return_pct", "pnl_rs"]
+      longterm_returns     = ["snapshot_date", "strategy", "kind", "return_pct", "pnl_rs"]
       swing_holdings       = ["strategy", "kind", "symbol", "sector", "qty", "avg_cost", "last_price", "value_rs", "pnl_rs", "pnl_pct", "opened"]
       longterm_holdings    = ["strategy", "kind", "symbol", "sector", "qty", "avg_cost", "last_price", "value_rs", "pnl_rs", "pnl_pct", "opened"]
       scanner_today        = ["list_type", "rank", "symbol", "company", "close", "setup", "stance", "rsi", "adx", "volume_x", "delivery_pct", "fno", "entry_low", "entry_high", "stop", "target2", "rr", "misses", "trade_date"]
@@ -884,8 +894,8 @@ locals {
   chart = {
     for k, c in {
       port_vs_nifty  = { ds = "portfolio_vs_nifty", type = "line", x = "snapshot_date", xt = "temporal", y = "index_value", color = "series", title = "Portfolio vs NIFTYBEES (both start at 100)", desc = "Above the NIFTYBEES line = beating simply holding the index.", pos = [0, 6, 7, 7] }
-      port_alloc     = { ds = "allocation_pool", type = "bar", x = "pool", xt = "categorical", y = "value_rs", color = null, title = "Where the money is (Rs)", desc = "Value of each real pool today.", pos = [6, 21, 3, 6] }
-      port_drawdown  = { ds = "portfolio_drawdown", type = "area", x = "snapshot_date", xt = "temporal", y = "drawdown_pct", color = null, title = "Below the best value so far (%)", desc = "0 = at its best; -5 = 5% below. Shallow, short dips are what you want.", pos = [9, 21, 3, 6] }
+      port_alloc     = { ds = "allocation_pool", type = "bar", x = "pool", xt = "categorical", y = "value_rs", color = null, title = "Where the money is (Rs)", desc = "Value of each real pool today.", pos = [6, 24, 3, 6] }
+      port_drawdown  = { ds = "portfolio_drawdown", type = "area", x = "snapshot_date", xt = "temporal", y = "drawdown_pct", color = null, title = "Below the best value so far (%)", desc = "0 = at its best; -5 = 5% below. Shallow, short dips are what you want.", pos = [9, 24, 3, 6] }
       intra_all      = { ds = "intra_lines", type = "line", x = "trade_date", xt = "temporal", y = "total_rs", color = "line", title = "Total since 18 Nov: real vs shadow (Rs)", desc = "Every version: exit rules (incl. the fixed 2R target, the trailing stop and the early exits) and models replay your real trades, so above the 'Real' line = it would have made more on the same trades. The opening-range test is separate paper trades. Use Show to pick lines.", pos = [0, 6, 12, 7] }
       intra_daily    = { ds = "intraday_daily_pnl", type = "bar", x = "trade_date", xt = "temporal", y = "day_pnl_rs", color = "result", title = "P&L each day (Rs)", desc = "One bar per trading day.", pos = [6, 13, 6, 7] }
       intra_setup    = { ds = "intraday_setup_chart", type = "bar", x = "setup", xt = "categorical", y = "net_pnl_rs", color = null, title = "By setup (Rs)", desc = "Which kinds of trade made or lost money.", pos = [0, 20, 4, 5] }
@@ -929,10 +939,11 @@ locals {
     for k, t in {
       desk_status       = { ds = "desk_status", title = "Today", desc = "Auto mode, India VIX and risk from the trader's export; mood from its latest proposal.", pos = [8, 0, 4, 3] }
       desk_setups       = { ds = "desk_setups", title = "Track record by setup (last 30 days)", desc = "Every proposal, taken or skipped, judged on what really happened. Under 10 is too few to judge.", pos = [7, 6, 5, 7] }
-      desk_decisions    = { ds = "desk_decisions", title = "Today's decisions", desc = "Score gate, the independent reviewer, what happened, your rating and the result (R = one unit of risk).", pos = [0, 13, 7, 7] }
-      desk_board        = { ds = "desk_board", title = "Real and shadow pools", desc = "Return since each started, and vs NIFTYBEES over the same days.", pos = [7, 13, 5, 7] }
-      holdings          = { ds = "holdings", title = "What the real pools hold", desc = "Largest first. Weight = share of the whole portfolio.", pos = [0, 21, 6, 6] }
-      summary_portfolio = { ds = "summary_portfolio", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 27, 12, 4] }
+      desk_pools        = { ds = "desk_pools", title = "Each pool: value and P&L since 18 Nov", desc = "Real pools only (dummy money). P&L = value now minus starting cash, after costs.", pos = [0, 13, 12, 3] }
+      desk_decisions    = { ds = "desk_decisions", title = "Today's decisions", desc = "Score gate, the independent reviewer, what happened, your rating and the result (R = one unit of risk).", pos = [0, 16, 7, 7] }
+      desk_board        = { ds = "desk_board", title = "Real and shadow pools", desc = "Return since each started, and vs NIFTYBEES over the same days.", pos = [7, 16, 5, 7] }
+      holdings          = { ds = "holdings", title = "What the real pools hold", desc = "Largest first. Weight = share of the whole portfolio.", pos = [0, 24, 6, 6] }
+      summary_portfolio = { ds = "summary_portfolio", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 30, 12, 4] }
       intra_board       = { ds = "intra_board", title = "Real vs every shadow, same trades (since 18 Nov)", desc = "Total = what each would have made. Beat real = how often it did better trade by trade.", pos = [0, 13, 6, 7] }
       intra_recent      = { ds = "trading_recent", title = "Latest trades", desc = "Since 18 Nov, newest first.", pos = [0, 25, 12, 7] }
       intra_bt_table    = { ds = "backtest_latest", title = "Backtest details (latest run)", desc = "All rules on the same setups. Worst day = the worst single day's total.", pos = [0, 39, 12, 6] }
@@ -988,7 +999,7 @@ locals {
   text = {
     for k, t in {
       desk_title     = { lines = ["## Paper Trader · Desk", "Whole portfolio, dummy money, since the 18 Nov reset. Updated after 15:45 and 23:30 IST. Not advice."], pos = [0, 0, 8, 3] }
-      desk_details   = { lines = ["### Details"], pos = [0, 20, 12, 1] }
+      desk_details   = { lines = ["### Details"], pos = [0, 23, 12, 1] }
       intra_title    = { lines = ["## Intraday", "Real pool Rs 40,000 since 18 Nov. Shadow lines replay your real trades under other exit rules and the shadow models; the opening-range test trades on paper."], pos = [0, 0, 8, 3] }
       intra_tests    = { lines = ["### Model tests on ~200 stocks (paper)"], pos = [0, 32, 12, 1] }
       swing_title    = { lines = ["## Swing", "Real pool Rs 60,000 in auto mode from 24 Nov (momentum + news rules; idle cash in NIFTYBEES) vs four shadow strategies on paper, same costs. Not advice."], pos = [0, 0, 8, 3] }
@@ -1024,7 +1035,7 @@ locals {
           local.counter.desk_value, local.counter.desk_return, local.counter.desk_today,
           local.counter.desk_trades, local.counter.desk_proposals, local.counter.desk_calls,
           local.chart.port_vs_nifty, local.table_widget.desk_setups,
-          local.table_widget.desk_decisions, local.table_widget.desk_board,
+          local.table_widget.desk_pools, local.table_widget.desk_decisions, local.table_widget.desk_board,
           local.text.desk_details, local.table_widget.holdings, local.chart.port_alloc, local.chart.port_drawdown,
           local.table_widget.summary_portfolio,
         ]

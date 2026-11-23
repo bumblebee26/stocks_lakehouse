@@ -47,7 +47,8 @@ class Export(unittest.TestCase):
         s3 = FakeS3({"config/queries.json": json.dumps(QUERIES).encode()})
         with mock.patch.dict(os.environ, {"APP_BUCKET": "b", "APP_PREFIX": "abc123"}), \
              mock.patch.object(app_export, "_s3", return_value=s3), \
-             mock.patch.object(app_export.databricks_sql, "query", return_value=[{"x": 1.0}]):
+             mock.patch.object(app_export.databricks_sql, "query", return_value=[{"x": 1.0}]), \
+             mock.patch.object(app_export, "yahoo_series", return_value=({}, [])):
             out = app_export.handler({}, None)
         self.assertTrue(out["written"])
         put = s3.puts[0]
@@ -60,10 +61,29 @@ class Export(unittest.TestCase):
         s3 = FakeS3({"config/queries.json": json.dumps(QUERIES).encode()})
         with mock.patch.dict(os.environ, {"APP_BUCKET": "b", "APP_PREFIX": "p"}), \
              mock.patch.object(app_export, "_s3", return_value=s3), \
-             mock.patch.object(app_export.databricks_sql, "query", return_value=[]):
+             mock.patch.object(app_export.databricks_sql, "query", return_value=[]), \
+             mock.patch.object(app_export, "yahoo_series", return_value=({}, [])):
             out = app_export.handler({"dry_run": True}, None)
         self.assertFalse(out["written"])
         self.assertEqual(s3.puts, [])
+
+
+class YahooSeries(unittest.TestCase):
+    def test_series_and_failure_keeps_previous(self):
+        bars = [{"date": "2021-11-24", "close": 74.5}, {"date": "2026-11-23", "close": 93.47}]
+        ok = lambda sym, rng: (bars, {})  # noqa: E731
+        out, failed = app_export.yahoo_series({}, fetch=ok)
+        self.assertEqual(failed, [])
+        self.assertEqual(out["usdinr_5y"]["rows"][-1], {"date": "2026-11-23", "close": 93.47})
+        self.assertIn("Accenture", out["acn_5y"]["label"])
+
+        def boom(sym, rng):
+            raise RuntimeError("yahoo down")
+        prev = {"datasets": {"usdinr_5y": out["usdinr_5y"]}}
+        out2, failed2 = app_export.yahoo_series(prev, fetch=boom)
+        self.assertEqual(sorted(failed2), ["acn_5y", "usdinr_5y"])
+        self.assertEqual(out2["usdinr_5y"]["rows"], out["usdinr_5y"]["rows"])
+        self.assertEqual(out2["acn_5y"]["rows"], [])
 
 
 if __name__ == "__main__":

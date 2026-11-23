@@ -7,6 +7,9 @@ rows}}, failed}. A query that fails keeps its previous rows (and is listed in fa
 blanks the app. The app (app/index.html) is served by CloudFront from the same secret path.
 
 Event: {} normally; {"dry_run": true} returns the payload without writing it.
+
+From 24 Nov it also adds five years of daily closes from Yahoo for the app's charts that have no lakehouse table:
+USD/INR (Markets tab) and Accenture, NYSE: ACN (Custom tab). A failed fetch keeps the previous series.
 """
 
 import datetime as dt
@@ -22,6 +25,8 @@ from common import log
 IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
 QUERIES_KEY = "config/queries.json"
 WORKERS = 4
+# app dataset -> (Yahoo symbol, label); five years of daily closes as rows {date, close}
+YAHOO_SERIES = {"usdinr_5y": ("INR=X", "USD/INR"), "acn_5y": ("ACN", "Accenture (NYSE: ACN, USD)")}
 
 
 def _s3():
@@ -55,13 +60,39 @@ def run_all(queries, previous, query=None):
     return datasets, failed
 
 
+def yahoo_series(previous, fetch=None):
+    """{dataset: {fields, rows, label}} for YAHOO_SERIES and the names that failed (those keep the previous rows)."""
+    if fetch is None:
+        import yahoo
+
+        fetch = yahoo.daily
+    old = (previous or {}).get("datasets") or {}
+    out, failed = {}, []
+    for name, (sym, label) in YAHOO_SERIES.items():
+        try:
+            bars, _ = fetch(sym, "5y")
+            rows = [{"date": b["date"], "close": round(float(b["close"]), 4)} for b in bars if b.get("close")]
+            if not rows:
+                raise ValueError("no closes")
+            out[name] = {"fields": ["date", "close"], "rows": rows, "label": label}
+        except Exception as err:  # noqa: BLE001 - keep the last good series
+            log.error("Yahoo series %s failed: %s", name, err)
+            out[name] = old.get(name) or {"fields": ["date", "close"], "rows": [], "label": label}
+            failed.append(name)
+    return out, failed
+
+
 def handler(event, context):
     event = event or {}
     bucket, prefix = os.environ["APP_BUCKET"], os.environ["APP_PREFIX"]
     s3 = _s3()
     queries = json.loads(s3.get_object(Bucket=bucket, Key=QUERIES_KEY)["Body"].read())
     data_key = f"{prefix}/data/desk.json"
-    datasets, failed = run_all(queries, load_previous(s3, bucket, data_key))
+    previous = load_previous(s3, bucket, data_key)
+    datasets, failed = run_all(queries, previous)
+    series, series_failed = yahoo_series(previous)
+    datasets.update(series)
+    failed += series_failed
     payload = {"updated_at": dt.datetime.now(IST).strftime("%Y-%m-%d %H:%M"), "datasets": datasets,
                "failed": failed}
     body = json.dumps(payload, separators=(",", ":"), default=str).encode()
