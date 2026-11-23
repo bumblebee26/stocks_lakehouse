@@ -644,6 +644,7 @@ SHADOW_RULE_WORDS = {
     "open_2r": "09:15 opening buy, 2R target", "open_eod": "09:15 opening buy, held to 15:10",
     "fade_2r": "gap fade short, 2R target", "fade_eod": "gap fade short, held to 15:10",
     "early_any": "early exit on any close past the line", "early_strict": "early exit on a real break (live from 20 Nov)",
+    "trailing_early": "trailing stop with the early exit (as it would run live)",
 }
 
 def _rule_label():
