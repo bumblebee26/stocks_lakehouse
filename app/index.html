@@ -57,8 +57,9 @@ h2 { font-size: 22px; margin: 4px 2px 0 }
 svg.chart { width: 100%; height: 120px; display: block }
 .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); flex-wrap: wrap }
 .note { font-size: 12px; color: var(--muted); margin: 6px 2px 0 }
-nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 3; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); background: var(--card); border-top: 1px solid var(--line); padding: 4px 4px calc(env(safe-area-inset-bottom) + 6px) }
-nav button { min-height: 50px; border: 0; background: none; color: var(--muted); font: 600 12px inherit; font-family: inherit; border-top: 3px solid transparent }
+.axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; margin-top: 2px }
+nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 3; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); background: var(--card); border-top: 1px solid var(--line); padding: 4px 4px calc(env(safe-area-inset-bottom) + 6px) }
+nav button { min-height: 50px; border: 0; background: none; color: var(--muted); font: 600 11.5px inherit; font-family: inherit; border-top: 3px solid transparent }
 nav button[aria-current="page"] { color: var(--accent); border-top-color: var(--accent) }
 .err { border-color: var(--down) }
 button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
@@ -76,6 +77,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
   <button type="button" data-tab="swing">Swing</button>
   <button type="button" data-tab="long">Long</button>
   <button type="button" data-tab="markets">Markets</button>
+  <button type="button" data-tab="custom">Custom</button>
 </nav>
 <script>
 "use strict";
@@ -93,7 +95,7 @@ const pct = (v, sign) => { const n = num(v); if (n == null) return "–"; return
 const cls = (v) => { const n = num(v); return n == null ? "" : n > 0 ? "up" : n < 0 ? "down" : ""; };
 const arrowCls = (s) => (String(s).startsWith("▲") ? "up" : String(s).startsWith("▼") ? "down" : "");
 
-function lineChart(series, label) {
+function lineChart(series, label, fmt) {
   // series: [{name, color, dash, points: [[x(date string), y]]}]
   const all = series.flatMap((s) => s.points.map((p) => p[1]));
   if (all.length < 2) return '<p class="muted">Not enough days yet.</p>';
@@ -103,7 +105,33 @@ function lineChart(series, label) {
   const y = (v) => H - ((v - lo + pad) / (hi - lo + 2 * pad)) * H;
   const lines = series.map((s) => `<polyline fill="none" stroke="${s.color}" stroke-width="${s.dash ? 2 : 3}" ${s.dash ? 'stroke-dasharray="5 4"' : ""} points="${s.points.map((p) => x(p[0]).toFixed(1) + "," + y(p[1]).toFixed(1)).join(" ")}"/>`).join("");
   const legend = series.map((s) => `<span style="color:${s.color}">${s.dash ? "┅" : "━"} ${esc(s.name)}</span>`).join("");
-  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}">${lines}</svg><div class="legend">${legend}</div>`;
+  const f = (v) => (fmt ? fmt(v) : (Math.abs(v) >= 1000 ? Math.round(v).toLocaleString("en-IN") : v.toFixed(2)));
+  const zero = lo < 0 && hi > 0 ? `<line x1="0" x2="${W}" y1="${y(0).toFixed(1)}" y2="${y(0).toFixed(1)}" stroke="var(--line)"/>` : "";
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}">${zero}${lines}</svg>`
+    + `<div class="axis"><span>${esc(dates[0])}</span><span>${f(lo)} to ${f(hi)}</span><span>${esc(dates[dates.length - 1])}</span></div>`
+    + `<div class="legend">${legend}</div>`;
+}
+
+const PALETTE = ["#2563a6", "#b4560b", "#6a4fb9", "#1f6a40", "#a3311f", "#0e7c86", "#8a6d00", "#c0368c", "#4b5563"];
+function thin(points, max = 260) {   // keep long series light on a phone: every nth point, always the last
+  if (points.length <= max) return points;
+  const step = Math.ceil(points.length / max);
+  return points.filter((_, i) => i % step === 0 || i === points.length - 1);
+}
+function plChart(rows, o) {
+  // rows of {x, line, kind, y}; one line per `line`, filtered by the Real / Shadows / Both switch (o.key)
+  const by = {};
+  rows.filter((r) => num(r[o.y]) != null && keep(o.key, o.kindOf(r))).forEach((r) => {
+    (by[r[o.line]] = by[r[o.line]] || { kind: o.kindOf(r), points: [] }).points.push([String(r[o.x]).slice(0, 10), num(r[o.y])]);
+  });
+  const names = Object.keys(by).sort((a, b) => (by[a].kind === "real" ? -1 : 0) - (by[b].kind === "real" ? -1 : 0)
+    || Math.abs(by[b].points.at(-1)[1]) - Math.abs(by[a].points.at(-1)[1])).slice(0, o.max || 8);
+  const series = names.map((n, i) => ({ name: n, color: by[n].kind === "real" ? "var(--fg)" : PALETTE[i % PALETTE.length],
+    dash: by[n].kind === "benchmark", points: by[n].points.sort((a, b) => (a[0] < b[0] ? -1 : 1)) }));
+  const css = getComputedStyle(document.documentElement);
+  series.forEach((s) => { if (s.color === "var(--fg)") s.color = css.getPropertyValue("--fg").trim(); });
+  return series.length ? lineChart(series, o.label, (v) => (Math.abs(v) >= 1000 ? "Rs " + Math.round(v).toLocaleString("en-IN") : "Rs " + Math.round(v)))
+    : '<p class="muted">No lines for this choice yet.</p>';
 }
 
 function story() {
@@ -139,6 +167,7 @@ function desk() {
     <div class="tile"><span class="l">Proposals judged</span><span class="v">${esc(k.proposals)}</span></div>
     <div class="tile"><span class="l">Your calls right</span><span class="v">${k.calls_right_pct == null ? "–" : esc(k.calls_right_pct) + "%"}</span></div>
   </div>
+  <section class="card"><h3>Each pool (since 18 Nov)</h3>${rows("desk_pools").map((r) => `<div class="row"><div class="n"><b>${esc(r.pool)}</b><span>${rs(r.value_rs)} now</span></div><div class="r ${cls(r.pnl_rs)}">${rs(r.pnl_rs, true)}<br><span style="font-weight:500;font-size:12px">${pct(r.return_pct, true)}</span></div></div>`).join("") || '<p class="muted">No data yet.</p>'}</section>
   <section class="card"><h3>Today's decisions</h3>${dec}</section>
   <section class="card"><h3>Every strategy vs NIFTYBEES</h3>${board || '<p class="muted">No data yet.</p>'}</section>`;
 }
@@ -163,6 +192,9 @@ function intraday() {
     <div class="tile"><span class="l">Profit factor</span><span class="v">${esc(k.profit_factor)}</span></div>
   </div>
   ${seg("intraday")}
+  <section class="card"><h3>P&amp;L since 18 Nov</h3>${plChart(rows("intra_lines"), { key: "intraday", x: "trade_date", y: "total_rs", line: "line",
+    kindOf: (r) => (r.kind === "Real" ? "real" : "shadow"), label: "Intraday P&L, real and shadows", max: 8 })}
+    <p class="note">Bold line = real. Shadows replay the same trades; the opening-range test is its own paper trades. Top 8 lines shown.</p></section>
   <section class="card"><h3>Real vs every shadow (same trades)</h3>${board || '<p class="muted">No data yet.</p>'}<p class="note">Right column: what it would have made vs the real result.</p></section>
   <section class="card"><h3>Auto bar and sizing (every proposal)</h3>${ladder || '<p class="muted">No data yet.</p>'}</section>
   <section class="card"><h3>Selector (paper)</h3>${sel || '<p class="muted">Starts after Monday\'s day report.</p>'}</section>`;
@@ -183,6 +215,8 @@ function pool(title, ds, key) {
   </div>
   <section class="card"><h3>Best shadow</h3>${best}</section>
   ${seg(key)}
+  <section class="card"><h3>P&amp;L since each started</h3>${plChart(rows(ds + "_returns"), { key, x: "snapshot_date", y: "pnl_rs", line: "strategy",
+    kindOf: (r) => String(r.kind).toLowerCase(), label: title + " P&L, real and shadows" })}</section>
   <section class="card"><h3>Scoreboard</h3>${board || '<p class="muted">No data yet.</p>'}</section>
   <section class="card"><h3>Trades placed (last 30 days)</h3>${trades || '<p class="muted">No trades yet.</p>'}<p class="note">Right column: realized P&amp;L on sells, value on buys.</p></section>`;
 }
@@ -198,8 +232,29 @@ function markets() {
     <div class="tile"><span class="l">Nikkei</span><span class="v ${cls(k.nikkei_pct)}">${pct(k.nikkei_pct, true)}</span></div>
     <div class="tile"><span class="l">USD/INR · Brent</span><span class="v">${esc(k.usd_inr)} · $${esc(k.brent_usd)}</span></div>
   </div>
+  <section class="card"><h3>USD/INR, past 5 years</h3>${series5y("usdinr_5y", "USD/INR")}</section>
   <section class="card"><h3>Today's read</h3>${read || '<p class="muted">No data yet.</p>'}</section>
   <section class="card"><h3>World moves</h3>${moves || '<p class="muted">No data yet.</p>'}</section>`;
+}
+
+function series5y(name, label) {
+  const r = rows(name);
+  if (r.length < 2) return '<p class="muted">Appears after the next export.</p>';
+  const pts = thin(r.map((x) => [x.date, num(x.close)]));
+  const last = num(r.at(-1).close), y1 = r.find((x) => x.date >= dateBack(r.at(-1).date, 1)), first = num(r[0].close);
+  const css = getComputedStyle(document.documentElement);
+  const ch = (a) => (a ? ((last / a - 1) * 100) : null);
+  return `<div class="tiles"><div class="tile"><span class="l">Latest (${esc(r.at(-1).date)})</span><span class="v">${last.toFixed(2)}</span></div>
+    <div class="tile"><span class="l">1 year · 5 years</span><span class="v"><span class="${cls(ch(y1 && num(y1.close)))}">${pct(ch(y1 && num(y1.close)), true)}</span> · <span class="${cls(ch(first))}">${pct(ch(first), true)}</span></span></div></div>`
+    + lineChart([{ name: label, color: css.getPropertyValue("--accent").trim(), points: pts }], label + ", past 5 years", (v) => v.toFixed(2));
+}
+function dateBack(iso, years) { const d = new Date(iso); d.setFullYear(d.getFullYear() - years); return d.toISOString().slice(0, 10); }
+
+function custom() {
+  const ds = (D.datasets || {}).acn_5y || {};
+  return `<h2>Custom</h2>
+  <section class="card"><h3>${esc(ds.label || "Accenture (NYSE: ACN)")}, past 5 years</h3>${series5y("acn_5y", "Accenture")}
+    <p class="note">Daily closes in US dollars from Yahoo Finance, refreshed with each export.</p></section>`;
 }
 
 function render() {
@@ -208,7 +263,7 @@ function render() {
     .map((c) => `<span class="chip ${String(c).includes("ON") ? "on" : ""}">${esc(c)}</span>`).join("");
   document.getElementById("updated").textContent = D.updated_at ? `Updated ${D.updated_at} IST` + ((D.failed || []).length ? " · some parts older" : "") : "No data yet";
   const view = { desk, intraday, swing: () => pool("Swing", "swing", "swing"),
-                 long: () => pool("Long term", "longterm", "long"), markets }[tab] || desk;
+                 long: () => pool("Long term", "longterm", "long"), markets, custom }[tab] || desk;
   document.getElementById("main").innerHTML = view() + '<p class="note">Dummy money only. Not investment advice.</p>';
   document.querySelectorAll("nav button").forEach((b) => b.setAttribute("aria-current", b.dataset.tab === tab ? "page" : "false"));
 }
