@@ -355,6 +355,64 @@ locals {
       ORDER BY coalesce(swing_rank, 999), lt_rank
     SQL
 
+    # "Suggested today" on the Swing and Long-term pages and the phone app: information only, nothing is placed from it.
+    # Swing: what the auto rules would buy next (momentum + news top 6, stop 2 x ATR under the close) and the
+    # scanner's strict picks with their levels. Chart = TradingView (M&M -> M_M, BAJAJ-AUTO -> BAJAJ_AUTO).
+    swing_suggest = <<-SQL
+      SELECT strategy, CAST(rank AS INT) AS rank, symbol, company, close, entry, stop, target, rr, why, chart, trade_date
+      FROM (
+        SELECT 'Momentum + news (auto rules)' AS strategy, 1 AS grp, swing_rank AS rank, symbol, company, close,
+               concat('near ', format_number(close, 2)) AS entry, round(close - 2 * atr14, 2) AS stop,
+               CAST(NULL AS DOUBLE) AS target, CAST(NULL AS DOUBLE) AS rr,
+               concat('1m ', format_number(ret_1m_pct, 1), '% · 3m ', format_number(ret_3m_pct, 1), '% · ',
+                      format_number(pct_of_52w_high, 0), '% of 52-week high',
+                      CASE WHEN news_pos_5d > 0 THEN ' · fresh good news' ELSE '' END,
+                      ' · exit: 2xATR stop or out of the top 12') AS why,
+               concat('https://www.tradingview.com/chart/?symbol=NSE%3A', translate(symbol, '&-', '__')) AS chart, trade_date
+        FROM stocks.gold.momentum_ranks
+        WHERE swing_rank <= 6
+        UNION ALL
+        SELECT 'Scanner strict pick', 2, rank, symbol, company, round(close, 2),
+               concat(format_number(entry_low, 2), ' to ', format_number(entry_high, 2)), round(stop, 2),
+               round(target2, 2), round(rr, 1), concat(setup, ' · RSI ', format_number(rsi14, 0), ' · ADX ', format_number(adx14, 0)),
+               concat('https://www.tradingview.com/chart/?symbol=NSE%3A', translate(symbol, '&-', '__')), trade_date
+        FROM stocks.gold.technical_screen
+        WHERE list_type = 'strict'
+      )
+      ORDER BY grp, rank
+    SQL
+
+    # Long term: this week's quality picks (top 10) and the momentum top 15 (volatility-adjusted 6 and 12 months).
+    longterm_suggest = <<-SQL
+      SELECT strategy, CAST(rank AS INT) AS rank, symbol, company, close, why, chart
+      FROM (
+        SELECT 'Quality pick (weekly)' AS strategy, 1 AS grp, c.rank, c.symbol, c.company, m.close,
+               concat('score ', format_number(c.score, 1),
+                      coalesce(concat(' · weight ', format_number(c.target_weight_pct, 0), '%'), ''),
+                      coalesce(concat(' · ', c.reasons), '')) AS why,
+               concat('https://www.tradingview.com/chart/?symbol=NSE%3A', translate(c.symbol, '&-', '__')) AS chart
+        FROM stocks.gold.longterm_candidates c
+        LEFT JOIN stocks.gold.momentum_ranks m ON m.symbol = c.symbol
+        WHERE c.rank <= 10
+        UNION ALL
+        SELECT 'Momentum top 15', 2, lt_rank, symbol, company, close,
+               concat('6m ', format_number(ret_6m_pct, 1), '% · 12m ', format_number(ret_12m_pct, 1),
+                      '% · volatility ', format_number(vol_1y_pct, 0), '%'),
+               concat('https://www.tradingview.com/chart/?symbol=NSE%3A', translate(symbol, '&-', '__'))
+        FROM stocks.gold.momentum_ranks
+        WHERE lt_rank <= 15
+      )
+      ORDER BY grp, rank
+    SQL
+
+    # USD/INR, past five years (FRED DEXINUS; history loaded once on 24 Nov), for the Global markets page.
+    usdinr_history = <<-SQL
+      SELECT obs_date, round(value, 2) AS usd_inr
+      FROM stocks.silver.global_daily
+      WHERE instrument = 'DEXINUS' AND value IS NOT NULL AND obs_date >= add_months(current_date(), -60)
+      ORDER BY obs_date
+    SQL
+
     scanner_record = <<-SQL
       SELECT signal_label AS signal, CAST(horizon_days AS INT) AS days_after, CAST(signals AS INT) AS signals,
              avg_return_pct, avg_excess_pct AS vs_niftybees_pct, beat_niftybees_pct
@@ -788,6 +846,9 @@ locals {
       scanner_today        = ["list_type", "rank", "symbol", "company", "close", "setup", "stance", "rsi", "adx", "volume_x", "delivery_pct", "fno", "entry_low", "entry_high", "stop", "target2", "rr", "misses", "trade_date"]
       momentum_top         = ["swing_rank", "lt_rank", "symbol", "company", "industry", "close", "ret_1m_pct", "ret_3m_pct", "ret_6m_pct", "ret_12m_pct", "vol_1y_pct", "pct_of_52w_high", "rsi14", "good_news_5d", "latest_good_news", "scanner_strict", "swing_score", "lt_score", "trade_date"]
       scanner_record       = ["signal", "days_after", "signals", "avg_return_pct", "vs_niftybees_pct", "beat_niftybees_pct"]
+      swing_suggest        = ["strategy", "rank", "symbol", "company", "close", "entry", "stop", "target", "rr", "why", "chart", "trade_date"]
+      longterm_suggest     = ["strategy", "rank", "symbol", "company", "close", "why", "chart"]
+      usdinr_history       = ["obs_date", "usd_inr"]
       longterm_picks       = ["rank", "pick", "symbol", "company", "industry", "score", "quality_score", "target_weight_pct", "return_on_capital_pct", "debt_to_equity", "profit_cagr_3y_pct", "pe", "reasons"]
       quality_scatter      = ["symbol", "roce_pct", "pe", "tests"]
       calls_kpis           = ["calls_right_pct", "liked_avg_r", "disliked_avg_r", "edge_r", "rated", "more_needed"]
@@ -903,9 +964,12 @@ locals {
       intra_drawdown = { ds = "intraday_curve", type = "area", x = "trade_date", xt = "temporal", y = "below_peak_rs", color = null, title = "Below the best total so far (Rs)", desc = "Deep or long dips mean risky trading.", pos = [8, 20, 4, 5] }
       intra_backtest = { ds = "backtest_latest", type = "bar", x = "rule", xt = "categorical", y = "vs_current_r", color = null, title = "Backtest on ~200 stocks: each rule vs current rules (R)", desc = "Latest walk-forward run. R = one unit of risk, about Rs 400. Above 0 = better than the current rules.", pos = [0, 33, 6, 6] }
       intra_bt_trend = { ds = "backtest_trend", type = "line", x = "run_date", xt = "temporal", y = "vs_current_r", color = "rule", title = "Is each edge holding up? (R vs current, by run day)", desc = "A line that stays above 0 run after run is a rule worth reviewing for go-live.", pos = [6, 33, 6, 6] }
-      swing_curve    = { ds = "swing_returns", type = "line", x = "snapshot_date", xt = "temporal", y = "return_pct", color = "strategy", title = "Return since each started (%)", desc = "Real pool, the four shadows (news breakouts, scanner, momentum + news, momentum top 3) and NIFTYBEES. Use Show to pick.", pos = [0, 6, 12, 7] }
-      lt_curve       = { ds = "longterm_returns", type = "line", x = "snapshot_date", xt = "temporal", y = "return_pct", color = "strategy", title = "Return since each started (%)", desc = "Real pool, the three shadows (quality picks, momentum top 15, momentum top 5) and NIFTYBEES. Use Show to pick.", pos = [0, 6, 12, 7] }
-      quality_dots   = { ds = "quality_scatter", type = "scatter", x = "roce_pct", xt = "quantitative", y = "pe", color = "tests", title = "Quality vs price: return on capital (%) against P/E (excl. banks)", desc = "Further right = more profitable; lower = cheaper. Bottom right is the sweet spot.", pos = [0, 37, 12, 7] }
+      swing_curve    = { ds = "swing_returns", type = "line", x = "snapshot_date", xt = "temporal", y = "return_pct", color = "strategy", title = "Return since each started (%)", desc = "Real pool, the four shadows (news breakouts, scanner, momentum + news, momentum top 3) and NIFTYBEES. Use Show to pick.", pos = [0, 6, 6, 7] }
+      lt_curve       = { ds = "longterm_returns", type = "line", x = "snapshot_date", xt = "temporal", y = "return_pct", color = "strategy", title = "Return since each started (%)", desc = "Real pool, the three shadows (quality picks, momentum top 15, momentum top 5) and NIFTYBEES. Use Show to pick.", pos = [0, 6, 6, 7] }
+      swing_pnl      = { ds = "swing_returns", type = "line", x = "snapshot_date", xt = "temporal", y = "pnl_rs", color = "strategy", title = "Profit / loss since each started (Rs)", desc = "Same lines in rupees: value minus starting cash, after costs. Use Show to pick.", pos = [6, 6, 6, 7] }
+      lt_pnl         = { ds = "longterm_returns", type = "line", x = "snapshot_date", xt = "temporal", y = "pnl_rs", color = "strategy", title = "Profit / loss since each started (Rs)", desc = "Same lines in rupees: value minus starting cash, after costs. Use Show to pick.", pos = [6, 6, 6, 7] }
+      mk_usdinr      = { ds = "usdinr_history", type = "line", x = "obs_date", xt = "temporal", y = "usd_inr", color = null, title = "USD/INR, past 5 years (rupees per dollar)", desc = "FRED daily reference rate (published weekly, so the last few days can lag). Up = weaker rupee.", pos = [0, 34, 12, 6] }
+      quality_dots   = { ds = "quality_scatter", type = "scatter", x = "roce_pct", xt = "quantitative", y = "pe", color = "tests", title = "Quality vs price: return on capital (%) against P/E (excl. banks)", desc = "Further right = more profitable; lower = cheaper. Bottom right is the sweet spot.", pos = [0, 44, 12, 7] }
       calls_trend    = { ds = "calls_weekly", type = "line", x = "week", xt = "temporal", y = "right_pct", color = "series", title = "Calls right, week by week (%)", desc = "Above the coin-flip line = your instinct adds something.", pos = [0, 11, 7, 6] }
       calls_setup    = { ds = "calls_by_setup", type = "bar", x = "setup", xt = "categorical", y = "right_pct", color = null, title = "Where your instinct is strongest (% right)", desc = "Setups with 3 or more rated proposals. 50 = a coin flip.", pos = [7, 11, 5, 6] }
       mk_follow      = { ds = "india_vs_global", type = "bar", x = "name", xt = "categorical", y = "corr_with_india_gap", color = "region", title = "Who India's open follows (correlation)", desc = "How closely each market's last move matched the Nifty's next open. Near +1 = same way; 0 = no link; below 0 = opposite.", pos = [7, 10, 5, 12] }
@@ -952,19 +1016,21 @@ locals {
       intra_fills       = { ds = "intra_fill_check", title = "Paper fills vs the real minute", desc = "Positive bps = the paper fill was worse than that minute's close (stricter than the market).", pos = [6, 55, 6, 6] }
       intra_select      = { ds = "intra_selector", title = "Selector (paper): picks tomorrow's version from the last 20 days", desc = "Each day scored on results it couldn't see when it picked. Beats the fixed rules for weeks = worth a review; until then it is luck.", pos = [0, 61, 12, 5] }
       summary_intraday  = { ds = "summary_intraday", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 51, 12, 4] }
-      swing_board       = { ds = "swing_scoreboard", title = "Scoreboard", desc = "Return since each started; vs NIFTYBEES over the same days.", pos = [0, 13, 6, 7] }
-      swing_hold        = { ds = "swing_holdings", title = "What each one holds now", desc = "Real pool and shadow pools (paper).", pos = [6, 13, 6, 7] }
+      swing_board       = { ds = "swing_scoreboard", title = "Scoreboard", desc = "Return since each started; vs NIFTYBEES over the same days.", pos = [0, 20, 6, 7] }
+      swing_hold        = { ds = "swing_holdings", title = "What each one holds now", desc = "Real pool and shadow pools (paper).", pos = [6, 20, 6, 7] }
       swing_best_card   = { ds = "swing_best", title = "Best shadow vs the bar to beat", desc = "Which shadow leads, its value and P&L, and NIFTYBEES over the real pool's days.", pos = [8, 3, 4, 3] }
-      swing_trades      = { ds = "swing_trades", title = "Trades placed (last 30 days)", desc = "Every buy and sell, real pool and shadows, after costs. P&L is realized on sells.", pos = [0, 20, 12, 7] }
-      swing_scan        = { ds = "scanner_today", title = "Today's technical scanner (Nifty 200)", desc = "Strict picks and near-misses. Indicative levels, never a guaranteed return.", pos = [0, 27, 12, 7] }
-      swing_mom         = { ds = "momentum_top", title = "Momentum ranks (Nifty 200)", desc = "What the momentum shadows buy from: swing top 12 and long-term top 30. Past strength only.", pos = [0, 34, 12, 8] }
-      swing_signals     = { ds = "scanner_record", title = "How each scanner signal did afterwards", desc = "Average return 5, 10 and 20 trading days later, and how often it beat NIFTYBEES. Past results only.", pos = [0, 42, 12, 7] }
-      lt_board          = { ds = "longterm_scoreboard", title = "Scoreboard", desc = "Return since each started; vs NIFTYBEES over the same days.", pos = [0, 13, 6, 7] }
-      lt_hold           = { ds = "longterm_holdings", title = "What each one holds now", desc = "Real pool and shadow pools (paper).", pos = [6, 13, 6, 7] }
+      swing_trades      = { ds = "swing_trades", title = "Trades placed (last 30 days)", desc = "Every buy and sell, real pool and shadows, after costs. P&L is realized on sells.", pos = [0, 27, 12, 7] }
+      swing_suggest     = { ds = "swing_suggest", title = "Suggested today (information only)", desc = "What the auto rules would buy next and the scanner's strict picks, with levels. Nothing is placed from this list; chart = TradingView. Not advice.", pos = [0, 13, 12, 7] }
+      lt_suggest        = { ds = "longterm_suggest", title = "Suggested today (information only)", desc = "This week's quality picks and the momentum top 15. Nothing is placed from this list; chart = TradingView. Not advice.", pos = [0, 13, 12, 7] }
+      swing_scan        = { ds = "scanner_today", title = "Today's technical scanner (Nifty 200)", desc = "Strict picks and near-misses. Indicative levels, never a guaranteed return.", pos = [0, 34, 12, 7] }
+      swing_mom         = { ds = "momentum_top", title = "Momentum ranks (Nifty 200)", desc = "What the momentum shadows buy from: swing top 12 and long-term top 30. Past strength only.", pos = [0, 41, 12, 8] }
+      swing_signals     = { ds = "scanner_record", title = "How each scanner signal did afterwards", desc = "Average return 5, 10 and 20 trading days later, and how often it beat NIFTYBEES. Past results only.", pos = [0, 49, 12, 7] }
+      lt_board          = { ds = "longterm_scoreboard", title = "Scoreboard", desc = "Return since each started; vs NIFTYBEES over the same days.", pos = [0, 20, 6, 7] }
+      lt_hold           = { ds = "longterm_holdings", title = "What each one holds now", desc = "Real pool and shadow pools (paper).", pos = [6, 20, 6, 7] }
       lt_best_card      = { ds = "longterm_best", title = "Best shadow vs the bar to beat", desc = "Which shadow leads, its value and P&L, and NIFTYBEES over the real pool's days.", pos = [8, 3, 4, 3] }
-      lt_trades         = { ds = "longterm_trades", title = "Trades placed (last 30 days)", desc = "Every buy and sell, real pool and shadows, after costs. P&L is realized on sells.", pos = [0, 20, 12, 7] }
-      quality_top       = { ds = "longterm_picks", title = "This week's quality picks (max 2 per industry) and the next 20", desc = "Eligible Nifty 200 companies; score = 100 x quality + growth bonus - price penalty. Shadow mode: nothing real is bought yet.", pos = [0, 27, 12, 10] }
-      summary_quality   = { ds = "summary_quality", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 44, 12, 4] }
+      lt_trades         = { ds = "longterm_trades", title = "Trades placed (last 30 days)", desc = "Every buy and sell, real pool and shadows, after costs. P&L is realized on sells.", pos = [0, 27, 12, 7] }
+      quality_top       = { ds = "longterm_picks", title = "This week's quality picks (max 2 per industry) and the next 20", desc = "Eligible Nifty 200 companies; score = 100 x quality + growth bonus - price penalty. Shadow mode: nothing real is bought yet.", pos = [0, 34, 12, 10] }
+      summary_quality   = { ds = "summary_quality", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 51, 12, 4] }
       calls_matrix      = { ds = "calls_matrix", title = "Your rating vs what happened", desc = "Count · total Rs · whether your call was right. Skipped proposals count by what they would have made.", pos = [0, 6, 5, 5] }
       calls_vs_trader   = { ds = "calls_vs_trader", title = "You vs the trader", desc = "Where you disagreed shows what following you would have changed (ratings still never train it).", pos = [5, 6, 7, 5] }
       calls_list        = { ds = "rating_trades", title = "Every rated proposal (newest first)", desc = "Your rating, what the trader did, the outcome and whether your call was right.", pos = [0, 17, 12, 9] }
@@ -973,10 +1039,10 @@ locals {
       mk_world          = { ds = "world_moves", title = "Around the world", desc = "Last move, and over the last 5 and 20 sessions. Newest reading wins: the 08:45 IST Yahoo snapshot or FRED/Massive; live = that market is still trading.", pos = [0, 10, 7, 12] }
       mk_us_after       = { ds = "us_after_moves", title = "What the Nifty did after the US moved", desc = "Since 2023. The open follows the US more than the close does.", pos = [0, 22, 6, 6] }
       mk_unusual        = { ds = "unusual_latest", title = "Unusual volume, latest session", desc = "Stocks trading far above their 20-day average volume.", pos = [0, 28, 6, 6] }
-      details_global    = { ds = "global_latest", title = "Every global instrument: latest reading", desc = "FRED series, US-listed country ETFs and the 08:45 IST Yahoo snapshot (source column).", pos = [0, 35, 12, 8] }
-      details_ivg       = { ds = "india_vs_global", title = "India's next open vs global moves", desc = "Correlation over all sessions; same direction = how often the gap matched the global move.", pos = [0, 43, 12, 7] }
-      details_adr       = { ds = "adr_latest", title = "Indian ADRs vs NSE shares", desc = "Premium vs the pair's median, and vs USD/INR.", pos = [0, 50, 12, 5] }
-      summary_overview  = { ds = "summary_overview", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 55, 12, 4] }
+      details_global    = { ds = "global_latest", title = "Every global instrument: latest reading", desc = "FRED series, US-listed country ETFs and the 08:45 IST Yahoo snapshot (source column).", pos = [0, 41, 12, 8] }
+      details_ivg       = { ds = "india_vs_global", title = "India's next open vs global moves", desc = "Correlation over all sessions; same direction = how often the gap matched the global move.", pos = [0, 49, 12, 7] }
+      details_adr       = { ds = "adr_latest", title = "Indian ADRs vs NSE shares", desc = "Premium vs the pair's median, and vs USD/INR.", pos = [0, 56, 12, 5] }
+      summary_overview  = { ds = "summary_overview", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 61, 12, 4] }
       } : k => {
       widget = {
         name = "${k}_table"
@@ -1006,7 +1072,7 @@ locals {
       lt_title       = { lines = ["## Long term", "Real pool Rs 1 lakh in cash until the 18 Dec go/no-go review, vs three shadow strategies on paper. Company quality refreshed every Saturday. Not advice."], pos = [0, 0, 8, 3] }
       calls_title    = { lines = ["## Your calls", "Your 👍/👎 against what really happened, for your own learning: ratings never train the trader. All history; under 30 rated is too early to judge."], pos = [0, 0, 12, 3] }
       markets_title  = { lines = ["## Global markets: what matters for India's next open", "US, Asia, Europe, the rupee, crude, yields and the fear gauge, plus what the NSE did under the surface."], pos = [0, 0, 12, 2] }
-      markets_tables = { lines = ["### Full tables"], pos = [0, 34, 12, 1] }
+      markets_tables = { lines = ["### Full tables"], pos = [0, 40, 12, 1] }
       } : k => {
       # one string with real line breaks: Databricks joins a text box's lines without a break
       widget   = { name = k, multilineTextboxSpec = { lines = [join("\n", t.lines)] } }
@@ -1069,7 +1135,7 @@ locals {
           local.text.swing_title, local.show_filter.swing_show,
           local.counter.swing_real, local.counter.swing_pnl, local.counter.swing_return, local.counter.swing_trades,
           local.table_widget.swing_best_card,
-          local.chart.swing_curve,
+          local.chart.swing_curve, local.chart.swing_pnl, local.table_widget.swing_suggest,
           local.table_widget.swing_board, local.table_widget.swing_hold, local.table_widget.swing_trades,
           local.table_widget.swing_scan, local.table_widget.swing_mom, local.table_widget.swing_signals,
         ]
@@ -1083,7 +1149,7 @@ locals {
           local.text.lt_title, local.show_filter.lt_show,
           local.counter.lt_real, local.counter.lt_pnl, local.counter.lt_return, local.counter.lt_trades,
           local.table_widget.lt_best_card,
-          local.chart.lt_curve,
+          local.chart.lt_curve, local.chart.lt_pnl, local.table_widget.lt_suggest,
           local.table_widget.lt_board, local.table_widget.lt_hold, local.table_widget.lt_trades,
           local.table_widget.quality_top, local.chart.quality_dots, local.table_widget.summary_quality,
         ]
@@ -1113,7 +1179,7 @@ locals {
           local.counter.markets_usdinr, local.counter.markets_brent, local.counter.markets_vix,
           local.table_widget.mk_world, local.chart.mk_follow,
           local.table_widget.mk_us_after, local.chart.mk_breadth,
-          local.table_widget.mk_unusual, local.chart.mk_adr,
+          local.table_widget.mk_unusual, local.chart.mk_adr, local.chart.mk_usdinr,
           local.text.markets_tables, local.table_widget.details_global, local.table_widget.details_ivg,
           local.table_widget.details_adr, local.table_widget.summary_overview,
         ]

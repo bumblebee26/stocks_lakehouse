@@ -9,7 +9,11 @@ blanks the app. The app (app/index.html) is served by CloudFront from the same s
 Event: {} normally; {"dry_run": true} returns the payload without writing it.
 
 From 24 Nov it also adds five years of daily closes from Yahoo for the app's charts that have no lakehouse table:
-USD/INR (Markets tab) and Accenture, NYSE: ACN (Custom tab). A failed fetch keeps the previous series.
+USD/INR (Markets tab) and Accenture, NYSE: ACN (Desk tab). A failed fetch keeps the previous series.
+
+From 24 Nov the Markets tab also shows Mumbai fuel and EV-charging rates (dataset fuel_mumbai). There is no free
+official feed, so the rates live in FUEL_MUMBAI below with the date and source of each; to update them without a
+code change, put the same list as JSON in the app bucket at config/fuel_mumbai.json (it wins when present).
 """
 
 import datetime as dt
@@ -27,6 +31,20 @@ QUERIES_KEY = "config/queries.json"
 WORKERS = 4
 # app dataset -> (Yahoo symbol, label); five years of daily closes as rows {date, close}
 YAHOO_SERIES = {"usdinr_5y": ("INR=X", "USD/INR"), "acn_5y": ("ACN", "Accenture (NYSE: ACN, USD)")}
+FUEL_KEY = "config/fuel_mumbai.json"
+FUEL_FIELDS = ["item", "rate", "unit", "as_of", "source"]
+FUEL_MUMBAI = [
+    {"item": "Petrol", "rate": "111.21", "unit": "Rs / litre", "as_of": "2026-11-16",
+     "source": "HDFC Sky daily fuel prices"},
+    {"item": "Diesel", "rate": "97.83", "unit": "Rs / litre", "as_of": "2026-11-16",
+     "source": "HDFC Sky daily fuel prices"},
+    {"item": "CNG", "rate": "91.50", "unit": "Rs / kg", "as_of": "2026-11-15",
+     "source": "Mahanagar Gas revision (Oneindia)"},
+    {"item": "EV charging, public fast (Tata Power, Jio-bp, ChargeZone)", "rate": "18 to 25", "unit": "Rs / kWh",
+     "as_of": "2026-11", "source": "MyMotor Mumbai charging list"},
+    {"item": "EV charging, MSEDCL public chargers", "rate": "11.50 to 17", "unit": "Rs / kWh", "as_of": "2026-11",
+     "source": "MyMotor Mumbai charging list"},
+]
 
 
 def _s3():
@@ -82,6 +100,14 @@ def yahoo_series(previous, fetch=None):
     return out, failed
 
 
+def fuel_rates(s3, bucket):
+    """The fuel_mumbai dataset: config/fuel_mumbai.json in the app bucket if present, else FUEL_MUMBAI."""
+    rows = load_previous(s3, bucket, FUEL_KEY) or FUEL_MUMBAI
+    if not isinstance(rows, list):
+        rows = FUEL_MUMBAI
+    return {"fields": FUEL_FIELDS, "rows": [{f: r.get(f) for f in FUEL_FIELDS} for r in rows]}
+
+
 def handler(event, context):
     event = event or {}
     bucket, prefix = os.environ["APP_BUCKET"], os.environ["APP_PREFIX"]
@@ -92,6 +118,7 @@ def handler(event, context):
     datasets, failed = run_all(queries, previous)
     series, series_failed = yahoo_series(previous)
     datasets.update(series)
+    datasets["fuel_mumbai"] = fuel_rates(s3, bucket)
     failed += series_failed
     payload = {"updated_at": dt.datetime.now(IST).strftime("%Y-%m-%d %H:%M"), "datasets": datasets,
                "failed": failed}

@@ -54,8 +54,16 @@ class Export(unittest.TestCase):
         put = s3.puts[0]
         self.assertEqual(put["Key"], "abc123/data/desk.json")
         body = json.loads(put["Body"])
-        self.assertEqual(set(body["datasets"]), set(QUERIES))
+        self.assertEqual(set(body["datasets"]), set(QUERIES) | {"fuel_mumbai"})
         self.assertEqual(body["failed"], [])
+        fuel = body["datasets"]["fuel_mumbai"]["rows"]
+        self.assertEqual([r["item"] for r in fuel[:3]], ["Petrol", "Diesel", "CNG"])
+
+    def test_fuel_rates_from_the_bucket_win(self):
+        own = [{"item": "Petrol", "rate": "105.00", "unit": "Rs / litre", "as_of": "2026-12-01", "source": "you"}]
+        s3 = FakeS3({app_export.FUEL_KEY: json.dumps(own).encode()})
+        self.assertEqual(app_export.fuel_rates(s3, "b")["rows"], own)
+        self.assertEqual(app_export.fuel_rates(FakeS3({}), "b")["rows"][0]["item"], "Petrol")
 
     def test_dry_run_writes_nothing(self):
         s3 = FakeS3({"config/queries.json": json.dumps(QUERIES).encode()})
