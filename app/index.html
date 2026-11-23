@@ -58,8 +58,8 @@ svg.chart { width: 100%; height: 120px; display: block }
 .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); flex-wrap: wrap }
 .note { font-size: 12px; color: var(--muted); margin: 6px 2px 0 }
 .axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; margin-top: 2px }
-nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 3; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); background: var(--card); border-top: 1px solid var(--line); padding: 4px 4px calc(env(safe-area-inset-bottom) + 6px) }
-nav button { min-height: 50px; border: 0; background: none; color: var(--muted); font: 600 11.5px inherit; font-family: inherit; border-top: 3px solid transparent }
+nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 3; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); background: var(--card); border-top: 1px solid var(--line); padding: 4px 4px calc(env(safe-area-inset-bottom) + 6px) }
+nav button { min-height: 50px; border: 0; background: none; color: var(--muted); font: 600 12px inherit; font-family: inherit; border-top: 3px solid transparent }
 nav button[aria-current="page"] { color: var(--accent); border-top-color: var(--accent) }
 .err { border-color: var(--down) }
 button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
@@ -77,14 +77,13 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
   <button type="button" data-tab="swing">Swing</button>
   <button type="button" data-tab="long">Long</button>
   <button type="button" data-tab="markets">Markets</button>
-  <button type="button" data-tab="custom">Custom</button>
 </nav>
 <script>
 "use strict";
 let D = {};
 let tab = "desk";
 let show = { swing: "both", long: "both", intraday: "both" };
-try { tab = localStorage.getItem("tab") || "desk"; } catch (e) {}
+try { tab = localStorage.getItem("tab") || "desk"; if (tab === "custom") tab = "desk"; } catch (e) {}
 
 const rows = (n) => ((D.datasets || {})[n] || {}).rows || [];
 const one = (n) => rows(n)[0] || {};
@@ -169,7 +168,8 @@ function desk() {
   </div>
   <section class="card"><h3>Each pool (since 18 Nov)</h3>${rows("desk_pools").map((r) => `<div class="row"><div class="n"><b>${esc(r.pool)}</b><span>${rs(r.value_rs)} now</span></div><div class="r ${cls(r.pnl_rs)}">${rs(r.pnl_rs, true)}<br><span style="font-weight:500;font-size:12px">${pct(r.return_pct, true)}</span></div></div>`).join("") || '<p class="muted">No data yet.</p>'}</section>
   <section class="card"><h3>Today's decisions</h3>${dec}</section>
-  <section class="card"><h3>Every strategy vs NIFTYBEES</h3>${board || '<p class="muted">No data yet.</p>'}</section>`;
+  <section class="card"><h3>Every strategy vs NIFTYBEES</h3>${board || '<p class="muted">No data yet.</p>'}</section>
+  ${custom()}`;
 }
 
 function seg(key) {
@@ -252,8 +252,7 @@ function dateBack(iso, years) { const d = new Date(iso); d.setFullYear(d.getFull
 
 function custom() {
   const ds = (D.datasets || {}).acn_5y || {};
-  return `<h2>Custom</h2>
-  <section class="card"><h3>${esc(ds.label || "Accenture (NYSE: ACN)")}, past 5 years</h3>${series5y("acn_5y", "Accenture")}
+  return `<section class="card"><h3>${esc(ds.label || "Accenture (NYSE: ACN)")}, past 5 years</h3>${series5y("acn_5y", "Accenture")}
     <p class="note">Daily closes in US dollars from Yahoo Finance, refreshed with each export.</p></section>`;
 }
 
@@ -263,7 +262,7 @@ function render() {
     .map((c) => `<span class="chip ${String(c).includes("ON") ? "on" : ""}">${esc(c)}</span>`).join("");
   document.getElementById("updated").textContent = D.updated_at ? `Updated ${D.updated_at} IST` + ((D.failed || []).length ? " · some parts older" : "") : "No data yet";
   const view = { desk, intraday, swing: () => pool("Swing", "swing", "swing"),
-                 long: () => pool("Long term", "longterm", "long"), markets, custom }[tab] || desk;
+                 long: () => pool("Long term", "longterm", "long"), markets }[tab] || desk;
   document.getElementById("main").innerHTML = view() + '<p class="note">Dummy money only. Not investment advice.</p>';
   document.querySelectorAll("nav button").forEach((b) => b.setAttribute("aria-current", b.dataset.tab === tab ? "page" : "false"));
 }
