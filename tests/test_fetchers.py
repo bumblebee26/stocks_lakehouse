@@ -109,6 +109,11 @@ class NseFetch(unittest.TestCase):
                           rows[0]["TtlTradgVol"], rows[0]["TradDt"], rows[0]["Rmks"]),
                          ("TCS", "EQ", "3540", "3490", "1000000", "2024-07-05", "legacy bhavcopy"))
 
+    def test_legacy_day_that_fails_is_skipped_not_fatal(self):
+        with mock.patch.object(nse, "http_get", side_effect=RuntimeError("HTTP 503")):
+            out = nse.handler({"start": "2020-10-05", "end": "2020-10-06"}, None)
+        self.assertEqual([r["status"] for r in out["results"]], ["error", "error"])
+
     def test_udiff_dates_use_the_new_url(self):
         with mock.patch.object(nse, "http_get", return_value=b"PK\x03\x04data") as get:
             nse.handler({"date": "2024-07-08"}, None)

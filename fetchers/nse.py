@@ -104,12 +104,21 @@ def fetch_one(trade_date):
     if trade_date.weekday() >= 5:
         return {"date": trade_date.isoformat(), "status": "skipped_weekend"}
     if trade_date < UDIFF_START:
+        # One bad day (NSE refusing or timing out, a volume upload error) must not stop a years-long backfill:
+        # it is logged and skipped; the S3-to-volume sync repairs upload gaps, and a re-run fills the rest.
         try:
             body = fetch_legacy(trade_date)
         except NotFound:
             log.warning("No legacy NSE bhavcopy for %s (holiday)", trade_date)
             return {"date": trade_date.isoformat(), "status": "no_file"}
-        key = put_landing("nse", trade_date, f"bhavcopy_cm_{trade_date:%Y%m%d}.csv.zip", body, "application/zip")
+        except Exception as err:  # noqa: BLE001
+            log.error("Legacy NSE bhavcopy for %s failed, skipped: %s", trade_date, err)
+            return {"date": trade_date.isoformat(), "status": "error", "error": str(err)[:200]}
+        try:
+            key = put_landing("nse", trade_date, f"bhavcopy_cm_{trade_date:%Y%m%d}.csv.zip", body, "application/zip")
+        except Exception as err:  # noqa: BLE001
+            log.error("Landing the legacy bhavcopy for %s failed, skipped: %s", trade_date, err)
+            return {"date": trade_date.isoformat(), "status": "error", "error": str(err)[:200]}
         return {"date": trade_date.isoformat(), "status": "written", "key": key, "bytes": len(body), "legacy": True,
                 "delivery": fetch_delivery(trade_date), "indices": fetch_indices(trade_date)}
 
