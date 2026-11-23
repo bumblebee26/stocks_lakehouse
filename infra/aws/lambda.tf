@@ -235,6 +235,33 @@ resource "aws_scheduler_schedule" "nse_history_backfill" {
   }
 }
 
+# One-off (24 Nov 2026): five years of FRED history (all series, one file) so the dashboard can chart USD/INR over
+# five years like the phone app. Silver keeps the newest file's value per series and date, so the overlap with the
+# daily window is harmless. To run it again, change the time and apply.
+resource "aws_scheduler_schedule" "fred_history_backfill" {
+  name        = "${var.name_prefix}-fetch-fred-history-backfill"
+  description = "One-off: FRED 2021-11-01 to 2026-11-24 (USD/INR five years for the dashboard)."
+  state       = var.schedules_enabled && var.fred_enabled ? "ENABLED" : "DISABLED"
+
+  schedule_expression          = "at(2026-11-24T04:15:00)"
+  schedule_expression_timezone = "Asia/Kolkata"
+
+  flexible_time_window {
+    mode = "OFF"
+  }
+
+  target {
+    arn      = aws_lambda_function.fetcher["fred"].arn
+    role_arn = aws_iam_role.scheduler.arn
+    input    = jsonencode({ start = "2021-11-01", end = "2026-11-24" })
+
+    retry_policy {
+      maximum_retry_attempts       = 1
+      maximum_event_age_in_seconds = 3600
+    }
+  }
+}
+
 # The NSE fetcher continues long backfills by invoking itself (common.run_dates). AWS stopped that chain as a
 # "recursive loop" on 23-24 Nov 2026 (Health event AWS_LAMBDA_RUNAWAY_TERMINATION_NOTIFICATION), so at the owner's
 # decision loop detection is off for this one function. The chain is bounded: each hop passes only the remaining

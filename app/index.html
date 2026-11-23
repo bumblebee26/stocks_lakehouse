@@ -57,7 +57,22 @@ h2 { font-size: 22px; margin: 4px 2px 0 }
 svg.chart { width: 100%; height: 140px; display: block; touch-action: pan-y }
 .cwrap { position: relative }
 .tip { position: absolute; top: -6px; transform: translateY(-100%); background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 6px 9px; font-size: 12px; line-height: 1.35; box-shadow: 0 4px 14px rgba(0,0,0,.15); pointer-events: none; max-width: 92%; z-index: 1 }
-.legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); flex-wrap: wrap }
+.legend { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px }
+.lg { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 30px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--soft); color: var(--fg); font: 500 12px/1.2 inherit; font-family: inherit; cursor: pointer }
+.lg i { flex: none; width: 14px; height: 3px; border-radius: 2px }
+.lg i.dash { background-image: linear-gradient(90deg, currentColor 55%, transparent 0) !important; background-size: 5px 3px }
+.lg span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.lg.real { font-weight: 700; border-color: var(--fg) }
+.lg[aria-pressed="true"] { background: var(--card); border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset }
+svg.chart.hl polyline { opacity: .15 }
+svg.chart.hl polyline.on { opacity: 1; stroke-width: 3.5 }
+.sug .row .r { font-weight: 600; font-size: 13px }
+.sug a { color: var(--accent); text-decoration: none; font-weight: 600 }
+.sub { font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); margin: 10px 0 2px }
+.sub:first-of-type { margin-top: 0 }
+.tiles.three { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px }
+.tiles.three .tile { padding: 10px }
+.tiles.three .v { font-size: 19px }
 .note { font-size: 12px; color: var(--muted); margin: 6px 2px 0 }
 .axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; margin-top: 2px }
 nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 3; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); background: var(--card); border-top: 1px solid var(--line); padding: 4px 4px calc(env(safe-area-inset-bottom) + 6px) }
@@ -110,14 +125,15 @@ function lineChart(series, label, fmt) {
   const grid = [lo, (lo + hi) / 2, hi].map((v) => `<line x1="${L}" x2="${W}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="var(--soft)"/>`
     + `<text x="${L - 4}" y="${(y(v) + 3).toFixed(1)}" text-anchor="end" font-size="9" fill="var(--muted)">${esc(f(v))}</text>`).join("");
   const zero = lo < 0 && hi > 0 ? `<line x1="${L}" x2="${W}" y1="${y(0).toFixed(1)}" y2="${y(0).toFixed(1)}" stroke="var(--line)"/>` : "";
-  const lines = series.map((s) => `<polyline fill="none" stroke="${s.color}" stroke-width="${s.dash ? 2 : 2.5}" ${s.dash ? 'stroke-dasharray="5 4"' : ""} points="${s.points.map((p) => x(p[0]).toFixed(1) + "," + y(p[1]).toFixed(1)).join(" ")}"/>`).join("");
-  const legend = series.map((s) => `<span style="color:${s.color}">${s.dash ? "┅" : "━"} ${esc(s.name)}</span>`).join("");
+  const lines = series.map((s, i) => `<polyline data-i="${i}" fill="none" stroke="${s.color}" stroke-width="${s.dash ? 2 : 2.5}" ${s.dash ? 'stroke-dasharray="5 4"' : ""} points="${s.points.map((p) => x(p[0]).toFixed(1) + "," + y(p[1]).toFixed(1)).join(" ")}"/>`).join("");
   const id = CHARTS.length;
+  const legend = series.length < 2 ? "" : series.map((s, i) => `<button type="button" class="lg${s.real ? " real" : ""}" data-lg="${id}" data-i="${i}" aria-pressed="false"`
+    + ` title="${esc(s.name)}"><i class="${s.dash ? "dash" : ""}" style="background:${s.color};color:${s.color}"></i><span>${esc(s.name)}</span></button>`).join("");
   CHARTS.push({ dates, f, x, y, series: series.map((s) => ({ name: s.name, color: s.color, at: Object.fromEntries(s.points) })) });
   return `<div class="cwrap"><svg class="chart" data-chart="${id}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}. Touch the chart to read values.">`
     + `${grid}${zero}${lines}<g class="cur"></g></svg><div class="tip" hidden></div></div>`
     + `<div class="axis" style="padding-left:${(L / W * 100).toFixed(1)}%"><span>${esc(dates[0])}</span><span>${esc(dates[dates.length - 1])}</span></div>`
-    + `<div class="legend">${legend}</div>`;
+    + (legend ? `<div class="legend" role="group" aria-label="Lines: tap one to highlight it">${legend}</div>` : "");
 }
 
 function cursor(e) {
@@ -163,7 +179,7 @@ function plChart(rows, o) {
   const best = rest.slice(0, 5), worst = rest.slice(5).slice(-2);
   const names = [...real, ...best, ...worst];
   const total = Object.keys(by).length;
-  const series = names.map((n, i) => ({ name: n, color: by[n].kind === "real" ? "var(--fg)" : PALETTE[i % PALETTE.length],
+  const series = names.map((n, i) => ({ name: n, real: by[n].kind === "real", color: by[n].kind === "real" ? "var(--fg)" : PALETTE[i % PALETTE.length],
     dash: by[n].kind === "benchmark", points: by[n].points.sort((a, b) => (a[0] < b[0] ? -1 : 1)) }));
   const css = getComputedStyle(document.documentElement);
   series.forEach((s) => { if (s.color === "var(--fg)") s.color = css.getPropertyValue("--fg").trim(); });
@@ -193,8 +209,8 @@ function desk() {
   const pv = rows("portfolio_vs_nifty");
   const s = (name, color, dash) => ({ name, color, dash, points: pv.filter((r) => r.series === name).map((r) => [r.snapshot_date, num(r.index_value)]) });
   const css = getComputedStyle(document.documentElement);
-  const chart = lineChart([s("Your portfolio", css.getPropertyValue("--accent").trim()), s("NIFTYBEES (index)", css.getPropertyValue("--nb").trim(), true)], "Portfolio vs NIFTYBEES");
-  const dec = rows("desk_decisions").map((d) => `<div class="row"><div class="n"><b>${esc(d.symbol)} · ${esc(d.setup)}</b><span>${esc(d.time)} · ${esc(d.decision)} · score ${esc(d.score)}</span></div><div class="r ${arrowCls(d.result) || (String(d.result).includes("−") ? "down" : String(d.result).includes("+") ? "up" : "muted")}">${esc(d.result)}</div></div>`).join("") || '<p class="muted">No proposals on the latest day.</p>';
+  const chart = lineChart([{ ...s("Your portfolio", css.getPropertyValue("--accent").trim()), real: true }, s("NIFTYBEES (index)", css.getPropertyValue("--nb").trim(), true)], "Portfolio vs NIFTYBEES");
+  const dec = rows("desk_decisions").map((d) => `<div class="row"><div class="n"><b>${esc(d.symbol)} · ${esc(d.setup)}</b><span>${esc(d.time)} · ${esc(d.decision)} · score ${esc(d.score)} · you ${d.you && d.you !== "–" ? esc(d.you) : "not rated"}</span></div><div class="r ${arrowCls(d.result) || (String(d.result).includes("−") ? "down" : String(d.result).includes("+") ? "up" : "muted")}">${esc(d.result)}</div></div>`).join("") || '<p class="muted">No proposals on the latest day.</p>';
   const board = rows("desk_board").slice(0, 8).map((r) => `<div class="row"><div class="n"><b>${esc(r.strategy)}</b><span>${esc(r.kind)} · ${esc(r.return_since_start)}</span></div><div class="r ${arrowCls(r.vs_niftybees)}">${esc(r.vs_niftybees)}</div></div>`).join("");
   return story() + `
   <section class="card"><span class="muted" style="font-size:13px">Whole dummy portfolio</span><div class="big">${rs(k.portfolio_rs)}</div>
@@ -233,7 +249,7 @@ function intraday() {
   ${seg("intraday")}
   <section class="card"><h3>P&amp;L since 18 Nov</h3>${plChart(rows("intra_lines"), { key: "intraday", x: "trade_date", y: "total_rs", line: "line",
     kindOf: (r) => (r.kind === "Real" ? "real" : "shadow"), label: "Intraday P&L, real and shadows", max: 8 })}
-    <p class="note">Bold line = real. Shadows replay the same trades; the opening-range test is its own paper trades.</p></section>
+    <p class="note">Black line, bold chip = real; tap a chip to highlight its line. Shadows replay the same trades; the opening-range test is its own paper trades.</p></section>
   <section class="card"><h3>Real vs every shadow (same trades)</h3>${board || '<p class="muted">No data yet.</p>'}<p class="note">Right column: what it would have made vs the real result.</p></section>
   <section class="card"><h3>Auto bar and sizing (every proposal)</h3>${ladder || '<p class="muted">No data yet.</p>'}</section>
   <section class="card"><h3>Selector (paper)</h3>${sel || '<p class="muted">Starts after Monday\'s day report.</p>'}</section>`;
@@ -256,8 +272,31 @@ function pool(title, ds, key) {
   ${seg(key)}
   <section class="card"><h3>P&amp;L since each started</h3>${plChart(rows(ds + "_returns"), { key, x: "snapshot_date", y: "pnl_rs", line: "strategy",
     kindOf: (r) => String(r.kind).toLowerCase(), label: title + " P&L, real and shadows" })}</section>
+  ${suggested(ds)}
   <section class="card"><h3>Scoreboard</h3>${board || '<p class="muted">No data yet.</p>'}</section>
   <section class="card"><h3>Trades placed (last 30 days)</h3>${trades || '<p class="muted">No trades yet.</p>'}<p class="note">Right column: realized P&amp;L on sells, value on buys.</p></section>`;
+}
+
+const chartLink = (r) => (r.chart ? ` · <a href="${esc(r.chart)}" target="_blank" rel="noopener">chart ↗</a>` : "");
+function suggested(ds) {
+  const r = rows(ds + "_suggest");
+  const groups = [...new Set(r.map((x) => x.strategy))];
+  const body = groups.map((g) => `<div class="sub">${esc(g)}</div>` + r.filter((x) => x.strategy === g).map((x) => {
+    const lv = x.stop == null ? "" : `stop ${esc(x.stop)}` + (x.target == null ? "" : `<br>target ${esc(x.target)}`) + (x.rr == null ? "" : ` · R:R ${esc(x.rr)}`);
+    return `<div class="row"><div class="n"><b>${esc(x.rank)}. ${esc(x.symbol)}</b><span>${esc(x.why)}${chartLink(x)}</span></div>`
+      + `<div class="r">${x.entry ? esc(x.entry) : "Rs " + esc(x.close)}${lv ? `<br><span class="muted" style="font-weight:500;font-size:12px">${lv}</span>` : ""}</div></div>`;
+  }).join("")).join("");
+  const asOf = r[0] && r[0].trade_date ? ` (prices from ${esc(r[0].trade_date)})` : "";
+  return `<section class="card sug"><h3>Suggested today${asOf}</h3>${body || '<p class="muted">Appears after the next export.</p>'}
+    <p class="note">Information only: nothing is placed from this list. Levels are indicative. Not advice.</p></section>`;
+}
+
+function fuel() {
+  const r = rows("fuel_mumbai");
+  if (!r.length) return "";
+  return `<section class="card"><h3>Fuel in Mumbai</h3><div class="tiles three">${r.map((x) => `<div class="tile"><span class="l">${esc(x.item)}</span>`
+    + `<span class="v">₹${esc(x.rate)}</span><span class="l">${esc(x.unit)}<br>${esc(x.as_of)}</span></div>`).join("")}</div>
+    <p class="note">Source: ${esc(r[0].source)}, read with each export; a price that looks wrong keeps the last good one.</p></section>`;
 }
 
 function markets() {
@@ -271,6 +310,7 @@ function markets() {
     <div class="tile"><span class="l">Nikkei</span><span class="v ${cls(k.nikkei_pct)}">${pct(k.nikkei_pct, true)}</span></div>
     <div class="tile"><span class="l">USD/INR · Brent</span><span class="v">${esc(k.usd_inr)} · $${esc(k.brent_usd)}</span></div>
   </div>
+  ${fuel()}
   <section class="card"><h3>USD/INR, past 5 years</h3>${series5y("usdinr_5y", "USD/INR")}</section>
   <section class="card"><h3>Today's read</h3>${read || '<p class="muted">No data yet.</p>'}</section>
   <section class="card"><h3>World moves</h3>${moves || '<p class="muted">No data yet.</p>'}</section>`;
@@ -315,6 +355,16 @@ document.querySelector("nav").addEventListener("click", (e) => {
 ["pointerdown", "pointermove"].forEach((t) => document.getElementById("main").addEventListener(t, cursor));
 ["pointerleave", "pointercancel"].forEach((t) => document.getElementById("main").addEventListener(t, cursorOff, true));
 document.getElementById("main").addEventListener("click", (e) => {
+  const lg = e.target.closest("button[data-lg]");
+  if (lg) {   // tap a line's chip to highlight it; tap again to show all
+    const on = lg.getAttribute("aria-pressed") !== "true";
+    const svg = document.querySelector(`svg[data-chart="${lg.dataset.lg}"]`);
+    lg.parentNode.querySelectorAll("button[data-lg]").forEach((x) => x.setAttribute("aria-pressed", "false"));
+    lg.setAttribute("aria-pressed", String(on));
+    svg.classList.toggle("hl", on);
+    svg.querySelectorAll("polyline").forEach((p) => p.classList.toggle("on", on && p.dataset.i === lg.dataset.i));
+    return;
+  }
   const b = e.target.closest("button[data-seg]"); if (!b) return;
   show[b.dataset.seg] = b.dataset.v; render();
 });
