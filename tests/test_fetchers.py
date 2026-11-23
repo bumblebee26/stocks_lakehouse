@@ -89,6 +89,31 @@ class NseFetch(unittest.TestCase):
                          "landing/nse/date=2026-11-06/bhavcopy_cm_20261106.csv.zip")
         self.assertEqual(out["results"][0]["delivery"], "empty")     # the fake body isn't a delivery CSV
 
+    def test_legacy_bhavcopy_before_udiff_is_converted(self):
+        import io
+        import zipfile
+        legacy = ("SYMBOL,SERIES,OPEN,HIGH,LOW,CLOSE,LAST,PREVCLOSE,TOTTRDQTY,TOTTRDVAL,TIMESTAMP,TOTALTRADES,ISIN,\n"
+                  "TCS,EQ,3500,3550,3480,3540,3541,3490,1000000,3540000000,05-JUL-2024,50000,INE467B01029,\n")
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("cm05JUL2024bhav.csv", legacy)
+        with mock.patch.object(nse, "http_get", return_value=buf.getvalue()) as get:
+            out = nse.handler({"date": "2024-07-05"}, None)
+        self.assertIn("/EQUITIES/2024/JUL/cm05JUL2024bhav.csv.zip", get.call_args_list[0].args[0])
+        self.assertTrue(out["results"][0]["legacy"])
+        put = self.s3.puts[0]
+        self.assertEqual(put["Key"], "landing/nse/date=2024-07-05/bhavcopy_cm_20240705.csv.zip")
+        with zipfile.ZipFile(io.BytesIO(put["Body"])) as z:
+            rows = list(__import__("csv").DictReader(io.StringIO(z.read(z.namelist()[0]).decode())))
+        self.assertEqual((rows[0]["TckrSymb"], rows[0]["SctySrs"], rows[0]["ClsPric"], rows[0]["PrvsClsgPric"],
+                          rows[0]["TtlTradgVol"], rows[0]["TradDt"], rows[0]["Rmks"]),
+                         ("TCS", "EQ", "3540", "3490", "1000000", "2024-07-05", "legacy bhavcopy"))
+
+    def test_udiff_dates_use_the_new_url(self):
+        with mock.patch.object(nse, "http_get", return_value=b"PK\x03\x04data") as get:
+            nse.handler({"date": "2024-07-08"}, None)
+        self.assertIn("BhavCopy_NSE_CM_0_0_0_20240708", get.call_args_list[0].args[0])
+
     def test_delivery_file(self):
         csv_text = ("SYMBOL, SERIES, DATE1, PREV_CLOSE, CLOSE_PRICE, TTL_TRD_QNTY, DELIV_QTY, DELIV_PER\n"
                     "TCS, EQ, 06-Nov-2026, 2400, 2410, 1000000, 550000, 55.00\n"
