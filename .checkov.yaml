@@ -41,3 +41,7 @@ skip-check:
   - CKV2_AWS_47   # WAF Log4j rule: no WAF, and no Java behind it
   - CKV_AWS_374   # geo restriction
   - CKV2_AWS_32   # response headers policy (the managed SecurityHeadersPolicy is attached)
+  # Mobile app Lambda function URL (used while CloudFront is blocked on the account): public by design,
+  # serves only /<secret path>/<app file>, 404 otherwise. Skipped at the owner's request (PR #71).
+  - CKV_AWS_258   # function URL AuthType NONE: a phone can't sign requests; the secret path is the key
+  - CKV_AWS_301   # Lambda publicly invokable: only via the URL (lambda:InvokedViaFunctionUrl)

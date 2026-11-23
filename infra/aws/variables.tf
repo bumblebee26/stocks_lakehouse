@@ -113,3 +113,12 @@ variable "fred_enabled" {
   type        = bool
   default     = false
 }
+
+variable "app_use_cloudfront" {
+  description = <<-EOT
+    Front door for the desk mobile app (app.tf). false: a Lambda function URL (free tier). true: CloudFront.
+    CloudFront is off until AWS lifts its "account must be verified" block on the account (support case, Nov 2026).
+  EOT
+  type        = bool
+  default     = false
+}
