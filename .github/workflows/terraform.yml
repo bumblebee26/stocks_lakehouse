@@ -15,6 +15,7 @@ on:
       - "infra/**"
       - "fetchers/**"
       - "pipeline/**"
+      - "app/**"
       - ".github/workflows/terraform.yml"
       - ".github/actions/tf-init/**"
   push:
@@ -23,6 +24,7 @@ on:
       - "infra/**"
       - "fetchers/**"
       - "pipeline/**"
+      - "app/**"
       - ".github/workflows/terraform.yml"
       - ".github/actions/tf-init/**"
   workflow_dispatch:
