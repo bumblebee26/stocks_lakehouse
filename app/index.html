@@ -168,18 +168,23 @@ function intraday() {
   <section class="card"><h3>Selector (paper)</h3>${sel || '<p class="muted">Starts after Monday\'s day report.</p>'}</section>`;
 }
 
-function pool(title, kpiName, boardName, key) {
-  const k = one(kpiName);
-  const board = rows(boardName).filter((r) => keep(key, r.kind)).map((r) => `<div class="row"><div class="n"><b>${esc(r.strategy)}</b><span>${esc(r.kind)} · since ${esc(r.since)}${r.value_rs == null ? "" : " · " + rs(r.value_rs)}</span></div><div class="r"><span class="${cls(r.return_pct)}">${pct(r.return_pct, true)}</span><br><span class="${arrowCls(r.vs_niftybees)}" style="font-weight:500;font-size:12px">${esc(r.vs_niftybees)}</span></div></div>`).join("");
+function pool(title, ds, key) {
+  const k = one(ds + "_kpis");
+  const board = rows(ds + "_scoreboard").filter((r) => keep(key, r.kind)).map((r) => `<div class="row"><div class="n"><b>${esc(r.strategy)}</b><span>${esc(r.kind)} · since ${esc(r.since)}${r.value_rs == null ? "" : " · " + rs(r.value_rs) + " (" + rs(r.pnl_rs, true) + ")"}${r.trades == null ? "" : " · " + esc(r.trades) + " trades"}</span></div><div class="r"><span class="${cls(r.return_pct)}">${pct(r.return_pct, true)}</span><br><span class="${arrowCls(r.vs_niftybees)}" style="font-weight:500;font-size:12px">${esc(r.vs_niftybees)}</span></div></div>`).join("");
+  const trades = rows(ds + "_trades").filter((r) => keep(key, r.kind)).slice(0, 15).map((r) => `<div class="row"><div class="n"><b>${esc(r.side)} ${esc(r.symbol)} · ${esc(r.qty)} @ ${esc(r.price)}</b><span>${esc(r.trade_date)} · ${esc(r.strategy)}${r.reason ? " · " + esc(r.reason) : ""}</span></div><div class="r ${cls(r.pnl_rs)}">${r.pnl_rs == null ? rs(r.value_rs) : rs(r.pnl_rs, true)}</div></div>`).join("");
+  const best = k.best_shadow == null ? '<p class="muted">No shadow data yet.</p>'
+    : `<div class="row"><div class="n"><b>${esc(k.best_shadow)}</b><span>${rs(k.best_shadow_value_rs)} · ${rs(k.best_shadow_pnl_rs, true)} · ${esc(k.shadows_beating)} shadow(s) ahead of NIFTYBEES</span></div><div class="r"><span class="${cls(k.best_shadow_pct)}">${pct(k.best_shadow_pct, true)}</span><br><span class="muted" style="font-weight:500;font-size:12px">NIFTYBEES ${pct(k.niftybees_pct, true)}</span></div></div>`;
   return `<h2>${title}</h2>
   <div class="tiles">
     <div class="tile"><span class="l">Real pool</span><span class="v">${rs(k.real_value_rs)}</span></div>
+    <div class="tile"><span class="l">Real P&amp;L</span><span class="v ${cls(k.real_pnl_rs)}">${rs(k.real_pnl_rs, true)}</span></div>
     <div class="tile"><span class="l">Real return</span><span class="v ${cls(k.real_return_pct)}">${pct(k.real_return_pct, true)}</span></div>
-    <div class="tile"><span class="l">Best shadow</span><span class="v ${cls(k.best_shadow_pct)}">${pct(k.best_shadow_pct, true)}</span></div>
-    <div class="tile"><span class="l">NIFTYBEES · shadows ahead</span><span class="v">${pct(k.niftybees_pct, true)} · ${esc(k.shadows_beating)}</span></div>
+    <div class="tile"><span class="l">Trades · real / shadows</span><span class="v">${esc(k.real_trades)} / ${esc(k.shadow_trades)}</span></div>
   </div>
+  <section class="card"><h3>Best shadow</h3>${best}</section>
   ${seg(key)}
-  <section class="card"><h3>Scoreboard</h3>${board || '<p class="muted">No data yet.</p>'}</section>`;
+  <section class="card"><h3>Scoreboard</h3>${board || '<p class="muted">No data yet.</p>'}</section>
+  <section class="card"><h3>Trades placed (last 30 days)</h3>${trades || '<p class="muted">No trades yet.</p>'}<p class="note">Right column: realized P&amp;L on sells, value on buys.</p></section>`;
 }
 
 function markets() {
@@ -202,8 +207,8 @@ function render() {
   document.getElementById("chips").innerHTML = [st.auto_mode, st.india_vix, st.risk].filter((c) => c && c !== "–")
     .map((c) => `<span class="chip ${String(c).includes("ON") ? "on" : ""}">${esc(c)}</span>`).join("");
   document.getElementById("updated").textContent = D.updated_at ? `Updated ${D.updated_at} IST` + ((D.failed || []).length ? " · some parts older" : "") : "No data yet";
-  const view = { desk, intraday, swing: () => pool("Swing", "swing_kpis", "swing_scoreboard", "swing"),
-                 long: () => pool("Long term", "longterm_kpis", "longterm_scoreboard", "long"), markets }[tab] || desk;
+  const view = { desk, intraday, swing: () => pool("Swing", "swing", "swing"),
+                 long: () => pool("Long term", "longterm", "long"), markets }[tab] || desk;
   document.getElementById("main").innerHTML = view() + '<p class="note">Dummy money only. Not investment advice.</p>';
   document.querySelectorAll("nav button").forEach((b) => b.setAttribute("aria-current", b.dataset.tab === tab ? "page" : "false"));
 }

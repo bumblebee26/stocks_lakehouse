@@ -65,7 +65,7 @@ fetchers/          Lambda code: nse (+ delivery, indices), nse_fo, massive, fred
 pipeline/          Lakeflow pipelines in Python, SQL equivalents in comments:
   market/          bronze.py, silver.py, gold.py: market data in, cleaned, light summaries (37 tables)
   research/        gold.py: technical scanner, momentum ranks, signal record, data freshness (5 tables, pandas)
-  trading/         bronze.py, silver.py, gold.py: paper-trader journal, portfolio, shadows (23 tables)
+  trading/         bronze.py, silver.py, gold.py: paper-trader journal, portfolio, shadows, pool trades (25 tables)
 sql/               dashboard_summary.sql: "In plain words" page summaries, run by each job after its pipelines
 infra/
   bootstrap/       S3 bucket for Terraform state (run once, locally)

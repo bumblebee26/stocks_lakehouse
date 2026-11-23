@@ -60,6 +60,7 @@ resource "databricks_file" "landing_readme" {
     fred          = "FRED global markets (newline-delimited JSON). One folder per fetch date; each file covers a date range."
     trades        = "Paper-trader journal (dummy money, JSON lines), pushed daily at 15:45 IST by stocks-trader-guardian (bumblebee26/paper-trader)."
     portfolio     = "Paper-trader pools and holdings (dummy money, JSON lines), pushed daily at 15:45 IST with the trade journal."
+    pool_trades   = "Paper-trader pool buys and sells (swing, long-term and the shadow pools; dummy money, JSON lines), pushed with the journal at 15:45 and 23:30 IST."
     index_members = "NSE index constituents (Nifty 200: symbol, company, industry, ISIN), pushed weekly with the fundamentals."
     fundamentals  = "Company financials (annual and quarterly, JSON lines) for about 250 large NSE companies, pushed weekly by paper-trader's Company fundamentals workflow."
     nse_indices   = "Every NSE index's day (India VIX included), JSON lines, written with the bhavcopy at 19:30 IST Mon-Fri. Sets the trader's risk per trade."
