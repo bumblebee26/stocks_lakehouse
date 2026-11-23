@@ -4,9 +4,9 @@
 locals {
   functions = {
     nse = {
+      # timeout 15 min: a self-continuing backfill does ~80 days a run, staying under AWS's ~16-hop recursion limit
       handler     = "nse.handler"
       role_key    = "nse" # key in var.fetchers / aws_iam_role.fetcher
-      # 15 min: a self-continuing backfill does ~80 days a run, staying under AWS's ~16-hop recursion limit
       timeout     = 900
       description = "NSE equities bhavcopy (UDiFF) -> landing/nse/"
       # 19:30 IST, Monday-Friday (NSE publishes in the early evening)
