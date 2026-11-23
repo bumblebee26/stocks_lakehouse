@@ -204,7 +204,7 @@ resource "aws_scheduler_schedule" "news_live" {
 }
 
 # One-off backfill (24 Nov 2026, approved by the owner): NSE's older bhavcopy format from 2019 to the day before
-# UDiFF began (8 Jul 2024), for multi-year swing and long-term backtests. Fires once at 20:30 IST on 24 Nov, after
+# UDiFF began (8 Jul 2024), for multi-year swing and long-term backtests. Fires once at 22:00 IST on 23 Nov, after
 # the day's 19:30 fetch; the Lambda continues itself until the range is done (~2 hours, 2 s between files). To run
 # it again, change the time and apply.
 resource "aws_scheduler_schedule" "nse_history_backfill" {
@@ -212,7 +212,7 @@ resource "aws_scheduler_schedule" "nse_history_backfill" {
   description = "One-off: NSE bhavcopy 2019-01-01 to 2024-07-05 (older format, converted to UDiFF columns)."
   state       = var.schedules_enabled ? "ENABLED" : "DISABLED"
 
-  schedule_expression          = "at(2026-11-24T20:30:00)"
+  schedule_expression          = "at(2026-11-23T22:00:00)"
   schedule_expression_timezone = "Asia/Kolkata"
 
   flexible_time_window {
