@@ -144,7 +144,7 @@ Status words: **live** = affects the dummy-money ledgers today; **paper** = reco
 |---|---|
 | G1 | You merge PRs unless you say "merge", "auto merge" or "push this change"; security-scan suppressions are your decision |
 | G2 | Plan first, then ask before changing anything; compact answers |
-| G3 | Reviews: 1 Dec (repeat of 23 Nov plus the new rules), ~8 Dec scanner, mid-Dec swing shadows, 18 Dec long-term and real-money go/no-go |
+| G3 | Reviews: 1 Dec (repeat of 23 Nov plus the new rules; also: should swing auto mode buy the scanner's strict picks too? From 24 Nov their buttons say 'Hand buy ... (outside auto rules)'); and swing auto mode itself: its rules trailed NIFTYBEES on the 2019-2026 history (+32.2% vs +106.3% on 2020-24, -19.1% vs +10.8% on 2025-26; section 15). Owner kept it on until then (24 Nov), ~8 Dec scanner, mid-Dec swing shadows, 18 Dec long-term and real-money go/no-go |
 | G4 | 23 Nov council decisions: trailing auto-switch, sector filter live, 5 open, sector caps and 15:10 kept; dynamic sector scoring, shorting weak sectors, no position cap and a later square-off rejected |
 
 ## 13. Exploration: families, lanes and the pass bar (from 24 Nov)
@@ -161,15 +161,39 @@ Every paper variant keeps running; the owner wants broad exploration. To keep ch
 | F6 | Each report also shows real trades' R before and after costs, "Is Claude adding value?" (Claude's proposals vs the plain 15-min breakout on the same days) and when the real-money trade count arrives at the current pace | `families.lines` (weekly report, `/shadow`) |
 | F7 | No new exit or filter variants on the same intraday setups; new ideas must be different entries. Live rules change only at reviews (1 Dec, then monthly) | review of 23 Nov |
 
-## Gaps found while building this register (for phase 3)
+## 14. Suggestions from a friend's review (24 Nov; council verdict, owner approved)
 
-| Where | Says | Code / reality |
-|---|---|---|
-| `SYSTEM_PLAN.md` header | "As of 19 Nov 2026" | 23 Nov |
-| `SYSTEM_PLAN.md` Risk framework | 3 open; no sector filter; exits not mentioned | 5 open; sector filter live; trailing auto-switch |
-| `SYSTEM_PLAN.md` Phase 1 table | Exit rules "fixed stop and 2R target … decided at a review" | auto-switch to trailing at 15 trades |
-| `SYSTEM_PLAN.md` Principle 2 | automatic exits: stop, target, 15:10, early exit | plus the trailing stop |
-| `SYSTEM_PLAN.md` Decisions table | Intraday loss limit "Rs 4,000 (9 Nov)" first | 4R = Rs 1,600 today (history row; reword) |
-| `PLATFORM.md` Components | guardian 15:45 exports journal + portfolio | also pool trades |
-| `PLATFORM.md` constraints | AWS services list | Lambda function URL now used; CloudFront blocked pending verification |
-| Swing pool | "rules on hold" | your own swing buys are allowed (one placed 23 Nov) |
+A friend reviewed a skipped proposal ("UNSURE 52%; auto skipped: needs over 60%") and suggested eight ideas. The skip
+came mostly from the bar being raised to 60% by +5 penalties (09:00 hour, IT sector, losing buys); the "already
+rallied" check is protective. No idea below fixes the main issue (the intraday setups are about break-even before
+costs); only tested new entries can.
+
+| # | Idea | Decision | Where |
+|---|---|---|---|
+| B1 | Daily, weekly, monthly levels | **Shown, not a filter.** Each proposal shows the nearest level in its direction (previous day / week / month high or low, 52-week high or low; completed bars only) and the room to it in R; the journal note keeps `room=..R@level`. Not given to the agent or the reviewer. A "skip under 1R of room" filter is backtested on the 2,093 setups and replaces "stretched" only if it beats it | `trader/levels.py`, VARIANTS `room_1r` |
+| B2 | Chart patterns | **Shown on proposals (owner, 24 Nov), tested before use:** double bottom / double top (daily and weekly) and bull / bear flags (daily), by fixed rules on completed bars, with the neckline or flag edge, its status and the measured target in R; journal note `pattern=...`. Not given to the agent or the reviewer; blocks nothing. Backtests: the 52-week-high breakout and these patterns on 2019-2026, 2025-26 held back | `trader/patterns.py`, VARIANTS `breakout_52w`, `chart_patterns` |
+| B3 | RSI / MACD | Already used (daily scanner). Weekly RSI shown on proposals, information only | `levels.weekly_rsi` |
+| B4 | No clear goal | **Goal page** and a short goal section in the trader's instructions; untested outside ideas don't go in. The agent's YES rate is compared two weeks before and after 25 Nov | `docs/GOAL.md`, `prompts/trading_rules.md` |
+| B5 | 10-20 minute options trades | **No options** (thin stock options, large lots, 1-3% spreads, option STT, decay, no data feed). The trigger "rallied ~5%, ranges 1-2%, then breaks out" is tested on the share itself as a new paper entry family | VARIANTS `rally_range` |
+| B6 | Morning brief | Moved from 08:45 to 08:30 (owner, 24 Nov); on NSE holidays it says "closed today" and has no buy buttons | lakehouse `fetchers/premarket.py`, `nse_holidays.py` |
+| B7 | Ranked list | The 09:25 in-play ranking's top 5 with scores goes to Telegram, labelled a ranking, not a chance of profit | `engine.in_play_message` |
+| B8 | Charting website | TradingView chart button on every proposal; chart links on the app's and dashboard's suggested lists | `links.tradingview`, lakehouse `swing_suggest` |
+| B9 | NSE pre-open auction (owner, 24 Nov) | **Information only:** at ~09:09 the session reads NSE's pre-open data (IEP, gap vs yesterday, buy/sell quantity ratio) for tradable F&O stocks, saves it to S3 `preopen/` and shows the biggest gaps in the plan message and the ratio in the 09:25 ranking. Not given to the agent or the reviewer; tested before any use. NSE may block cloud servers: then that day has none | `trader/preopen.py`, VARIANTS `preopen_imbalance` |
+
+## 15. History backtests (Phase 3 step 4, 24 Nov)
+
+`backtest/history.py`, run by the "History backtests" workflow on the lakehouse's NSE prices 2019-2026 (1,948
+days): momentum (the live swing auto rules, price only), the scanner's strict picks, the 52-week-high breakout (B2),
+double bottom and bull flag breakouts (chart patterns), and rally-range-breakout on daily bars (B5). Judged on
+2020-2024 and once on the held-back 2025-2026; "beats NIFTYBEES" needs more than holding NIFTYBEES over the same days
+and the low end of the average R's 95% range above 0. Results go to the 1 Dec and 18 Dec reviews; nothing live
+changes from them directly. Still to do: the "under 1R of room" filter (B1) on the intraday setups.
+
+Results (24 Nov run): nothing beat NIFTYBEES in either period; on 2025-2026 five of six lost money. Momentum +32.2% / -19.1%, scanner +1.5% / -15.2%, 52-week high +29.6% / -14.1%, bull flag +62.4% / -12.2%, double bottom -46.0% / -32.3%, rally-range -21.0% / +4.9% (2020-24 / 2025-26; NIFTYBEES +106.3% / +10.8%). Report: the Claude doc "History backtests: NSE 2019-2026".
+
+## Gaps found while building this register
+
+All fixed in Phase 3 step 6 (24 Nov): SYSTEM_PLAN.md (as-of date, swing auto mode, risk table with 5 open and the
+sector filter, the trailing stop on paper, principle 2 with auto mode, the loss-limit history row), PLATFORM.md (pool
+trades export, the phone app on a Lambda function URL, CloudFront pending AWS verification) and ARCHITECTURE.md (swing
+pool, history backtests, the information-only levels, patterns and pre-open feed).

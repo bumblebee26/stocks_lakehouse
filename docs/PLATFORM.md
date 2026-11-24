@@ -58,7 +58,7 @@ afternoon. All times IST; every step is scheduled, nothing needs you except the 
 | 15:10 | Mon–Fri | Trader | Square-off, then day report to Telegram, with the day's paper tests (opening-range test; from 21 Nov the 09:15 opening buy, the gap fade and each fill vs the real minute) and, from 23 Nov, the selector's picks for tomorrow |
 | 15:12 / 15:40 | Mon–Fri | Trader | Guardian backstops: square-off and report if the session didn't |
 | 15:14 | Mon–Fri | Trader | Guardian puts the swing pool's idle cash into NIFTYBEES |
-| 15:45 | Mon–Fri | Trader → Lakehouse | Journal export to `landing/trades/` and portfolio snapshot to `landing/portfolio/`; job `stocks-trading` builds the trading and portfolio tables |
+| 15:45 | Mon–Fri | Trader → Lakehouse | Journal export to `landing/trades/` portfolio snapshot to `landing/portfolio/` and pool buys/sells to `landing/pool_trades/`; job `stocks-trading` builds the trading and portfolio tables |
 | 15:50 | Mon–Fri | Trader | Swing shadow tests: news breakouts from `gold.swing_signals`, the scanner's strict picks from `gold.technical_indicators`, and momentum + news from `gold.momentum_ranks` with its concentrated copy (top 3), bought and sold on paper, vs NIFTYBEES; stops and targets on your own swing trades checked |
 | 16:10 | Mon–Fri | Trader (GitHub job) | Shadow models: volatility stop, trade filter, early cut and let winners run, plus stop variants, the 1.5R and yesterday's-level targets and skipping stretched breakouts (from 19 Nov), trained walk-forward on the 5-minute setups of every stock in `gold.intraday_universe`; today's real trades replayed under each (paper only) |
 | 17:55 | Fri | Trader | Weekly report to Telegram (from 21 Nov with the auto-bar ladder, score sizing, the selector and the swing holding-period study) |
@@ -82,9 +82,10 @@ there are no servers.
 | S3 landing bucket | lakehouse | AWS S3 | Permanent, untouched raw archive (private, encrypted, versioned) |
 | Sync Lambda | lakehouse | AWS Lambda | Copies anything missing from S3 to the volume (backfills, repairs) |
 | Landing volume | lakehouse | Databricks | `/Volumes/stocks/bronze/landing/<source>/date=…/`, what the pipeline reads |
-| Pipelines `stocks-market`, `stocks-research`, `stocks-trading` | lakehouse | Databricks | Market data in and cleaned (37 tables); the heavy daily research: scanner, momentum ranks (5); paper-trader's journal, portfolio, shadows and pool trades (25). Bronze streaming tables, silver and gold materialized views. One runs at a time (Free Edition) |
+| Pipelines `stocks-market`, `stocks-research`, `stocks-trading` | lakehouse | Databricks | Market data in and cleaned (39 tables, NSE trading holidays included); the heavy daily research: scanner, momentum ranks (5); paper-trader's journal, portfolio, shadows and pool trades (25). Bronze streaming tables, silver and gold materialized views. One runs at a time (Free Edition) |
 | Jobs `stocks-market-close`, `stocks-market-preopen`, `stocks-market-morning`, `stocks-market-weekend`, `stocks-trading` | lakehouse | Databricks | When the NSE file lands: market → research; when the 08:30 pre-open snapshot lands: market only (world markets before NSE opens); 11:15 Tue–Sat: market only (overnight US prices); Saturday 08:00: market → research; when paper-trader's export lands: trading. Each then runs `sql/dashboard_summary.sql` (plain-words page summaries, `ai_summarize`). Pipeline tasks retry every 15 min if another pipeline is running |
 | Dashboard | lakehouse | Databricks | Pages Desk, Intraday, Swing, Long term (each real pool vs its shadows, with a Show filter), Your calls and Global markets |
+| Phone app | lakehouse | AWS Lambda + S3 | `app/index.html` and `desk.json` (the dashboard's own SQL, plus Yahoo history, NSE holidays and Mumbai fuel prices from CarDekho) written by the `app_export` Lambda about five times a weekday, served by the `app_web` Lambda function URL behind a secret path (SSM `/stocks/desk-app-url`). Holiday card, suggested trades, time ranges |
 | Pre-market Lambda | lakehouse | AWS Lambda | 08:30: saves the pre-open Yahoo snapshot (21 world markets) to the landing bucket and volume, queries gold and a few live Yahoo figures, sends two Telegram messages (the brief, India first, and the technical scanner) |
 | Trading session | paper-trader | GitHub Actions | Claude Code + paper-trader MCP tools; morning and afternoon runs |
 | Trader engine and MCP tools | paper-trader | inside the session | Ledger, risk gate, Telegram approvals, simulated fills, exits (from 20 Nov including the early exit on a real break), report with the paper tests and the selector (paper, from 23 Nov); your own orders (`/buy`, `/short`, `/swing`, `/longterm`) while a session is live |
@@ -115,6 +116,7 @@ portfolio), and two per week on Saturdays (fundamentals and the Nifty 200 list).
 | Ledger | Trader ↔ S3 `state/ledger.json` | Read, change, write back on every tool call; versioned 30 days | all session |
 | Journal export | Trader → `landing/trades/date=YYYY-MM-DD/events.jsonl` | One line per event with unique `event_id` + `proposal_id`; last line `ledger_snapshot` | 15:45 |
 | Portfolio snapshot | Trader → `landing/portfolio/date=YYYY-MM-DD/portfolio.jsonl` | One `pool` row per pool (capital, cash, holdings value, equity) and one `holding` row per holding; newest file per day wins | 15:45 |
+| Pool trades | Trader → `landing/pool_trades/date=YYYY-MM-DD/trades.jsonl` | One row per buy or sell in every delivery pool (real swing and long-term, and the shadow pools): qty, price, value, fees, P&L, reason; `trade_id` is unique | 15:45, 23:30 |
 | Long-term picks | `gold.longterm_candidates`, `gold.momentum_ranks` → shadow job | Read-only SQL: rank, `is_pick`, `target_weight_pct`, `reasons`, last close; long-term momentum rank (`lt_rank`) with 6- and 12-month returns | Sat 10:15 |
 | Swing signals | `gold.swing_signals`, `gold.technical_indicators`, `gold.momentum_ranks` → guardian | Read-only SQL: yesterday's news breakouts with their stop; yesterday's scanner strict picks with entry zone, trigger, stop and T2; the top 12 swing momentum ranks with ATR | 15:50 |
 | Model universe | `gold.intraday_universe` → shadow models job | Read-only SQL: the tradable stocks (`eligible`) | 16:10 |
@@ -184,6 +186,7 @@ does about it.
 | A job lasts at most 6 h; cron can start late or not at all | GitHub Actions | Morning + afternoon sessions; kicker Lambda starts them on time, cron as backup |
 | Branch rules only on public repos (free plan) | GitHub | Both repos public; no secrets in code |
 | Serverless compute quota | Databricks Free Edition | Files land a few times a day; the trader exports once at 15:45, not per trade |
+| CloudFront needs account verification | AWS (case open for 538498973473) | The phone app is served by a Lambda function URL instead; `var.app_use_cloudfront` switches back once verified |
 | Usage limits shared with your chats | Claude Pro/Max | One `run_cycle` + one wait per 5 min; guardian squares off if a session stops |
 | Prices unofficial, may lag minutes | Yahoo Finance | Accepted for mock trading; tested from GitHub runners |
 
