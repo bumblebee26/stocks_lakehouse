@@ -21,6 +21,7 @@ Data-quality expectations drop bad rows and report counts in the pipeline UI.
   stocks.silver.nse_delivery                 delivery % per NSE stock per day
   stocks.silver.nse_index_daily              every NSE index's close per day (India VIX included)
   stocks.silver.fno_symbols                  the latest NSE F&O stock list (with its date)
+  stocks.silver.nse_holidays                 NSE trading holidays (latest list)
 
 Tables of the research and trading pipelines are never defined here; the three pipelines never run at
 the same time (Free Edition allows one active pipeline).
@@ -507,6 +508,24 @@ def nse_index_daily():
     return latest_file_wins(raw.select("trade_date", "index_name", "open", "high", "low", "close", "change_pct",
                                        "_source_file", "_file_modified_at"),
                             ["trade_date", "index_name"]).drop("_source_file", "_file_modified_at")
+
+# SQL equivalent:
+#   CREATE OR REFRESH MATERIALIZED VIEW stocks.silver.nse_holidays AS
+#   SELECT DISTINCT to_date(holiday_date) AS holiday_date, description, to_date(as_of) AS as_of
+#   FROM stocks.bronze.nse_holidays_raw
+#   WHERE to_date(as_of) = (SELECT max(to_date(as_of)) FROM stocks.bronze.nse_holidays_raw);
+@dp.materialized_view(
+    name="stocks.silver.nse_holidays",
+    comment="NSE trading holidays (cash market) from NSE's latest list, with the date it was read. The dashboard's "
+            "holiday banner uses it.",
+    table_properties={"quality": "silver"},
+)
+def nse_holidays():
+    raw = spark.read.table("stocks.bronze.nse_holidays_raw").withColumn("as_of", F.to_date("as_of"))  # noqa: F821
+    latest = raw.agg(F.max("as_of").alias("as_of"))
+    return raw.join(latest, "as_of").select(F.to_date("holiday_date").alias("holiday_date"),
+                                            F.trim("description").alias("description"), "as_of") \
+        .where("holiday_date IS NOT NULL").dropDuplicates(["holiday_date"])
 
 @dp.materialized_view(
     name="stocks.silver.fno_symbols",

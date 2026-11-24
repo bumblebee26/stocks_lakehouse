@@ -26,6 +26,7 @@ from concurrent.futures import ThreadPoolExecutor
 import boto3
 
 import databricks_sql
+import nse_holidays
 from common import http_get, log
 
 IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
@@ -149,6 +150,22 @@ def fuel_rates(previous, fetch=None, today=None):
     return {"fields": FUEL_FIELDS, "rows": rows}, bad
 
 
+def market_status(previous, fetch=None, today=None):
+    """Datasets nse_holidays (NSE's list; the last good one if NSE can't be read) and market_status (one row:
+    holiday name or empty, card title and message, next open). The app shows its holiday card only when
+    holiday is set (from 24 Nov 2026)."""
+    today = today or dt.datetime.now(IST).date()
+    rows = nse_holidays.fetch(fetch)
+    failed = rows is None
+    if failed:
+        rows = ((((previous or {}).get("datasets") or {}).get("nse_holidays")) or {}).get("rows") or []
+    st = nse_holidays.status(today, rows)
+    return ({"fields": ["holiday_date", "description"], "rows": rows},
+            {"fields": ["date", "holiday", "title", "message", "next_open"],
+             "rows": [{"date": today.isoformat(), "holiday": st["holiday"] or "", "title": st["title"],
+                       "message": st["message"], "next_open": st["next_open"]}]}, failed)
+
+
 def handler(event, context):
     event = event or {}
     bucket, prefix = os.environ["APP_BUCKET"], os.environ["APP_PREFIX"]
@@ -159,6 +176,8 @@ def handler(event, context):
     datasets, failed = run_all(queries, previous)
     series, series_failed = yahoo_series(previous)
     datasets.update(series)
+    datasets["nse_holidays"], datasets["market_status"], hol_failed = market_status(previous)
+    failed += ["nse_holidays"] if hol_failed else []
     datasets["fuel_mumbai"], fuel_failed = fuel_rates(previous)
     failed += ["fuel_mumbai"] if fuel_failed else []
     failed += series_failed

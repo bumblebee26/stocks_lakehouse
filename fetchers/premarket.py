@@ -32,7 +32,8 @@ import databricks_sql
 import snapshot
 import telegram
 import yahoo
-from common import http_get, log
+import nse_holidays
+from common import log, put_landing
 from telegram import esc
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -121,30 +122,24 @@ def fetch_live(today):
 # ---------------------------------------------------------------------------
 # Calendar and freshness
 # ---------------------------------------------------------------------------
-NSE_HOLIDAYS_URL = "https://www.nseindia.com/api/holiday-master?type=trading"
-NSE_HEADERS = {"User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
-                              "Chrome/124.0 Safari/537.36"),
-               "Accept": "application/json, */*", "Accept-Language": "en-US,en;q=0.9",
-               "Referer": "https://www.nseindia.com/resources/exchange-communication-holidays"}
-
-
 def nse_holiday(today, fetch=None):
-    """The NSE trading-holiday name for today, from NSE's own list (cash market), or None. From 24 Nov 2026 a
-    holiday brief says so at the top and carries no hand-buy buttons. If NSE can't be read, today counts as a
-    trading day (as before)."""
-    try:
-        payload = (fetch or (lambda: json.loads(http_get(NSE_HOLIDAYS_URL, NSE_HEADERS))))()
-    except Exception as err:  # noqa: BLE001
-        log.warning("NSE holiday list unavailable: %s", err)
+    """(today's NSE holiday name or None, the holiday list or None). From 24 Nov 2026 a holiday brief says so at the
+    top and carries no buy buttons; the list is also landed for the dashboard's holiday banner. If NSE can't be
+    read, today counts as a trading day (as before)."""
+    rows = nse_holidays.fetch(fetch)
+    return nse_holidays.holiday_on(today, rows), rows
+
+
+def land_holidays(today, rows, dry_run=False):
+    """landing/nse_holidays/date=YYYY-MM-DD/holidays.jsonl -> stocks.silver.nse_holidays. Never stops the brief."""
+    if not rows or dry_run:
         return None
-    for row in (payload or {}).get("CM", []):
-        try:
-            day = dt.datetime.strptime(row["tradingDate"], "%d-%b-%Y").date()
-        except (KeyError, ValueError):
-            continue
-        if day == today:
-            return (row.get("description") or "NSE holiday").rstrip("*").strip()
-    return None
+    try:
+        body = "\n".join(json.dumps({**r, "as_of": today.isoformat()}) for r in rows).encode()
+        return put_landing("nse_holidays", today, "holidays.jsonl", body, "application/x-ndjson")
+    except Exception as err:  # noqa: BLE001
+        log.warning("Landing the NSE holiday list failed: %s", err)
+        return None
 
 
 def previous_weekday(d):
@@ -476,6 +471,8 @@ def handler(event, context):
     event = event or {}
     now = dt.datetime.now(IST)
     today = now.date()
+    holiday, holiday_rows = nse_holiday(today)
+    land_holidays(today, holiday_rows, bool(event.get("dry_run")))   # before the snapshot, which starts the job
     snap = save_snapshot(now, bool(event.get("dry_run")))
     data, failed = fetch_all(QUERIES)
     sessions, live = fetch_live(today)
@@ -484,7 +481,6 @@ def handler(event, context):
     fresh = freshness(data, expected)
     brief = build_brief(data, live, expected, fresh, today, failed)
     scan, buttons = build_scanner(data, expected, fresh, failed)
-    holiday = nse_holiday(today)
     if holiday:
         closed = (f"🛑 <b>NSE closed today ({esc(holiday)})</b>: nothing trades; the picks and levels are for the next "
                   "session.\n\n")

@@ -49,14 +49,15 @@ class Export(unittest.TestCase):
              mock.patch.object(app_export, "_s3", return_value=s3), \
              mock.patch.object(app_export.databricks_sql, "query", return_value=[{"x": 1.0}]), \
              mock.patch.object(app_export, "yahoo_series", return_value=({}, [])), \
-             mock.patch.object(app_export, "http_get", side_effect=RuntimeError("offline")):
+             mock.patch.object(app_export, "http_get", side_effect=RuntimeError("offline")), \
+             mock.patch.object(app_export.nse_holidays, "http_get", side_effect=RuntimeError("offline")):
             out = app_export.handler({}, None)
         self.assertTrue(out["written"])
         put = s3.puts[0]
         self.assertEqual(put["Key"], "abc123/data/desk.json")
         body = json.loads(put["Body"])
-        self.assertEqual(set(body["datasets"]), set(QUERIES) | {"fuel_mumbai"})
-        self.assertEqual(body["failed"], ["fuel_mumbai"])
+        self.assertEqual(set(body["datasets"]), set(QUERIES) | {"fuel_mumbai", "nse_holidays", "market_status"})
+        self.assertEqual(body["failed"], ["nse_holidays", "fuel_mumbai"])
         fuel = body["datasets"]["fuel_mumbai"]["rows"]
         self.assertEqual([r["item"] for r in fuel], ["Petrol", "Diesel", "CNG"])
 
@@ -69,6 +70,23 @@ class Export(unittest.TestCase):
         self.assertLess(len(old), len([d for d in days if d.isoformat() < cut]) / 6)   # about one a week
         self.assertEqual(len([r for r in rows if r["date"] >= cut]), len([d for d in days if d.isoformat() >= cut]))
         self.assertEqual(rows[-1]["date"], days[-1].isoformat())
+
+    def test_market_status_on_a_holiday_and_after(self):
+        import datetime as dt
+        payload = {"CM": [{"tradingDate": "24-Nov-2026", "description": "Guru Nanak Jayanti"}]}
+        hol, st, failed = app_export.market_status({}, fetch=lambda: payload, today=dt.date(2026, 11, 24))
+        row = st["rows"][0]
+        self.assertEqual((row["holiday"], row["title"], row["next_open"], failed),
+                         ("Guru Nanak Jayanti", "Happy Guru Nanak Jayanti!", "2026-11-25", False))
+        self.assertIn("will open at 9:15 AM on 25 Nov", row["message"])
+
+        def down():
+            raise RuntimeError("403")
+        prev = {"datasets": {"nse_holidays": hol}}
+        _, st2, failed2 = app_export.market_status(prev, fetch=down, today=dt.date(2026, 11, 24))
+        self.assertEqual((st2["rows"][0]["holiday"], failed2), ("Guru Nanak Jayanti", True))   # last good list
+        _, st3, _ = app_export.market_status(prev, fetch=down, today=dt.date(2026, 11, 25))
+        self.assertEqual(st3["rows"][0]["holiday"], "")                                        # no card
 
     def test_fuel_prices_from_the_page_within_the_band(self):
         page = ("<a>Petrol cars from ₹5.99 Lakh</a><h2>Petrol Price in Mumbai</h2><td>&#8377; 111.50</td>"
@@ -96,7 +114,8 @@ class Export(unittest.TestCase):
              mock.patch.object(app_export, "_s3", return_value=s3), \
              mock.patch.object(app_export.databricks_sql, "query", return_value=[]), \
              mock.patch.object(app_export, "yahoo_series", return_value=({}, [])), \
-             mock.patch.object(app_export, "fuel_rates", return_value=({"fields": [], "rows": []}, False)):
+             mock.patch.object(app_export, "fuel_rates", return_value=({"fields": [], "rows": []}, False)), \
+             mock.patch.object(app_export, "market_status", return_value=({}, {}, False)):
             out = app_export.handler({"dry_run": True}, None)
         self.assertFalse(out["written"])
         self.assertEqual(s3.puts, [])

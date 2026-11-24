@@ -69,6 +69,10 @@ svg.chart.hl polyline { opacity: .15 }
 .rng button { min-height: 34px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font: 600 12px inherit; font-family: inherit }
 .rng button[aria-pressed="true"] { background: var(--card); color: var(--fg); box-shadow: 0 1px 2px rgba(0,0,0,.08) }
 .rng button:disabled { opacity: .35 }
+.holiday { position: relative; padding-right: 48px }
+.holiday h3 { font-size: 19px; margin: 0 0 6px }
+.holiday p { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.45 }
+.holiday .x { position: absolute; top: 8px; right: 8px; width: 40px; height: 40px; border: 0; border-radius: 10px; background: transparent; color: var(--muted); font-size: 26px; line-height: 1; cursor: pointer }
 .chg { font-size: 13px; margin: 0 2px 4px; color: var(--muted) }
 .chg b { color: var(--fg) }
 svg.chart.hl polyline.on { opacity: 1; stroke-width: 3.5 }
@@ -244,6 +248,18 @@ function story() {
   return `<section class="card story"><span class="when">${esc(one("desk_status").as_of)}</span><h1>${head}</h1>${parts.map((p) => `<p>${p}</p>`).join("")}</section>`;
 }
 
+// Market-holiday card (24 Nov): only on an NSE holiday, from NSE's own list; × hides it for the day.
+const istToday = () => new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
+function holidayCard() {
+  const m = rows("market_status")[0];
+  if (!m || !m.holiday || m.date !== istToday()) return "";
+  let hidden = "";
+  try { hidden = localStorage.getItem("holiday-hidden") || ""; } catch (e) {}
+  if (hidden === m.date) return "";
+  return `<section class="card holiday" role="status"><button type="button" class="x" data-hide-holiday="${esc(m.date)}" aria-label="Hide for today">×</button>`
+    + `<h3>${esc(m.title)}</h3><p>${esc(m.message)}</p></section>`;
+}
+
 function desk() {
   const k = one("desk_kpis");
   const pv = rows("portfolio_vs_nifty");
@@ -253,7 +269,7 @@ function desk() {
   const chart = rg.chips + changeLine(rg.series[0], rg.range) + lineChart(rg.series, "Portfolio vs NIFTYBEES");
   const dec = rows("desk_decisions").map((d) => `<div class="row"><div class="n"><b>${esc(d.symbol)} · ${esc(d.setup)}</b><span>${esc(d.time)} · ${esc(d.decision)} · score ${esc(d.score)} · you ${d.you && d.you !== "–" ? esc(d.you) : "not rated"}</span></div><div class="r ${arrowCls(d.result) || (String(d.result).includes("−") ? "down" : String(d.result).includes("+") ? "up" : "muted")}">${esc(d.result)}</div></div>`).join("") || '<p class="muted">No proposals on the latest day.</p>';
   const board = rows("desk_board").slice(0, 8).map((r) => `<div class="row"><div class="n"><b>${esc(r.strategy)}</b><span>${esc(r.kind)} · ${esc(r.return_since_start)}</span></div><div class="r ${arrowCls(r.vs_niftybees)}">${esc(r.vs_niftybees)}</div></div>`).join("");
-  return story() + `
+  return holidayCard() + story() + `
   <section class="card"><span class="muted" style="font-size:13px">Whole dummy portfolio</span><div class="big">${rs(k.portfolio_rs)}</div>
     <div class="${cls(k.since_reset_pct)}" style="font-weight:600">${pct(k.since_reset_pct, true)} since 18 Nov</div>${chart}</section>
   <div class="tiles">
@@ -399,6 +415,11 @@ document.querySelector("nav").addEventListener("click", (e) => {
 ["pointerdown", "pointermove"].forEach((t) => document.getElementById("main").addEventListener(t, cursor));
 ["pointerleave", "pointercancel"].forEach((t) => document.getElementById("main").addEventListener(t, cursorOff, true));
 document.getElementById("main").addEventListener("click", (e) => {
+  const hh = e.target.closest("button[data-hide-holiday]");
+  if (hh) {
+    try { localStorage.setItem("holiday-hidden", hh.dataset.hideHoliday); } catch (err) {}
+    hh.closest("section").remove(); return;
+  }
   const rb = e.target.closest("button[data-rng]");
   if (rb) {
     RANGE[rb.dataset.rng] = rb.dataset.v;
