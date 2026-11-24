@@ -438,8 +438,8 @@ locals {
     # NSE's own index file gives Nifty 50, India VIX and the bank / PSU bank / government-company (PSE) indices;
     # sectors are the Nifty 200 grouped by NSE's industry, equal-weighted, with how many stocks rose or fell.
     india_kpis = <<-SQL
-      WITH i AS (SELECT trade_date, lower(trim(index_name)) AS name, close, change_pct FROM stocks.silver.nse_indices
-                 WHERE trade_date = (SELECT max(trade_date) FROM stocks.silver.nse_indices)),
+      WITH i AS (SELECT trade_date, lower(trim(index_name)) AS name, close, change_pct FROM stocks.silver.nse_index_daily
+                 WHERE trade_date = (SELECT max(trade_date) FROM stocks.silver.nse_index_daily)),
            b AS (SELECT advances, declines FROM stocks.gold.market_breadth
                  WHERE market = 'IN' AND trade_date = (SELECT max(trade_date) FROM stocks.gold.market_breadth
                                                        WHERE market = 'IN'))
@@ -480,8 +480,8 @@ locals {
              CASE lower(trim(index_name)) WHEN 'nifty bank' THEN 'Nifty Bank' WHEN 'nifty psu bank' THEN 'PSU banks'
                   ELSE 'Govt (PSE)' END,
              round(change_pct, 2), CAST(NULL AS BIGINT), CAST(NULL AS BIGINT), CAST(NULL AS BIGINT), trade_date
-      FROM stocks.silver.nse_indices
-      WHERE trade_date = (SELECT max(trade_date) FROM stocks.silver.nse_indices)
+      FROM stocks.silver.nse_index_daily
+      WHERE trade_date = (SELECT max(trade_date) FROM stocks.silver.nse_index_daily)
         AND lower(trim(index_name)) IN ('nifty bank', 'nifty psu bank', 'nifty pse')
       ORDER BY change_pct DESC
     SQL
