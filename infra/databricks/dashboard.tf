@@ -385,7 +385,7 @@ locals {
                concat('1m ', format_number(ret_1m_pct, 1), '% · 3m ', format_number(ret_3m_pct, 1), '% · ',
                       format_number(pct_of_52w_high, 0), '% of 52-week high',
                       CASE WHEN news_pos_5d > 0 THEN ' · fresh good news' ELSE '' END,
-                      ' · exit: 2xATR stop or out of the top 12') AS why,
+                      ' · exit: 2xATR trailing stop or after 20 days') AS why,
                concat('https://www.tradingview.com/chart/?symbol=NSE%3A', translate(symbol, '&-', '__')) AS chart, trade_date
         FROM stocks.gold.momentum_ranks
         WHERE swing_rank <= 6
