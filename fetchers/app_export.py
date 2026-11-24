@@ -48,6 +48,15 @@ FUEL_FIELDS = ["item", "rate", "unit", "as_of", "source"]
 FUEL_UNITS = {"Petrol": "Rs / litre", "Diesel": "Rs / litre", "CNG": "Rs / kg"}
 FUEL_START = {"Petrol": (111.21, "2026-11-16"), "Diesel": (97.83, "2026-11-16"), "CNG": (91.50, "2026-11-15")}
 FUEL_BAND = 0.15
+# Gold and silver in India (24 Nov): IBJA (India Bullion and Jewellers Association), the daily reference rates
+# Indian jewellers and banks quote. Gold per 10 g (999 = 24K, 916 = 22K), silver 999 per kg, excluding 3% GST and
+# making charges. The page has two tables (AM and PM) of date, 999, 995, 916, 750, 585, silver 999, platinum 999.
+BULLION_URL = "https://ibjarates.com/"
+BULLION_SOURCE = "IBJA"
+BULLION_FIELDS = ["item", "rate", "unit", "prev", "change_pct", "as_of", "session", "source"]
+BULLION_ITEMS = (("Gold 24K (999)", 0, "Rs / 10 g"), ("Gold 22K (916)", 2, "Rs / 10 g"), ("Silver (999)", 5, "Rs / kg"))
+BULLION_ROW = re.compile(r"(\d{2})/(\d{2})/(\d{4})" + r"\s+([\d,]{4,9})" * 7)
+KEEP_IF_EMPTY = ("sector_board", "sector_stocks")   # holidays and late data: keep the last trading day's
 
 
 def _s3():
@@ -158,6 +167,41 @@ def fuel_rates(previous, fetch=None, today=None):
     return {"fields": FUEL_FIELDS, "rows": rows}, bad
 
 
+def parse_bullion(html):
+    """{'AM'|'PM': [(iso date, [7 numbers]), newest first]} from IBJA's page (tables in page order: AM, then PM)."""
+    text = re.sub(r"<[^>]+>", " ", html or "")
+    text = re.sub(r"&nbsp;|\s+", " ", text)
+    tables, seen = {"AM": [], "PM": []}, set()
+    for m in BULLION_ROW.finditer(text):
+        day = f"{m.group(3)}-{m.group(2)}-{m.group(1)}"
+        vals = [float(v.replace(",", "")) for v in m.groups()[3:]]
+        tables["PM" if day in seen else "AM"].append((day, vals))
+        seen.add(day)
+    return tables
+
+
+def bullion_rates(previous, fetch=None):
+    """The bullion_in dataset (IBJA's latest closing rates, PM if published, else AM, with the change from the day
+    before) and whether it failed (then the last good rows stay)."""
+    old = (((previous or {}).get("datasets") or {}).get("bullion_in")) or {"fields": BULLION_FIELDS, "rows": []}
+    try:
+        html = (fetch or (lambda: http_get(BULLION_URL, headers={"User-Agent": "Mozilla/5.0"}, retries=2)))()
+        tables = parse_bullion(html.decode("utf-8", "replace") if isinstance(html, bytes) else html)
+    except Exception as err:  # noqa: BLE001 - keep the last good rates
+        log.error("IBJA rates failed: %s", err)
+        return old, True
+    session = "PM" if tables["PM"] else "AM"
+    t = tables[session]
+    if not t or not 20_000 < t[0][1][0] < 1_000_000:   # sanity: 24K gold per 10 g in rupees
+        log.error("IBJA page had no usable rates (%s rows)", len(t))
+        return old, True
+    (day, now), before = t[0], (t[1][1] if len(t) > 1 else None)
+    rows = [{"item": name, "rate": now[i], "unit": unit, "prev": before[i] if before else None,
+             "change_pct": round((now[i] / before[i] - 1) * 100, 2) if before and before[i] else None,
+             "as_of": day, "session": session, "source": BULLION_SOURCE} for name, i, unit in BULLION_ITEMS]
+    return {"fields": BULLION_FIELDS, "rows": rows}, False
+
+
 def market_status(previous, fetch=None, today=None):
     """Datasets nse_holidays (NSE's list; the last good one if NSE can't be read) and market_status (one row:
     holiday name or empty, card title and message, next open). The app shows its holiday card only when
@@ -203,11 +247,17 @@ def handler(event, context):
     data_key = f"{prefix}/data/desk.json"
     previous = load_previous(s3, bucket, data_key)
     datasets, failed = run_all(queries, previous)
+    for name in KEEP_IF_EMPTY:   # e.g. a holiday before the day's tables rebuild: show the last trading day
+        old = ((previous or {}).get("datasets") or {}).get(name)
+        if name in datasets and not datasets[name]["rows"] and old and old.get("rows"):
+            datasets[name] = old
     series, series_failed = yahoo_series(previous)
     datasets.update(series)
     datasets["nse_holidays"], datasets["market_status"], hol_failed = market_status(previous)
     failed += ["nse_holidays"] if hol_failed else []
     datasets["morning"], datasets["pool_auto"] = trader_files(s3, os.environ.get("TRADER_BUCKET"))
+    datasets["bullion_in"], bullion_failed = bullion_rates(previous)
+    failed += ["bullion_in"] if bullion_failed else []
     datasets["fuel_mumbai"], fuel_failed = fuel_rates(previous)
     failed += ["fuel_mumbai"] if fuel_failed else []
     failed += series_failed
