@@ -114,6 +114,19 @@ class NseFetch(unittest.TestCase):
             out = nse.handler({"start": "2020-10-05", "end": "2020-10-06"}, None)
         self.assertEqual([r["status"] for r in out["results"]], ["error", "error"])
 
+    def test_malformed_delivery_or_index_file_is_skipped_not_fatal(self):
+        bad = b"SYMBOL,SERIES\rTCS,EQ\r\"x\ny\""                 # a stray carriage return (8 Aug 2022)
+        bodies = {"cm": b"PK\x03\x04data", "sec": bad, "ind": bad}
+        pick = lambda url, h: bodies["sec" if "sec_" in url else "ind" if "ind_close" in url else "cm"]  # noqa: E731
+        with mock.patch.object(nse, "http_get", side_effect=pick):
+            out = nse.handler({"date": "2026-11-06"}, None)
+        self.assertEqual(out["results"][0]["status"], "written")
+        self.assertEqual(out["results"][0]["delivery"], "error")
+        with mock.patch.object(nse, "parse_indices", side_effect=ValueError("bad")), \
+                mock.patch.object(nse, "http_get", side_effect=pick):
+            out = nse.handler({"date": "2026-11-06"}, None)
+        self.assertEqual(out["results"][0]["indices"], "error")
+
     def test_udiff_dates_use_the_new_url(self):
         with mock.patch.object(nse, "http_get", return_value=b"PK\x03\x04data") as get:
             nse.handler({"date": "2024-07-08"}, None)
