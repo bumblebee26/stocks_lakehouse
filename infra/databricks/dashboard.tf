@@ -517,6 +517,30 @@ locals {
       LIMIT 30
     SQL
 
+    longterm_tests = <<-SQL
+      SELECT CAST(c.rank AS INT) AS rank, c.symbol, c.company,
+             CAST(c.tests_passed AS STRING) || ' of ' || CAST(c.tests_available AS STRING) AS passed,
+             CASE WHEN c.is_financial AND c.roa_pct IS NOT NULL
+                    THEN CASE WHEN c.roa_pct >= 1.2 THEN '✓ ' ELSE '✕ ' END || 'return on assets ' || format_number(c.roa_pct, 2) || '% vs 1.2% needed (' || CASE WHEN c.roa_pct - 1.2 >= 0 THEN '+' ELSE '' END || format_number(c.roa_pct - 1.2, 2) || ')'
+                  WHEN NOT c.is_financial AND c.roce_pct IS NOT NULL
+                    THEN CASE WHEN c.roce_pct >= 15 THEN '✓ ' ELSE '✕ ' END || 'return on capital ' || format_number(c.roce_pct, 1) || '% vs 15% needed (' || CASE WHEN c.roce_pct - 15 >= 0 THEN '+' ELSE '' END || format_number(c.roce_pct - 15, 1) || ' pts)'
+                  ELSE '– no figures' END AS capital,
+             CASE WHEN c.is_financial THEN '– not used for banks and lenders'
+                  WHEN c.debt_to_equity IS NULL THEN '– no figures'
+                  ELSE CASE WHEN c.debt_to_equity < 0.5 THEN '✓ ' ELSE '✕ ' END || 'debt ' || format_number(c.debt_to_equity, 2) || 'x equity vs under 0.5x (' || CASE WHEN 0.5 - c.debt_to_equity >= 0 THEN '+' ELSE '' END || format_number(0.5 - c.debt_to_equity, 2) || ' to spare)' END AS debt,
+             CASE WHEN c.is_financial THEN '– not used for banks and lenders'
+                  WHEN f.ocf_years IS NULL OR f.ocf_years < 3 THEN '– under 3 years of figures'
+                  ELSE CASE WHEN f.ocf_positive_years >= f.ocf_years - 1 THEN '✓ ' ELSE '✕ ' END || 'cash flow positive ' || CAST(f.ocf_positive_years AS STRING) || ' of ' || CAST(f.ocf_years AS STRING) || ' years vs ' || CAST(f.ocf_years - 1 AS STRING) || ' needed' END AS cash,
+             CASE WHEN c.revenue_cagr_3y_pct IS NULL OR c.profit_cagr_3y_pct IS NULL THEN '– no figures'
+                  ELSE CASE WHEN c.revenue_cagr_3y_pct > 10 AND c.profit_cagr_3y_pct > 10 THEN '✓ ' ELSE '✕ ' END || 'revenue ' || format_number(c.revenue_cagr_3y_pct, 1) || '%, profit ' || format_number(c.profit_cagr_3y_pct, 1) || '% a year vs over 10% each (' || CASE WHEN least(c.revenue_cagr_3y_pct, c.profit_cagr_3y_pct) - 10 >= 0 THEN '+' ELSE '' END || format_number(least(c.revenue_cagr_3y_pct, c.profit_cagr_3y_pct) - 10, 1) || ' pts on the weaker)' END AS growth,
+             CASE WHEN c.pe_percentile IS NULL THEN '– no figures'
+                  ELSE CASE WHEN c.pe_percentile <= 50 THEN '✓ ' ELSE '✕ ' END || 'P/E ' || format_number(c.pe, 1) || ', dearer than ' || format_number(c.pe_percentile, 0) || '% of companies vs at most 50% (' || CASE WHEN 50 - c.pe_percentile >= 0 THEN '+' ELSE '' END || format_number(50 - c.pe_percentile, 0) || ' to spare)' END AS price
+      FROM stocks.gold.longterm_candidates c
+      LEFT JOIN stocks.gold.company_fundamentals f ON f.symbol = c.symbol
+      WHERE c.is_pick
+      ORDER BY c.rank
+    SQL
+
     quality_scatter = <<-SQL
       SELECT symbol, roce_pct, pe, CAST(tests_passed AS STRING) || ' of ' || CAST(tests_available AS STRING) AS tests
       FROM stocks.gold.company_fundamentals
@@ -941,6 +965,7 @@ locals {
       swing_suggest        = ["strategy", "rank", "symbol", "company", "close", "entry", "stop", "target", "rr", "why", "chart", "trade_date"]
       longterm_suggest     = ["strategy", "rank", "symbol", "company", "close", "why", "chart"]
       usdinr_history       = ["obs_date", "usd_inr"]
+      longterm_tests       = ["rank", "symbol", "company", "passed", "capital", "debt", "cash", "growth", "price"]
       longterm_picks       = ["rank", "pick", "symbol", "company", "industry", "score", "quality_score", "target_weight_pct", "return_on_capital_pct", "debt_to_equity", "profit_cagr_3y_pct", "pe", "reasons"]
       quality_scatter      = ["symbol", "roce_pct", "pe", "tests"]
       calls_kpis           = ["calls_right_pct", "liked_avg_r", "disliked_avg_r", "edge_r", "rated", "more_needed"]
@@ -1123,7 +1148,8 @@ locals {
       lt_best_card      = { ds = "longterm_best", title = "Best shadow vs the bar to beat", desc = "Which shadow leads, its value and P&L, and NIFTYBEES over the real pool's days.", pos = [8, 3, 4, 3] }
       lt_trades         = { ds = "longterm_trades", title = "Trades placed (last 30 days)", desc = "Every buy and sell, real pool and shadows, after costs. P&L is realized on sells.", pos = [0, 27, 12, 7] }
       quality_top       = { ds = "longterm_picks", title = "This week's quality picks (max 2 per industry) and the next 20", desc = "Eligible Nifty 200 companies; score = 100 x quality + growth bonus - price penalty. Shadow mode: nothing real is bought yet.", pos = [0, 34, 12, 10] }
-      summary_quality   = { ds = "summary_quality", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 51, 12, 4] }
+      quality_tests     = { ds = "longterm_tests", title = "Why each pick qualifies: every test and its margin", desc = "✓ passed / ✕ failed, with how far it is from the line. A pick needs 3+ tests with figures and 60% of them passed; a thin margin can flip at the next results.", pos = [0, 51, 12, 7] }
+      summary_quality   = { ds = "summary_quality", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 58, 12, 4] }
       calls_matrix      = { ds = "calls_matrix", title = "Your rating vs what happened", desc = "Count · total Rs · whether your call was right. Skipped proposals count by what they would have made.", pos = [0, 6, 5, 5] }
       calls_vs_trader   = { ds = "calls_vs_trader", title = "You vs the trader", desc = "Where you disagreed shows what following you would have changed (ratings still never train it).", pos = [5, 6, 7, 5] }
       calls_list        = { ds = "rating_trades", title = "Every rated proposal (newest first)", desc = "Your rating, what the trader did, the outcome and whether your call was right.", pos = [0, 17, 12, 9] }
@@ -1244,7 +1270,8 @@ locals {
           local.table_widget.lt_best_card,
           local.chart.lt_curve, local.chart.lt_pnl_rs, local.table_widget.lt_suggest,
           local.table_widget.lt_board, local.table_widget.lt_hold, local.table_widget.lt_trades,
-          local.table_widget.quality_top, local.chart.quality_dots, local.table_widget.summary_quality,
+          local.table_widget.quality_top, local.chart.quality_dots, local.table_widget.quality_tests,
+          local.table_widget.summary_quality,
         ]
       },
       {

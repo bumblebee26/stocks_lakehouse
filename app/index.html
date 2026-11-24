@@ -98,6 +98,9 @@ svg.chart.hl polyline.on { opacity: 1; stroke-width: 3.5 }
 .heat button b { display: block; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .heat button[aria-pressed="true"] { border-color: var(--fg) }
 .heat button:disabled { cursor: default }
+.row.pick { width: 100%; background: none; border-left: 0; border-right: 0; border-bottom: 0; color: var(--fg); font: inherit; text-align: left; cursor: pointer }
+.tests { padding: 2px 0 8px }
+.tests .tl { font-size: 13px; padding: 3px 0 }
 .mkt { grid-template-columns: repeat(5, minmax(0, 1fr)); margin-bottom: 6px }
 .mkt button { font-size: 12px }
 .axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; margin-top: 2px }
@@ -386,6 +389,21 @@ function holdingsNow(name) {
   return `<section class="card"><h3>Holdings now</h3>${body || '<p class="muted">Nothing held (cash).</p>'}</section>`;
 }
 
+// Why each quality pick qualifies (24 Nov): every test, passed or failed, and its margin from the line.
+let OPEN_PICK = "";
+function ltTests() {
+  const r = rows("longterm_tests");
+  if (!r.length) return "";
+  const mk = (t) => { const v = String(t || "–"); return `<div class="tl ${v.startsWith("✓") ? "up" : v.startsWith("✕") ? "down" : "muted"}">${esc(v)}</div>`; };
+  const body = r.map((x) => {
+    const open = OPEN_PICK === x.symbol;
+    return `<button type="button" class="row pick" data-pick="${esc(x.symbol)}" aria-expanded="${open}"><span class="n"><b>${esc(x.rank)}. ${esc(x.symbol)}</b>`
+      + `<span>${esc(x.company)}</span></span><span class="r">${esc(x.passed)}<br><span class="muted" style="font-weight:500;font-size:12px">${open ? "hide" : "tests"}</span></span></button>`
+      + (open ? `<div class="tests">${["capital", "debt", "cash", "growth", "price"].map((k) => mk(x[k])).join("")}</div>` : "");
+  }).join("");
+  return `<section class="card"><h3>Why the quality picks qualify</h3>${body}<p class="note">Tap a pick for each test: ✓ passed, ✕ failed, and how far from the line. A thin margin can flip at the next results.</p></section>`;
+}
+
 function pool(title, ds, key) {
   const k = one(ds + "_kpis");
   const starred = (r) => k.best_shadow != null && r.strategy === k.best_shadow;
@@ -406,6 +424,7 @@ function pool(title, ds, key) {
   <section class="card"><h3>P&amp;L since each started</h3>${plChart(rows(ds + "_returns"), { key, x: "snapshot_date", y: "pnl_rs", line: "strategy",
     kindOf: (r) => String(r.kind).toLowerCase(), label: title + " P&L, real and shadows" })}</section>
   ${suggested(ds)}
+  ${key === "long" ? ltTests() : ""}
   <section class="card"><h3>Scoreboard (best shadow on top)</h3>${board || '<p class="muted">No data yet.</p>'}${bestNote}</section>
   <section class="card"><h3>Trades placed (last 30 days)</h3>${trades || '<p class="muted">No trades yet.</p>'}<p class="note">Right column: realized P&amp;L on sells, value on buys.</p></section>`;
 }
@@ -571,6 +590,8 @@ document.getElementById("main").addEventListener("click", (e) => {
   }
   const mk = e.target.closest("button[data-mkt]");
   if (mk) { MKT = mk.dataset.mkt; try { localStorage.setItem("mkt", MKT); } catch (err) {} render(); return; }
+  const pk = e.target.closest("button[data-pick]");
+  if (pk) { OPEN_PICK = OPEN_PICK === pk.dataset.pick ? "" : pk.dataset.pick; render(); return; }
   const sc = e.target.closest("button[data-sector]");
   if (sc) { OPEN_SECTOR = OPEN_SECTOR === sc.dataset.sector ? "" : sc.dataset.sector; render(); return; }
   const rb = e.target.closest("button[data-rng]");
