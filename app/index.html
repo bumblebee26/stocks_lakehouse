@@ -315,15 +315,26 @@ function dayState() {
   const closed = (m.date === today && !!m.holiday) || wd === 0 || wd === 6;
   return { today, closed, why: closed ? "Market closed today." : "Today's figures appear after the close (evening update)." };
 }
+// Sensex close and move on one day (Yahoo series), or null.
+function closeOn(name, day) {
+  const r = rows(name), i = r.findIndex((x) => x.date === day);
+  if (i < 1) return null;
+  const a = num(r[i - 1].close), b = num(r[i].close);
+  return { last: b, pct: a ? (b / a - 1) * 100 : null };
+}
+const dayMonth = (iso) => (iso ? `${Number(iso.slice(8, 10))} ${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(iso.slice(5, 7)) - 1]}` : "");
 function indiaNow() {
-  // Nifty 50 and India VIX from NSE's index file (lakehouse); Sensex from Yahoo. Today's only (see dayState).
+  // Nifty 50, India VIX and breadth from NSE's files (lakehouse); Sensex from Yahoo, on the same day. Today's after
+  // the evening update; otherwise (market hours, holidays, weekends) the last close, labelled (25 Nov change).
   const k = one("india_kpis"), d = dayState();
-  if (k.trade_date !== d.today) return { pending: d.why };
-  const sx = lastMove("sensex_5y");
+  if (!k.trade_date) return { pending: "Appears after the next update." };
+  const stale = k.trade_date !== d.today;
   return {
     nifty: k.nifty_close != null ? { last: num(k.nifty_close), pct: num(k.nifty_pct) } : null,
-    sensex: sx && sx.date === d.today ? sx : null, vix: k.vix_close != null ? { last: num(k.vix_close), pct: num(k.vix_pct) } : null,
+    sensex: closeOn("sensex_5y", k.trade_date), vix: k.vix_close != null ? { last: num(k.vix_close), pct: num(k.vix_pct) } : null,
     adv: k.advances, dec: k.declines, date: k.trade_date,
+    label: stale ? `last close, ${dayMonth(k.trade_date)}` : "today",
+    note: stale ? `${d.why.replace("Today's figures appear", "Today's appear")} Showing the last close (${dayMonth(k.trade_date)}).` : "",
   };
 }
 const lvl = (m, dp = 0) => (m && m.last != null ? m.last.toLocaleString("en-IN", { maximumFractionDigits: dp, minimumFractionDigits: dp }) : "–");
@@ -332,11 +343,11 @@ function glance() {
   const best = sec[0], worst = sec.at(-1);
   const line = best && worst && best !== worst ? `<p class="note">Best sector ${esc(best.sector)} <span class="up">${pct(best.change_pct, true)}</span>`
     + ` · worst ${esc(worst.sector)} <span class="${cls(worst.change_pct)}">${pct(worst.change_pct, true)}</span> · more on Markets</p>` : "";
-  return `<section class="card"><h3>Market at a glance${n.date ? ` (${esc(n.date)})` : ""}</h3><div class="tiles three">`
+  return `<section class="card"><h3>Market at a glance${n.label ? ` (${esc(n.label)})` : ""}</h3><div class="tiles three">`
     + tile("Nifty 50", `<span class="${cls(n.nifty && n.nifty.pct)}">${pct(n.nifty && n.nifty.pct, true)}</span>`)
     + tile("Sensex", `<span class="${cls(n.sensex && n.sensex.pct)}">${pct(n.sensex && n.sensex.pct, true)}</span>`)
     + tile("India VIX", lvl(n.vix, 1), n.vix && n.vix.pct)
-    + `</div>${n.pending ? `<p class="note">${esc(n.pending)}</p>` : line}</section>`;
+    + `</div>${n.pending ? `<p class="note">${esc(n.pending)}</p>` : line + (n.note ? `<p class="note">${esc(n.note)}</p>` : "")}</section>`;
 }
 
 function seg(key) {
@@ -499,7 +510,7 @@ function markets() {
   const read = rows("market_read").map((r) => `<div class="row"><div class="n"><b>${esc(r.topic)}</b><span style="color:var(--fg);font-size:14px">${esc(r.what_the_data_says)}</span></div></div>`).join("");
   const ibja = rows("bullion_in"), b = (i) => ibja.find((r) => r.item === i);
   const g24 = b("Gold 24K (999)"), g22 = b("Gold 22K (916)"), sil = b("Silver (999)");
-  const dm = (iso) => (iso ? `${Number(iso.slice(8, 10))} ${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(iso.slice(5, 7)) - 1]}` : "");
+  const dm = dayMonth;
   const bullion = g24 ? `<div class="tiles three bul">${tile("24K gold", rupees(num(g24.rate)), num(g24.change_pct))}`
       + `${g22 ? tile("22K gold", rupees(num(g22.rate)), num(g22.change_pct)) : ""}${sil ? tile("Silver", rupees(num(sil.rate)), num(sil.change_pct)) : ""}</div>`
       + `<p class="note">Gold per 10 g, silver per kg. IBJA rates, ${esc(dm(g24.as_of))} (${esc(g24.session)}); excl. 3% GST and making charges.</p>`
@@ -515,12 +526,12 @@ function markets() {
   }
   const switcher = `<div class="seg mkt" role="group" aria-label="Series">${Object.entries(MKT_SERIES).map(([key, v]) => `<button type="button" data-mkt="${key}" aria-pressed="${MKT === key}">${esc(v[0].split(" ")[0])}</button>`).join("")}</div>`;
   return `<h2>Markets</h2>
-  <section class="card"><h3>India${n.date ? ` (${esc(n.date)})` : ""}</h3><div class="tiles">
+  <section class="card"><h3>India${n.label ? ` (${esc(n.label)})` : ""}</h3><div class="tiles">
     ${tile("Nifty 50", lvl(n.nifty), n.nifty && n.nifty.pct)}
     ${tile("Sensex", lvl(n.sensex), n.sensex && n.sensex.pct)}
     ${tile("India VIX", lvl(n.vix, 2), n.vix && n.vix.pct)}
     ${tile("Breadth (all NSE)", `<span style="font-size:17px">${n.adv == null ? "–" : Number(n.adv).toLocaleString("en-IN")}↑ ${n.dec == null ? "–" : Number(n.dec).toLocaleString("en-IN")}↓</span>`)}
-  </div>${n.pending ? `<p class="note">${esc(n.pending)}</p>` : ""}</section>
+  </div>${n.pending || n.note ? `<p class="note">${esc(n.pending || n.note)}</p>` : ""}</section>
   ${fuel()}
   <section class="card"><h3>Gold &amp; silver</h3>${bullion}</section>
   ${sectors()}
