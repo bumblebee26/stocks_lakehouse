@@ -166,11 +166,16 @@ def fetch_delivery(trade_date):
     except Exception as err:  # noqa: BLE001 - optional data: never fail the bhavcopy run over it
         log.warning("NSE delivery file for %s failed: %s", trade_date, err)
         return "error"
-    rows = parse_delivery(body.decode("utf-8", "replace"))
-    if not rows:
-        return "empty"
-    put_landing("nse_delivery", trade_date, f"delivery_{trade_date:%Y%m%d}.jsonl",
-                "\n".join(json.dumps(r) for r in rows).encode(), "application/x-ndjson")
+    # A malformed file (seen for 8 Aug 2022) or a failed upload is logged and skipped: never stop the bhavcopy run.
+    try:
+        rows = parse_delivery(body.decode("utf-8", "replace"))
+        if not rows:
+            return "empty"
+        put_landing("nse_delivery", trade_date, f"delivery_{trade_date:%Y%m%d}.jsonl",
+                    "\n".join(json.dumps(r) for r in rows).encode(), "application/x-ndjson")
+    except Exception as err:  # noqa: BLE001
+        log.warning("NSE delivery file for %s unreadable, skipped: %s", trade_date, err)
+        return "error"
     return f"written ({len(rows)} rows)"
 
 
@@ -212,11 +217,15 @@ def fetch_indices(trade_date):
     except Exception as err:  # noqa: BLE001 - optional data: never fail the bhavcopy run over it
         log.warning("NSE index file for %s failed: %s", trade_date, err)
         return "error"
-    rows = parse_indices(body.decode("utf-8", "replace"))
-    if not rows:
-        return "empty"
-    put_landing("nse_indices", trade_date, f"indices_{trade_date:%Y%m%d}.jsonl",
-                "\n".join(json.dumps(r) for r in rows).encode(), "application/x-ndjson")
+    try:
+        rows = parse_indices(body.decode("utf-8", "replace"))
+        if not rows:
+            return "empty"
+        put_landing("nse_indices", trade_date, f"indices_{trade_date:%Y%m%d}.jsonl",
+                    "\n".join(json.dumps(r) for r in rows).encode(), "application/x-ndjson")
+    except Exception as err:  # noqa: BLE001 - optional data, as above
+        log.warning("NSE index file for %s unreadable, skipped: %s", trade_date, err)
+        return "error"
     vix = next((r for r in rows if r["index_name"].lower() == "india vix"), None)
     return f"written ({len(rows)} rows, India VIX {vix['close'] if vix else 'missing'})"
 

@@ -208,15 +208,15 @@ resource "aws_scheduler_schedule" "news_live" {
 # UDiFF began (8 Jul 2024), for multi-year swing and long-term backtests. First run 23 Nov 22:00 stopped near late
 # 2020: the chain of self-invocations hit AWS's recursive-loop limit (~16 hops). Resumed from 2 Nov 2020 at 01:45 IST
 # on 24 Nov with a 15-minute timeout, stopped again by the same protection at 02:17; restarted at 02:48 with
-# loop detection off for this function (below), after
-# the day's 19:30 fetch; the Lambda continues itself until the range is done (~2 hours, 2 s between files). To run
-# it again, change the time and apply.
+# loop detection off for this function (below); that run stopped at 8 Aug 2022 on a malformed delivery file
+# (now skipped), so it resumes from 8 Aug 2022 at 08:30 IST on 24 Nov. The Lambda continues itself until the range
+# is done (~2 hours, 2 s between files). To run it again, change the time and apply.
 resource "aws_scheduler_schedule" "nse_history_backfill" {
   name        = "${var.name_prefix}-fetch-nse-history-backfill"
-  description = "One-off: NSE bhavcopy 2020-11-02 to 2024-07-05 (older format, converted to UDiFF columns); resumes the 23 Nov run."
+  description = "One-off: NSE bhavcopy 2022-08-08 to 2024-07-05 (older format, converted to UDiFF columns); resumes after the 8 Aug 2022 stop."
   state       = var.schedules_enabled ? "ENABLED" : "DISABLED"
 
-  schedule_expression          = "at(2026-11-24T02:48:00)"
+  schedule_expression          = "at(2026-11-24T08:30:00)"
   schedule_expression_timezone = "Asia/Kolkata"
 
   flexible_time_window {
@@ -226,7 +226,7 @@ resource "aws_scheduler_schedule" "nse_history_backfill" {
   target {
     arn      = aws_lambda_function.fetcher["nse"].arn
     role_arn = aws_iam_role.scheduler.arn
-    input    = jsonencode({ start = "2020-11-02", end = "2024-07-05" })
+    input    = jsonencode({ start = "2022-08-08", end = "2024-07-05" })
 
     retry_policy {
       maximum_retry_attempts       = 0
