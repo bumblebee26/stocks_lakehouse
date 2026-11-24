@@ -97,7 +97,7 @@ def yahoo_series(previous, fetch=None):
     out, failed = {}, []
     for name, (sym, label) in YAHOO_SERIES.items():
         try:
-            bars, _ = fetch(sym, "max")
+            bars, _ = fetch(sym, "all")
             rows = thin_old([{"date": b["date"], "close": round(float(b["close"]), 4)} for b in bars if b.get("close")])
             if not rows:
                 raise ValueError("no closes")
