@@ -17,9 +17,10 @@
 # ---------------------------------------------------------------------------
 
 locals {
-  app_function_name = "${var.name_prefix}-app-export"
-  app_bucket_name   = "${var.name_prefix}-desk-app-${local.account_id}"
-  app_path          = sensitive(replace(terraform_data.app_path.output, "-", ""))
+  trader_state_bucket = "stocks-trader-state-${local.account_id}" # paper-trader's state bucket (same AWS account)
+  app_function_name   = "${var.name_prefix}-app-export"
+  app_bucket_name     = "${var.name_prefix}-desk-app-${local.account_id}"
+  app_path            = sensitive(replace(terraform_data.app_path.output, "-", ""))
   app_files = {
     "index.html"           = "text/html; charset=utf-8"
     "manifest.webmanifest" = "application/manifest+json"
@@ -184,6 +185,18 @@ data "aws_iam_policy_document" "app_export" {
     actions   = ["s3:GetObject", "s3:PutObject"]
     resources = ["${module.app_bucket.arn}/app/data/*"]
   }
+
+  # From 24 Nov: two small read-only files from paper-trader's state bucket (same account) for the app's
+  # Intraday "This morning" card and the Swing / Long auto-mode banner. Nothing else in that bucket.
+  statement {
+    sid     = "ReadTraderMorningAndAutoMode"
+    effect  = "Allow"
+    actions = ["s3:GetObject"]
+    resources = [
+      "arn:${local.partition}:s3:::${local.trader_state_bucket}/opening/*",
+      "arn:${local.partition}:s3:::${local.trader_state_bucket}/state/pool_auto.json",
+    ]
+  }
 }
 
 resource "aws_iam_role_policy" "app_export" {
@@ -218,6 +231,7 @@ resource "aws_lambda_function" "app_export" {
       DATABRICKS_WAREHOUSE_PARAM = local.databricks_warehouse_param
       APP_BUCKET                 = module.app_bucket.id
       APP_PREFIX                 = "app"
+      TRADER_BUCKET              = local.trader_state_bucket
     }
   }
 

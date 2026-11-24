@@ -431,6 +431,76 @@ locals {
       ORDER BY obs_date
     SQL
 
+    # Phone app, Markets slide (24 Nov): India at a glance, sectors at the close and their stocks.
+    # NSE's own index file gives Nifty 50, India VIX and the bank / PSU bank / government-company (PSE) indices;
+    # sectors are the Nifty 200 grouped by NSE's industry, equal-weighted, with how many stocks rose or fell.
+    india_kpis = <<-SQL
+      WITH i AS (SELECT trade_date, lower(trim(index_name)) AS name, close, change_pct FROM stocks.silver.nse_indices
+                 WHERE trade_date = (SELECT max(trade_date) FROM stocks.silver.nse_indices)),
+           b AS (SELECT advances, declines FROM stocks.gold.market_breadth
+                 WHERE market = 'IN' AND trade_date = (SELECT max(trade_date) FROM stocks.gold.market_breadth
+                                                       WHERE market = 'IN'))
+      SELECT (SELECT max(trade_date) FROM i) AS trade_date,
+             (SELECT round(max(close), 2) FROM i WHERE name = 'nifty 50') AS nifty_close,
+             (SELECT round(max(change_pct), 2) FROM i WHERE name = 'nifty 50') AS nifty_pct,
+             (SELECT round(max(close), 2) FROM i WHERE name = 'india vix') AS vix_close,
+             (SELECT round(max(change_pct), 2) FROM i WHERE name = 'india vix') AS vix_pct,
+             (SELECT max(advances) FROM b) AS advances,
+             (SELECT max(declines) FROM b) AS declines
+    SQL
+
+    sector_board = <<-SQL
+      WITH d AS (SELECT max(trade_date) AS d FROM stocks.silver.nse_eq_daily),
+           p AS (SELECT e.symbol, (e.close / e.prev_close - 1) * 100 AS chg
+                 FROM stocks.silver.nse_eq_daily e JOIN d ON e.trade_date = d.d
+                 WHERE e.series = 'EQ' AND e.prev_close > 0),
+           m AS (SELECT DISTINCT symbol, industry FROM stocks.silver.index_members WHERE industry IS NOT NULL)
+      SELECT 'industry' AS kind,
+             CASE m.industry
+               WHEN 'Information Technology' THEN 'IT'
+               WHEN 'Financial Services' THEN 'Banks & finance'
+               WHEN 'Automobile and Auto Components' THEN 'Auto'
+               WHEN 'Fast Moving Consumer Goods' THEN 'FMCG'
+               WHEN 'Healthcare' THEN 'Pharma & health'
+               WHEN 'Metals & Mining' THEN 'Metals'
+               WHEN 'Oil Gas & Consumable Fuels' THEN 'Oil & gas'
+               WHEN 'Consumer Durables' THEN 'Durables'
+               WHEN 'Construction Materials' THEN 'Cement'
+               WHEN 'Telecommunication' THEN 'Telecom'
+               ELSE m.industry END AS sector,
+             round(avg(p.chg), 2) AS change_pct, count_if(p.chg > 0) AS up, count_if(p.chg < 0) AS down,
+             count(*) AS stocks, (SELECT d FROM d) AS trade_date
+      FROM p JOIN m ON m.symbol = p.symbol
+      GROUP BY m.industry
+      UNION ALL
+      SELECT 'index',
+             CASE lower(trim(index_name)) WHEN 'nifty bank' THEN 'Nifty Bank' WHEN 'nifty psu bank' THEN 'PSU banks'
+                  ELSE 'Govt (PSE)' END,
+             round(change_pct, 2), CAST(NULL AS BIGINT), CAST(NULL AS BIGINT), CAST(NULL AS BIGINT), trade_date
+      FROM stocks.silver.nse_indices
+      WHERE trade_date = (SELECT max(trade_date) FROM stocks.silver.nse_indices)
+        AND lower(trim(index_name)) IN ('nifty bank', 'nifty psu bank', 'nifty pse')
+      ORDER BY change_pct DESC
+    SQL
+
+    sector_stocks = <<-SQL
+      WITH d AS (SELECT max(trade_date) AS d FROM stocks.silver.nse_eq_daily)
+      SELECT CASE m.industry
+               WHEN 'Information Technology' THEN 'IT' WHEN 'Financial Services' THEN 'Banks & finance'
+               WHEN 'Automobile and Auto Components' THEN 'Auto' WHEN 'Fast Moving Consumer Goods' THEN 'FMCG'
+               WHEN 'Healthcare' THEN 'Pharma & health' WHEN 'Metals & Mining' THEN 'Metals'
+               WHEN 'Oil Gas & Consumable Fuels' THEN 'Oil & gas' WHEN 'Consumer Durables' THEN 'Durables'
+               WHEN 'Construction Materials' THEN 'Cement' WHEN 'Telecommunication' THEN 'Telecom'
+               ELSE m.industry END AS sector,
+             e.symbol, round(e.close, 2) AS close, round((e.close / e.prev_close - 1) * 100, 2) AS change_pct
+      FROM stocks.silver.nse_eq_daily e
+      JOIN d ON e.trade_date = d.d
+      JOIN (SELECT DISTINCT symbol, industry FROM stocks.silver.index_members WHERE industry IS NOT NULL) m
+        ON m.symbol = e.symbol
+      WHERE e.series = 'EQ' AND e.prev_close > 0
+      ORDER BY sector, change_pct DESC
+    SQL
+
     scanner_record = <<-SQL
       SELECT signal_label AS signal, CAST(horizon_days AS INT) AS days_after, CAST(signals AS INT) AS signals,
              avg_return_pct, avg_excess_pct AS vs_niftybees_pct, beat_niftybees_pct
@@ -865,6 +935,9 @@ locals {
       momentum_top         = ["swing_rank", "lt_rank", "symbol", "company", "industry", "close", "ret_1m_pct", "ret_3m_pct", "ret_6m_pct", "ret_12m_pct", "vol_1y_pct", "pct_of_52w_high", "rsi14", "good_news_5d", "latest_good_news", "scanner_strict", "swing_score", "lt_score", "trade_date"]
       scanner_record       = ["signal", "days_after", "signals", "avg_return_pct", "vs_niftybees_pct", "beat_niftybees_pct"]
       market_banner        = ["market"]
+      india_kpis           = ["trade_date", "nifty_close", "nifty_pct", "vix_close", "vix_pct", "advances", "declines"]
+      sector_board         = ["kind", "sector", "change_pct", "up", "down", "stocks", "trade_date"]
+      sector_stocks        = ["sector", "symbol", "close", "change_pct"]
       swing_suggest        = ["strategy", "rank", "symbol", "company", "close", "entry", "stop", "target", "rr", "why", "chart", "trade_date"]
       longterm_suggest     = ["strategy", "rank", "symbol", "company", "close", "why", "chart"]
       usdinr_history       = ["obs_date", "usd_inr"]

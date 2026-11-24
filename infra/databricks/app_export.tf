@@ -9,11 +9,11 @@ data "aws_caller_identity" "app" {}
 
 locals {
   app_datasets = [
-    "desk_status", "desk_kpis", "desk_pools", "desk_decisions", "desk_board", "portfolio_vs_nifty",
+    "desk_status", "desk_kpis", "desk_pools", "desk_decisions", "portfolio_vs_nifty",
     "intraday_kpis", "intra_board", "intra_bar_ladder", "intra_selector", "intra_lines", "swing_returns",
-    "longterm_returns", "swing_suggest", "longterm_suggest",
+    "longterm_returns", "swing_suggest", "longterm_suggest", "india_kpis", "sector_board", "sector_stocks", "holdings",
     "swing_kpis", "swing_scoreboard", "swing_trades", "longterm_kpis", "longterm_scoreboard", "longterm_trades",
-    "calls_kpis", "markets_kpis", "market_read", "world_moves",
+    "calls_kpis", "markets_kpis", "market_read",
   ]
 }
 
