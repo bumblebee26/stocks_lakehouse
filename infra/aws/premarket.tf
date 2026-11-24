@@ -57,12 +57,16 @@ data "aws_iam_policy_document" "premarket" {
     ])
   }
 
-  # The pre-open snapshot (fetchers/snapshot.py): its own landing prefix only.
+  # The pre-open snapshot (fetchers/snapshot.py) and NSE's holiday list (fetchers/nse_holidays.py): their own
+  # landing prefixes only.
   statement {
-    sid       = "WritePremarketLanding"
-    effect    = "Allow"
-    actions   = ["s3:PutObject"]
-    resources = ["${module.landing_bucket.arn}/landing/premarket/*"]
+    sid     = "WritePremarketLanding"
+    effect  = "Allow"
+    actions = ["s3:PutObject"]
+    resources = [
+      "${module.landing_bucket.arn}/landing/premarket/*",
+      "${module.landing_bucket.arn}/landing/nse_holidays/*",
+    ]
   }
 }
 

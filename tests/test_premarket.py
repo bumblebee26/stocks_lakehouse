@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "fetchers"))
 sys.modules.setdefault("boto3", mock.MagicMock())
 
 import databricks_sql  # noqa: E402
+import nse_holidays  # noqa: E402
 import premarket  # noqa: E402
 import telegram  # noqa: E402
 
@@ -146,7 +147,7 @@ class Scanner(unittest.TestCase):
         self.assertIn("groww.in/stocks/abc-industries-ltd", scan)
         self.assertIn("XYZ Rs 1,234.5, wait: missed volume under 1.5x", scan)
         self.assertIn("never a guaranteed return", scan)
-        self.assertEqual(buttons[0], [("Swing buy ABC (asks first)", "sw:ABC:1180.00:1420.00")])
+        self.assertEqual(buttons[0], [("Hand buy ABC (outside auto rules, asks first)", "sw:ABC:1180.00:1420.00")])
         self.assertEqual(len(buttons), 2)
 
     def test_empty_list_says_so(self):
@@ -160,8 +161,9 @@ class Scanner(unittest.TestCase):
 
 
 class Handler(unittest.TestCase):
-    def _run(self, fake_query, event=None):
+    def _run(self, fake_query, event=None, holiday=None):
         with mock.patch.object(databricks_sql, "query", side_effect=fake_query), \
+             mock.patch.object(premarket, "nse_holiday", return_value=(holiday, None)), \
              mock.patch.object(premarket, "fetch_live", return_value=(SESSIONS, live())), \
              mock.patch.object(premarket.snapshot, "save", return_value={"rows": 21, "key": "k"}) as save, \
              mock.patch.object(premarket.snapshot, "collect", return_value=[{}] * 21), \
@@ -183,6 +185,30 @@ class Handler(unittest.TestCase):
         self.save.assert_called_once()
         self.assertEqual(out["snapshot"], {"rows": 21, "key": "k"})
         self.assertEqual(send.call_count, 2)
+
+    def test_holiday_brief_says_closed_and_has_no_buttons(self):
+        out, _ = self._run(lambda sql: [], {"dry_run": True}, holiday="Guru Nanak Jayanti")
+        self.assertTrue(out["message"].startswith("🛑 <b>NSE closed today (Guru Nanak Jayanti)</b>"))
+        self.assertIn("NSE closed today", out["scanner"])
+        self.assertEqual(out["buttons"], [])
+
+    def test_nse_holiday_from_the_list(self):
+        payload = {"CM": [{"tradingDate": "24-Nov-2026", "description": "Prakash Gurpurb Sri Guru Nanak Dev"},
+                          {"tradingDate": "25-Dec-2026", "description": "Christmas"}, {"tradingDate": "bad"}]}
+        name, rows = premarket.nse_holiday(dt.date(2026, 11, 24), fetch=lambda: payload)
+        self.assertEqual(name, "Prakash Gurpurb Sri Guru Nanak Dev")
+        self.assertIsNone(premarket.nse_holiday(dt.date(2026, 11, 25), fetch=lambda: payload)[0])
+        st = nse_holidays.status(dt.date(2026, 11, 24), rows)
+        self.assertEqual(st["title"], "Happy Prakash Gurpurb Sri Guru Nanak Dev!")
+        self.assertEqual(st["message"], "Markets are closed on 24 Nov on account of Prakash Gurpurb Sri Guru Nanak "
+                                        "Dev and will open at 9:15 AM on 25 Nov.")
+        self.assertEqual(nse_holidays.status(dt.date(2026, 11, 25), rows)["message"],
+                         "Next market holiday: Fri 25 Dec (Christmas)")
+        self.assertEqual(nse_holidays.next_open(dt.date(2026, 12, 24), rows), dt.date(2026, 12, 28))
+
+        def blocked():
+            raise RuntimeError("403")
+        self.assertEqual(premarket.nse_holiday(dt.date(2026, 11, 24), fetch=blocked), (None, None))
 
     def test_failed_snapshot_still_sends(self):
         with mock.patch.object(premarket.snapshot, "save", side_effect=RuntimeError("S3 denied")):

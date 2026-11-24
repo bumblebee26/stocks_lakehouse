@@ -21,6 +21,7 @@ _rescued_data instead (schemaEvolutionMode = rescue).
   stocks.bronze.nse_delivery_raw             NSE delivery file
   stocks.bronze.nse_indices_raw              NSE index closes (India VIX included)
   stocks.bronze.nse_fo_raw                   NSE F&O stock list
+  stocks.bronze.nse_holidays_raw             NSE trading holidays
   stocks.bronze.premarket_raw                pre-open world-markets snapshot (Yahoo, 08:30 IST Mon-Fri)
 Tables of the research and trading pipelines are never defined here; the three pipelines never run at
 the same time (Free Edition allows one active pipeline).
@@ -325,6 +326,26 @@ def nse_indices_raw():
         .option("cloudFiles.partitionColumns", "")
         .schema(INDICES_SCHEMA)
         .load(f"{LANDING}/nse_indices/")
+    )
+
+# NSE trading holidays (from 24 Nov 2026), the whole list re-landed by the 08:30 brief each weekday.
+# SQL equivalent: as above from landing/nse_holidays/, schema 'holiday_date STRING, description STRING, as_of STRING'.
+HOLIDAYS_SCHEMA = "holiday_date STRING, description STRING, as_of STRING"
+
+@dp.table(
+    name="stocks.bronze.nse_holidays_raw",
+    comment="Raw NSE trading-holiday lists (cash market), one row per holiday per landed file.",
+    table_properties={"quality": "bronze"},
+)
+def nse_holidays_raw():
+    return with_lineage(
+        spark.readStream.format("cloudFiles")  # noqa: F821
+        .option("cloudFiles.format", "json")
+        .option("pathGlobFilter", "*.jsonl")
+        .option("rescuedDataColumn", "_rescued_data")
+        .option("cloudFiles.partitionColumns", "")
+        .schema(HOLIDAYS_SCHEMA)
+        .load(f"{LANDING}/nse_holidays/")
     )
 
 @dp.table(

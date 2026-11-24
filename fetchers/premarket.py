@@ -23,6 +23,7 @@ Event: {} for a normal run, {"dry_run": true} to return the messages without sen
 """
 
 import datetime as dt
+import json
 import os
 import re
 from zoneinfo import ZoneInfo
@@ -31,7 +32,8 @@ import databricks_sql
 import snapshot
 import telegram
 import yahoo
-from common import log
+import nse_holidays
+from common import log, put_landing
 from telegram import esc
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -120,6 +122,26 @@ def fetch_live(today):
 # ---------------------------------------------------------------------------
 # Calendar and freshness
 # ---------------------------------------------------------------------------
+def nse_holiday(today, fetch=None):
+    """(today's NSE holiday name or None, the holiday list or None). From 24 Nov 2026 a holiday brief says so at the
+    top and carries no buy buttons; the list is also landed for the dashboard's holiday banner. If NSE can't be
+    read, today counts as a trading day (as before)."""
+    rows = nse_holidays.fetch(fetch)
+    return nse_holidays.holiday_on(today, rows), rows
+
+
+def land_holidays(today, rows, dry_run=False):
+    """landing/nse_holidays/date=YYYY-MM-DD/holidays.jsonl -> stocks.silver.nse_holidays. Never stops the brief."""
+    if not rows or dry_run:
+        return None
+    try:
+        body = "\n".join(json.dumps({**r, "as_of": today.isoformat()}) for r in rows).encode()
+        return put_landing("nse_holidays", today, "holidays.jsonl", body, "application/x-ndjson")
+    except Exception as err:  # noqa: BLE001
+        log.warning("Landing the NSE holiday list failed: %s", err)
+        return None
+
+
 def previous_weekday(d):
     d -= dt.timedelta(days=1)
     while d.weekday() >= 5:
@@ -415,7 +437,7 @@ def build_scanner(data, expected, fresh, failed=()):
             continue
         data_ = f"sw:{r['symbol']}:{r['stop']:.2f}:{r['target2']:.2f}"
         if len(data_.encode()) <= 64:
-            buttons.append([(f"Swing buy {r['symbol']} (asks first)", data_)])
+            buttons.append([(f"Hand buy {r['symbol']} (outside auto rules, asks first)", data_)])
     return "\n".join(lines), buttons
 
 
@@ -449,6 +471,8 @@ def handler(event, context):
     event = event or {}
     now = dt.datetime.now(IST)
     today = now.date()
+    holiday, holiday_rows = nse_holiday(today)
+    land_holidays(today, holiday_rows, bool(event.get("dry_run")))   # before the snapshot, which starts the job
     snap = save_snapshot(now, bool(event.get("dry_run")))
     data, failed = fetch_all(QUERIES)
     sessions, live = fetch_live(today)
@@ -457,6 +481,10 @@ def handler(event, context):
     fresh = freshness(data, expected)
     brief = build_brief(data, live, expected, fresh, today, failed)
     scan, buttons = build_scanner(data, expected, fresh, failed)
+    if holiday:
+        closed = (f"🛑 <b>NSE closed today ({esc(holiday)})</b>: nothing trades; the picks and levels are for the next "
+                  "session.\n\n")
+        brief, scan, buttons = closed + brief, closed + scan, []
     if event.get("dry_run"):
         log.info("Dry run; messages not sent:\n%s\n\n%s", brief, scan)
         return {"sent": False, "failed_queries": failed, "message": brief, "scanner": scan, "buttons": buttons,
@@ -468,4 +496,4 @@ def handler(event, context):
         telegram.send(part if len(parts) == 1 else f"{part}\n<i>({i + 1}/{len(parts)})</i>",
                       buttons=buttons if last else None)
     return {"sent": True, "failed_queries": failed, "chars": len(brief) + len(scan),
-            "scanner_parts": len(parts), "swing_buttons": len(buttons), "snapshot": snap}
+            "scanner_parts": len(parts), "swing_buttons": len(buttons), "snapshot": snap, "holiday": holiday}

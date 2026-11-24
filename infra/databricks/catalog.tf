@@ -64,6 +64,7 @@ resource "databricks_file" "landing_readme" {
     index_members = "NSE index constituents (Nifty 200: symbol, company, industry, ISIN), pushed weekly with the fundamentals."
     fundamentals  = "Company financials (annual and quarterly, JSON lines) for about 250 large NSE companies, pushed weekly by paper-trader's Company fundamentals workflow."
     nse_indices   = "Every NSE index's day (India VIX included), JSON lines, written with the bhavcopy at 19:30 IST Mon-Fri. Sets the trader's risk per trade."
+    nse_holidays  = "NSE trading holidays (cash market, from NSE's holiday-master list), JSON lines, written by the 08:30 IST brief Mon-Fri. Feeds the dashboard's holiday banner."
     premarket     = "Pre-open world-markets snapshot from Yahoo (JSON lines), written by the 08:30 IST brief Mon-Fri. A new file starts stocks-market-preopen."
   }
 
