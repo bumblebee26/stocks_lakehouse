@@ -44,7 +44,7 @@ locals {
 
     desk_kpis = <<-SQL
       WITH l AS (SELECT * FROM stocks.gold.portfolio_daily ORDER BY snapshot_date DESC LIMIT 1),
-           t AS (SELECT trades_opened FROM stocks.gold.trading_daily ORDER BY trade_date DESC LIMIT 1),
+           t AS (SELECT trades_opened, trade_date FROM stocks.gold.trading_daily ORDER BY trade_date DESC LIMIT 1),
            r AS (SELECT CASE WHEN (feedback = 'like' AND won = 1) OR (feedback = 'dislike' AND won = 0) THEN 1 ELSE 0 END AS right_call
                  FROM stocks.gold.proposal_outcomes WHERE feedback IN ('like', 'dislike') AND won IS NOT NULL)
       SELECT round(l.total_value_rs, 0)                    AS portfolio_rs,
@@ -53,7 +53,9 @@ locals {
              CAST((SELECT trades_opened FROM t) AS INT)    AS trades_today,
              CAST((SELECT count(*) FROM stocks.gold.proposal_outcomes
                    WHERE trade_date >= (SELECT min(trade_date) FROM stocks.gold.trading_daily)) AS INT) AS proposals,
-             (SELECT round(100 * avg(right_call), 0) FROM r) AS calls_right_pct
+             (SELECT round(100 * avg(right_call), 0) FROM r) AS calls_right_pct,
+             CAST(l.snapshot_date AS STRING)               AS day,
+             CAST((SELECT trade_date FROM t) AS STRING)    AS trades_day
       FROM l
     SQL
 
@@ -78,7 +80,8 @@ locals {
              CASE feedback WHEN 'like' THEN '👍' WHEN 'dislike' THEN '👎' ELSE '–' END AS you,
              CASE WHEN outcome_r IS NULL THEN '–'
                   WHEN decision = 'taken' THEN concat(CASE WHEN outcome_r >= 0 THEN '▲ +' ELSE '▼ −' END, format_number(abs(outcome_r), 1), 'R')
-                  ELSE concat('would be ', CASE WHEN outcome_r >= 0 THEN '+' ELSE '−' END, format_number(abs(outcome_r), 1), 'R') END AS result
+                  ELSE concat('would be ', CASE WHEN outcome_r >= 0 THEN '+' ELSE '−' END, format_number(abs(outcome_r), 1), 'R') END AS result,
+             CAST(trade_date AS STRING) AS trade_date
       FROM stocks.gold.proposal_outcomes
       WHERE trade_date = (SELECT max(trade_date) FROM stocks.gold.proposal_outcomes)
       ORDER BY proposed_at
@@ -916,9 +919,9 @@ locals {
   raw_fields = {
     for ds, cols in {
       desk_status          = ["auto_mode", "india_vix", "mood", "risk", "as_of"]
-      desk_kpis            = ["portfolio_rs", "since_reset_pct", "today_pnl_rs", "trades_today", "proposals", "calls_right_pct"]
+      desk_kpis            = ["portfolio_rs", "since_reset_pct", "today_pnl_rs", "trades_today", "proposals", "calls_right_pct", "day", "trades_day"]
       desk_setups          = ["setup", "win_rate", "avg_r", "proposals"]
-      desk_decisions       = ["time", "symbol", "setup", "score", "reviewer", "decision", "you", "result"]
+      desk_decisions       = ["time", "symbol", "setup", "score", "reviewer", "decision", "you", "result", "trade_date"]
       desk_board           = ["strategy", "kind", "return_since_start", "vs_niftybees"]
       desk_pools           = ["pool", "value_rs", "pnl_rs", "return_pct", "since", "as_of"]
       portfolio_vs_nifty   = ["snapshot_date", "series", "index_value"]

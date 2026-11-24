@@ -92,6 +92,7 @@ svg.chart.hl polyline.on { opacity: 1; stroke-width: 3.5 }
 .banner.off { background: var(--soft) }
 .banner h3 { margin-bottom: 4px }
 .banner p { margin: 0; font-size: 13px; color: var(--fg) }
+.tiles.bul .v { font-size: 17px; white-space: nowrap }
 .heat { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px }
 .heat button { min-height: 56px; min-width: 0; border: 1px solid transparent; border-radius: 10px; padding: 6px 7px; text-align: left; color: var(--fg); font: 500 11px/1.3 inherit; font-family: inherit; cursor: pointer; white-space: nowrap }
 .heat button span { display: block; font-size: 12px; font-weight: 700 }
@@ -252,19 +253,22 @@ function plChart(rows, o) {
 }
 
 function story() {
-  const k = one("desk_kpis"), dec = rows("desk_decisions");
-  const today = num(k.today_pnl_rs), since = num(k.since_reset_pct);
+  const k = one("desk_kpis"), st = dayState();
+  const dec = rows("desk_decisions").filter((d) => d.trade_date === st.today);   // today's only (dayState)
+  const today = k.day === st.today ? num(k.today_pnl_rs) : null, since = num(k.since_reset_pct);
   const placed = dec.filter((d) => String(d.decision).includes("Placed"));
   const skipped = dec.filter((d) => String(d.decision).startsWith("–"));
   const savedBy = skipped.filter((d) => String(d.result).includes("−")).length;
-  const head = today == null ? "Today's desk" : today > 0 ? "A green day" : today < 0 ? "A red day" : "A flat day";
+  const head = today != null ? (today > 0 ? "A green day" : today < 0 ? "A red day" : "A flat day")
+    : st.closed ? "Markets closed today" : "Today's desk";
   const parts = [];
-  if (today != null) parts.push(`Today ${rs(today, true)}; ${pct(since, true)} since 18 Nov.`);
+  parts.push(today != null ? `Today ${rs(today, true)}; ${pct(since, true)} since 18 Nov.` : `${pct(since, true)} since 18 Nov.`);
+  if (!dec.length && !st.closed && today == null) parts.push("Today's trades appear after the close (evening update).");
   if (placed.length) parts.push(`${placed.length} trade${placed.length > 1 ? "s" : ""} placed: ${placed.map((d) => `${esc(d.symbol)} ${esc(d.result)}`).join(", ")}.`);
   if (skipped.length) parts.push(`${skipped.length} skipped${savedBy ? `, ${savedBy} of them would have lost` : ""}.`);
   const best = rows("intra_board").filter((r) => r.kind !== "Real" && num(r.vs_real_rs) != null).sort((a, b) => b.vs_real_rs - a.vs_real_rs)[0];
   if (best) parts.push(`Best shadow so far: ${esc(best.rule)} (${rs(best.vs_real_rs, true)} vs real).`);
-  return `<section class="card story"><span class="when">${esc(one("desk_status").as_of)}</span><h1>${head}</h1>${parts.map((p) => `<p>${p}</p>`).join("")}</section>`;
+  return `<section class="card story"><span class="when">${esc(st.today)}</span><h1>${head}</h1>${parts.map((p) => `<p>${p}</p>`).join("")}</section>`;
 }
 
 // Market-holiday card (24 Nov): only on an NSE holiday, from NSE's own list; × hides it for the day.
@@ -286,13 +290,14 @@ function desk() {
   const css = getComputedStyle(document.documentElement);
   const rg = ranged("desk", [{ ...s("Your portfolio", css.getPropertyValue("--accent").trim()), real: true }, s("NIFTYBEES (index)", css.getPropertyValue("--nb").trim(), true)]);
   const chart = rg.chips + changeLine(rg.series[0], rg.range) + lineChart(rg.series, "Portfolio vs NIFTYBEES");
-  const dec = rows("desk_decisions").map((d) => `<div class="row"><div class="n"><b>${esc(d.symbol)} · ${esc(d.setup)}</b><span>${esc(d.time)} · ${esc(d.decision)} · score ${esc(d.score)} · you ${d.you && d.you !== "–" ? esc(d.you) : "not rated"}</span></div><div class="r ${arrowCls(d.result) || (String(d.result).includes("−") ? "down" : String(d.result).includes("+") ? "up" : "muted")}">${esc(d.result)}</div></div>`).join("") || '<p class="muted">No proposals on the latest day.</p>';
+  const st = dayState(), isToday = k.day === st.today;
+  const dec = rows("desk_decisions").filter((d) => d.trade_date === st.today).map((d) => `<div class="row"><div class="n"><b>${esc(d.symbol)} · ${esc(d.setup)}</b><span>${esc(d.time)} · ${esc(d.decision)} · score ${esc(d.score)} · you ${d.you && d.you !== "–" ? esc(d.you) : "not rated"}</span></div><div class="r ${arrowCls(d.result) || (String(d.result).includes("−") ? "down" : String(d.result).includes("+") ? "up" : "muted")}">${esc(d.result)}</div></div>`).join("") || `<p class="muted">${st.closed ? "Market closed today: no proposals." : "Today's proposals appear after the close (evening update)."}</p>`;
   return holidayCard() + story() + `
   <section class="card"><span class="muted" style="font-size:13px">Whole dummy portfolio</span><div class="big">${rs(k.portfolio_rs)}</div>
     <div class="${cls(k.since_reset_pct)}" style="font-weight:600">${pct(k.since_reset_pct, true)} since 18 Nov</div>${chart}</section>
   <div class="tiles">
-    <div class="tile"><span class="l">Today's P&amp;L</span><span class="v ${cls(k.today_pnl_rs)}">${rs(k.today_pnl_rs, true)}</span></div>
-    <div class="tile"><span class="l">Trades, latest day</span><span class="v">${esc(k.trades_today)}</span></div>
+    <div class="tile"><span class="l">Today's P&amp;L</span><span class="v ${isToday ? cls(k.today_pnl_rs) : ""}">${isToday ? rs(k.today_pnl_rs, true) : "–"}</span></div>
+    <div class="tile"><span class="l">Trades today</span><span class="v">${k.trades_day === st.today ? esc(k.trades_today) : "–"}</span></div>
     <div class="tile"><span class="l">Proposals judged</span><span class="v">${esc(k.proposals)}</span></div>
     <div class="tile"><span class="l">Your calls right</span><span class="v">${k.calls_right_pct == null ? "–" : esc(k.calls_right_pct) + "%"}</span></div>
   </div>
@@ -302,18 +307,28 @@ function desk() {
   ${custom()}`;
 }
 
+// Today-only rule (24 Nov): the Desk and Markets' India figures show only today's (IST) values, from the evening
+// export until midnight; during market hours, on holidays and weekends they stay empty (a line says why).
+function dayState() {
+  const today = istToday(), m = rows("market_status")[0] || {};
+  const wd = new Date(today + "T00:00:00Z").getUTCDay();
+  const closed = (m.date === today && !!m.holiday) || wd === 0 || wd === 6;
+  return { today, closed, why: closed ? "Market closed today." : "Today's figures appear after the close (evening update)." };
+}
 function indiaNow() {
-  // Nifty 50 and India VIX from NSE's index file (lakehouse); Sensex from Yahoo. Falls back to Yahoo for Nifty.
-  const k = one("india_kpis"), nf = lastMove("nifty_5y"), sx = lastMove("sensex_5y");
+  // Nifty 50 and India VIX from NSE's index file (lakehouse); Sensex from Yahoo. Today's only (see dayState).
+  const k = one("india_kpis"), d = dayState();
+  if (k.trade_date !== d.today) return { pending: d.why };
+  const sx = lastMove("sensex_5y");
   return {
-    nifty: k.nifty_close != null ? { last: num(k.nifty_close), pct: num(k.nifty_pct) } : nf,
-    sensex: sx, vix: k.vix_close != null ? { last: num(k.vix_close), pct: num(k.vix_pct) } : null,
-    adv: k.advances, dec: k.declines, date: k.trade_date || (nf && nf.date),
+    nifty: k.nifty_close != null ? { last: num(k.nifty_close), pct: num(k.nifty_pct) } : null,
+    sensex: sx && sx.date === d.today ? sx : null, vix: k.vix_close != null ? { last: num(k.vix_close), pct: num(k.vix_pct) } : null,
+    adv: k.advances, dec: k.declines, date: k.trade_date,
   };
 }
 const lvl = (m, dp = 0) => (m && m.last != null ? m.last.toLocaleString("en-IN", { maximumFractionDigits: dp, minimumFractionDigits: dp }) : "–");
 function glance() {
-  const n = indiaNow(), sec = rows("sector_board").filter((r) => r.kind === "industry" && num(r.change_pct) != null);
+  const n = indiaNow(), sec = n.pending ? [] : rows("sector_board").filter((r) => r.kind === "industry" && num(r.change_pct) != null && r.trade_date === n.date);
   const best = sec[0], worst = sec.at(-1);
   const line = best && worst && best !== worst ? `<p class="note">Best sector ${esc(best.sector)} <span class="up">${pct(best.change_pct, true)}</span>`
     + ` · worst ${esc(worst.sector)} <span class="${cls(worst.change_pct)}">${pct(worst.change_pct, true)}</span> · more on Markets</p>` : "";
@@ -321,7 +336,7 @@ function glance() {
     + tile("Nifty 50", `<span class="${cls(n.nifty && n.nifty.pct)}">${pct(n.nifty && n.nifty.pct, true)}</span>`)
     + tile("Sensex", `<span class="${cls(n.sensex && n.sensex.pct)}">${pct(n.sensex && n.sensex.pct, true)}</span>`)
     + tile("India VIX", lvl(n.vix, 1), n.vix && n.vix.pct)
-    + `</div>${line}</section>`;
+    + `</div>${n.pending ? `<p class="note">${esc(n.pending)}</p>` : line}</section>`;
 }
 
 function seg(key) {
@@ -482,7 +497,13 @@ let OPEN_SECTOR = "";
 function markets() {
   const k = one("markets_kpis"), n = indiaNow();
   const read = rows("market_read").map((r) => `<div class="row"><div class="n"><b>${esc(r.topic)}</b><span style="color:var(--fg);font-size:14px">${esc(r.what_the_data_says)}</span></div></div>`).join("");
-  const gold = inrLast(inrSeries("gold_5y", 10)), silver = inrLast(inrSeries("silver_5y", 1000));
+  const ibja = rows("bullion_in"), b = (i) => ibja.find((r) => r.item === i);
+  const g24 = b("Gold 24K (999)"), g22 = b("Gold 22K (916)"), sil = b("Silver (999)");
+  const dm = (iso) => (iso ? `${Number(iso.slice(8, 10))} ${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(iso.slice(5, 7)) - 1]}` : "");
+  const bullion = g24 ? `<div class="tiles three bul">${tile("24K gold", rupees(num(g24.rate)), num(g24.change_pct))}`
+      + `${g22 ? tile("22K gold", rupees(num(g22.rate)), num(g22.change_pct)) : ""}${sil ? tile("Silver", rupees(num(sil.rate)), num(sil.change_pct)) : ""}</div>`
+      + `<p class="note">Gold per 10 g, silver per kg. IBJA rates, ${esc(dm(g24.as_of))} (${esc(g24.session)}); excl. 3% GST and making charges.</p>`
+    : '<p class="muted">Appears after the next update.</p>';
   const [label, get, fmt] = MKT_SERIES[MKT] || MKT_SERIES.nifty;
   const pts = get().filter((p) => p[1] != null);
   let chart = '<p class="muted">Appears after the next export.</p>';
@@ -499,12 +520,9 @@ function markets() {
     ${tile("Sensex", lvl(n.sensex), n.sensex && n.sensex.pct)}
     ${tile("India VIX", lvl(n.vix, 2), n.vix && n.vix.pct)}
     ${tile("Breadth (all NSE)", `<span style="font-size:17px">${n.adv == null ? "–" : Number(n.adv).toLocaleString("en-IN")}↑ ${n.dec == null ? "–" : Number(n.dec).toLocaleString("en-IN")}↓</span>`)}
-  </div></section>
+  </div>${n.pending ? `<p class="note">${esc(n.pending)}</p>` : ""}</section>
   ${fuel()}
-  <section class="card"><h3>Gold &amp; silver</h3><div class="tiles">
-    ${tile("Gold ₹/10 g", rupees(gold && gold.last), gold && gold.pct)}
-    ${tile("Silver ₹/kg", rupees(silver && silver.last), silver && silver.pct)}
-  </div><p class="note">International price × USD/INR (before Indian duty and GST)${gold ? `, ${esc(gold.date)}` : ""}.</p></section>
+  <section class="card"><h3>Gold &amp; silver</h3>${bullion}</section>
   ${sectors()}
   <section class="card"><h3>Today's read</h3>${read || '<p class="muted">No data yet.</p>'}</section>
   <section class="card"><h3>World</h3><div class="tiles four">
@@ -513,7 +531,9 @@ function markets() {
     ${tile("Nikkei", `<span class="${cls(k.nikkei_pct)}">${pct(k.nikkei_pct, true)}</span>`)}
     ${tile("Brent", k.brent_usd == null ? "–" : "$" + esc(k.brent_usd))}
   </div></section>
-  <section class="card"><h3>Charts</h3>${switcher}${chart}<p class="note">Daily closes from Yahoo Finance (weekly before the last five years).</p></section>`;
+  <section class="card"><h3>Charts</h3>${switcher}${chart}<p class="note">${MKT === "gold" || MKT === "silver"
+    ? "Gold and silver history: the world price in dollars converted at that day's USD/INR, without Indian import duty and GST, so it reads below the IBJA rates above. "
+    : ""}Daily closes from Yahoo Finance (weekly before the last five years).</p></section>`;
 }
 
 function series5y(name, label) {
@@ -551,7 +571,6 @@ function inrSeries(name, grams) {
   });
   return out;
 }
-const inrLast = (pts) => (pts.length < 2 ? null : { date: pts.at(-1)[0], last: pts.at(-1)[1], pct: (pts.at(-1)[1] / pts.at(-2)[1] - 1) * 100 });
 const rupees = (v) => (v == null ? "–" : "₹" + Math.round(v).toLocaleString("en-IN"));
 const tile = (label, value, move, extra) => `<div class="tile"><span class="l">${esc(label)}</span><span class="v">${value}</span>`
   + (move == null ? "" : `<span class="s ${cls(move)}">${pct(move, true)}</span>`) + (extra ? `<span class="l">${extra}</span>` : "") + "</div>";

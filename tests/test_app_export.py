@@ -58,8 +58,8 @@ class Export(unittest.TestCase):
         self.assertEqual(put["Key"], "abc123/data/desk.json")
         body = json.loads(put["Body"])
         self.assertEqual(set(body["datasets"]), set(QUERIES) | {"fuel_mumbai", "nse_holidays", "market_status",
-                                                         "morning", "pool_auto"})
-        self.assertEqual(body["failed"], ["nse_holidays", "fuel_mumbai"])
+                                                         "morning", "pool_auto", "bullion_in"})
+        self.assertEqual(body["failed"], ["nse_holidays", "bullion_in", "fuel_mumbai"])
         fuel = body["datasets"]["fuel_mumbai"]["rows"]
         self.assertEqual([r["item"] for r in fuel], ["Petrol", "Diesel", "CNG"])
 
@@ -174,6 +174,49 @@ class YahooSeries(unittest.TestCase):
         morning2, auto2 = app_export.trader_files(FakeS3({}), "t", today=dt.date(2026, 11, 24))
         self.assertEqual(morning2["rows"], [])
         self.assertEqual({r["pool"]: r["on"] for r in auto2["rows"]}, {"swing": True, "long_term": False})
+
+    IBJA = ("<div>Gold rates per 10gm &amp; Silver rate per 1kg</div><div id='tab-am'><table>"
+            "<tr><td>23/11/2026</td><td>125123</td><td>124622</td><td>114613</td><td>93842</td><td>73197</td>"
+            "<td>152941</td><td>48525</td></tr>"
+            "<tr><td>20/11/2026</td><td>123584</td><td>123089</td><td>113203</td><td>92688</td><td>72297</td>"
+            "<td>150650</td><td>48880</td></tr></table></div><div id='tab-pm'><table>"
+            "<tr><td>23/11/2026</td><td>124945</td><td>124445</td><td>114450</td><td>93709</td><td>73093</td>"
+            "<td>152625</td><td>46900</td></tr>"
+            "<tr><td>20/11/2026</td><td>123893</td><td>123397</td><td>113486</td><td>92920</td><td>72477</td>"
+            "<td>152528</td><td>48730</td></tr></table></div>")
+
+    def test_bullion_takes_the_latest_pm_rates_with_the_change(self):
+        data, failed = app_export.bullion_rates({}, fetch=lambda: self.IBJA)
+        self.assertFalse(failed)
+        rows = {r["item"]: r for r in data["rows"]}
+        g = rows["Gold 24K (999)"]
+        self.assertEqual((g["rate"], g["as_of"], g["session"], g["unit"]), (124945.0, "2026-11-23", "PM", "Rs / 10 g"))
+        self.assertEqual(g["change_pct"], round((124945 / 123893 - 1) * 100, 2))
+        self.assertEqual(rows["Gold 22K (916)"]["rate"], 114450.0)
+        self.assertEqual((rows["Silver (999)"]["rate"], rows["Silver (999)"]["unit"]), (152625.0, "Rs / kg"))
+
+    def test_bullion_only_am_and_failures_keep_the_last(self):
+        am_only = self.IBJA.split("<div id='tab-pm'>")[0]
+        data, _ = app_export.bullion_rates({}, fetch=lambda: am_only)
+        self.assertEqual((data["rows"][0]["rate"], data["rows"][0]["session"]), (125123.0, "AM"))
+        prev = {"datasets": {"bullion_in": data}}
+        kept, failed = app_export.bullion_rates(prev, fetch=lambda: "<html>blocked</html>")
+        self.assertTrue(failed)
+        self.assertEqual(kept, data)
+
+    def test_empty_sector_tables_keep_the_last_trading_day(self):
+        prev = {"datasets": {"sector_board": {"fields": [], "rows": [{"sector": "IT"}]}}}
+        s3 = FakeS3({"config/queries.json": json.dumps({"sector_board": {"sql": "x"}}).encode(),
+                     "abc/data/desk.json": json.dumps(prev).encode()})
+        with mock.patch.dict(os.environ, {"APP_BUCKET": "b", "APP_PREFIX": "abc"}), \
+             mock.patch.object(app_export, "_s3", return_value=s3), \
+             mock.patch.object(app_export.databricks_sql, "query", return_value=[]), \
+             mock.patch.object(app_export, "yahoo_series", return_value=({}, [])), \
+             mock.patch.object(app_export, "http_get", side_effect=RuntimeError("offline")), \
+             mock.patch.object(app_export.nse_holidays, "http_get", side_effect=RuntimeError("offline")):
+            app_export.handler({}, None)
+        body = json.loads(s3.puts[0]["Body"])
+        self.assertEqual(body["datasets"]["sector_board"]["rows"], [{"sector": "IT"}])
 
 
 if __name__ == "__main__":
