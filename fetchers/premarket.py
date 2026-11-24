@@ -23,6 +23,7 @@ Event: {} for a normal run, {"dry_run": true} to return the messages without sen
 """
 
 import datetime as dt
+import json
 import os
 import re
 from zoneinfo import ZoneInfo
@@ -31,7 +32,7 @@ import databricks_sql
 import snapshot
 import telegram
 import yahoo
-from common import log
+from common import http_get, log
 from telegram import esc
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -120,6 +121,32 @@ def fetch_live(today):
 # ---------------------------------------------------------------------------
 # Calendar and freshness
 # ---------------------------------------------------------------------------
+NSE_HOLIDAYS_URL = "https://www.nseindia.com/api/holiday-master?type=trading"
+NSE_HEADERS = {"User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                              "Chrome/124.0 Safari/537.36"),
+               "Accept": "application/json, */*", "Accept-Language": "en-US,en;q=0.9",
+               "Referer": "https://www.nseindia.com/resources/exchange-communication-holidays"}
+
+
+def nse_holiday(today, fetch=None):
+    """The NSE trading-holiday name for today, from NSE's own list (cash market), or None. From 24 Nov 2026 a
+    holiday brief says so at the top and carries no hand-buy buttons. If NSE can't be read, today counts as a
+    trading day (as before)."""
+    try:
+        payload = (fetch or (lambda: json.loads(http_get(NSE_HOLIDAYS_URL, NSE_HEADERS))))()
+    except Exception as err:  # noqa: BLE001
+        log.warning("NSE holiday list unavailable: %s", err)
+        return None
+    for row in (payload or {}).get("CM", []):
+        try:
+            day = dt.datetime.strptime(row["tradingDate"], "%d-%b-%Y").date()
+        except (KeyError, ValueError):
+            continue
+        if day == today:
+            return (row.get("description") or "NSE holiday").rstrip("*").strip()
+    return None
+
+
 def previous_weekday(d):
     d -= dt.timedelta(days=1)
     while d.weekday() >= 5:
@@ -415,7 +442,7 @@ def build_scanner(data, expected, fresh, failed=()):
             continue
         data_ = f"sw:{r['symbol']}:{r['stop']:.2f}:{r['target2']:.2f}"
         if len(data_.encode()) <= 64:
-            buttons.append([(f"Swing buy {r['symbol']} (asks first)", data_)])
+            buttons.append([(f"Hand buy {r['symbol']} (outside auto rules, asks first)", data_)])
     return "\n".join(lines), buttons
 
 
@@ -457,6 +484,11 @@ def handler(event, context):
     fresh = freshness(data, expected)
     brief = build_brief(data, live, expected, fresh, today, failed)
     scan, buttons = build_scanner(data, expected, fresh, failed)
+    holiday = nse_holiday(today)
+    if holiday:
+        closed = (f"🛑 <b>NSE closed today ({esc(holiday)})</b>: nothing trades; the picks and levels are for the next "
+                  "session.\n\n")
+        brief, scan, buttons = closed + brief, closed + scan, []
     if event.get("dry_run"):
         log.info("Dry run; messages not sent:\n%s\n\n%s", brief, scan)
         return {"sent": False, "failed_queries": failed, "message": brief, "scanner": scan, "buttons": buttons,
@@ -468,4 +500,4 @@ def handler(event, context):
         telegram.send(part if len(parts) == 1 else f"{part}\n<i>({i + 1}/{len(parts)})</i>",
                       buttons=buttons if last else None)
     return {"sent": True, "failed_queries": failed, "chars": len(brief) + len(scan),
-            "scanner_parts": len(parts), "swing_buttons": len(buttons), "snapshot": snap}
+            "scanner_parts": len(parts), "swing_buttons": len(buttons), "snapshot": snap, "holiday": holiday}
