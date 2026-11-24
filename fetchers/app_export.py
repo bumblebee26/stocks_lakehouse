@@ -9,7 +9,9 @@ blanks the app. The app (app/index.html) is served by CloudFront from the same s
 Event: {} normally; {"dry_run": true} returns the payload without writing it.
 
 From 24 Nov it also adds Yahoo's full daily history (weekly before the last five years) for the app's charts that have no lakehouse table:
-USD/INR (Markets tab) and Accenture, NYSE: ACN (Desk tab). A failed fetch keeps the previous series.
+USD/INR, Nifty 50, Sensex, gold and silver (Markets tab) and Accenture, NYSE: ACN (Desk tab). A failed fetch keeps the
+previous series. It also reads two small files from paper-trader's state bucket (read-only): the latest opening read
+(`morning`, Intraday tab) and which delivery pools are in auto mode (`pool_auto`, Swing and Long tabs).
 
 From 24 Nov the Markets tab also shows Mumbai petrol, diesel and CNG prices (dataset fuel_mumbai), read on every
 export from one source, CarDekho's Mumbai fuel page (all three on one page; prices revise at 6 a.m.). A new price is
@@ -33,7 +35,13 @@ IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
 QUERIES_KEY = "config/queries.json"
 WORKERS = 4
 # app dataset -> (Yahoo symbol, label); five years of daily closes as rows {date, close}
-YAHOO_SERIES = {"usdinr_5y": ("INR=X", "USD/INR"), "acn_5y": ("ACN", "Accenture (NYSE: ACN, USD)")}
+YAHOO_SERIES = {"usdinr_5y": ("INR=X", "USD/INR"), "acn_5y": ("ACN", "Accenture (NYSE: ACN, USD)"),
+                # Markets slide (24 Nov): the switchable chart and the India / gold & silver tiles. Gold and silver
+                # are international prices in USD per troy ounce; the app turns them into Rs per 10 g / per kg
+                # with USD/INR (before Indian duty and GST).
+                "nifty_5y": ("^NSEI", "Nifty 50"), "sensex_5y": ("^BSESN", "Sensex"),
+                "gold_5y": ("GC=F", "Gold (USD/oz)"), "silver_5y": ("SI=F", "Silver (USD/oz)")}
+MORNING_DAYS = 6   # how far back to look for the trader's latest opening read
 FUEL_URL = "https://www.cardekho.com/fuel-price-in-mumbai-city"
 FUEL_SOURCE = "CarDekho"
 FUEL_FIELDS = ["item", "rate", "unit", "as_of", "source"]
@@ -166,6 +174,27 @@ def market_status(previous, fetch=None, today=None):
                        "message": st["message"], "next_open": st["next_open"]}]}, failed)
 
 
+def trader_files(s3, bucket, today=None):
+    """From paper-trader's state bucket (read-only): the latest opening read (opening/<day>.json, written at 09:25)
+    as dataset `morning`, and which delivery pools are in auto mode (state/pool_auto.json) as `pool_auto`."""
+    today = today or dt.datetime.now(IST).date()
+    morning = {"fields": ["date", "read", "top"], "rows": []}
+    if bucket:
+        for back in range(MORNING_DAYS):
+            day = (today - dt.timedelta(days=back)).isoformat()
+            doc = load_previous(s3, bucket, f"opening/{day}.json")
+            if doc:
+                top = [{"symbol": r.get("symbol"), "score": r.get("score"), "rvol": r.get("rvol"),
+                        "gap_pct": r.get("gap_pct"), "first10_pct": r.get("first10_pct"),
+                        "preopen_gap": (r.get("preopen") or {}).get("gap_pct"),
+                        "buy_sell": (r.get("preopen") or {}).get("buy_sell")} for r in (doc.get("stocks") or [])[:5]]
+                morning["rows"] = [{"date": day, "read": doc.get("read") or {}, "top": top}]
+                break
+    auto = (load_previous(s3, bucket, "state/pool_auto.json") if bucket else {}) or {}
+    pools = {"swing": True, "long_term": False, **{k: bool(v) for k, v in auto.items() if k in ("swing", "long_term")}}
+    return morning, {"fields": ["pool", "on"], "rows": [{"pool": k, "on": v} for k, v in pools.items()]}
+
+
 def handler(event, context):
     event = event or {}
     bucket, prefix = os.environ["APP_BUCKET"], os.environ["APP_PREFIX"]
@@ -178,6 +207,7 @@ def handler(event, context):
     datasets.update(series)
     datasets["nse_holidays"], datasets["market_status"], hol_failed = market_status(previous)
     failed += ["nse_holidays"] if hol_failed else []
+    datasets["morning"], datasets["pool_auto"] = trader_files(s3, os.environ.get("TRADER_BUCKET"))
     datasets["fuel_mumbai"], fuel_failed = fuel_rates(previous)
     failed += ["fuel_mumbai"] if fuel_failed else []
     failed += series_failed

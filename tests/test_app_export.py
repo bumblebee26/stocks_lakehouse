@@ -1,5 +1,6 @@
 """Tests for the mobile app export (fetchers/app_export.py). No network/AWS."""
 
+import datetime as dt
 import io
 import json
 import os
@@ -56,7 +57,8 @@ class Export(unittest.TestCase):
         put = s3.puts[0]
         self.assertEqual(put["Key"], "abc123/data/desk.json")
         body = json.loads(put["Body"])
-        self.assertEqual(set(body["datasets"]), set(QUERIES) | {"fuel_mumbai", "nse_holidays", "market_status"})
+        self.assertEqual(set(body["datasets"]), set(QUERIES) | {"fuel_mumbai", "nse_holidays", "market_status",
+                                                         "morning", "pool_auto"})
         self.assertEqual(body["failed"], ["nse_holidays", "fuel_mumbai"])
         fuel = body["datasets"]["fuel_mumbai"]["rows"]
         self.assertEqual([r["item"] for r in fuel], ["Petrol", "Diesel", "CNG"])
@@ -153,9 +155,25 @@ class YahooSeries(unittest.TestCase):
             raise RuntimeError("yahoo down")
         prev = {"datasets": {"usdinr_5y": out["usdinr_5y"]}}
         out2, failed2 = app_export.yahoo_series(prev, fetch=boom)
-        self.assertEqual(sorted(failed2), ["acn_5y", "usdinr_5y"])
+        self.assertEqual(sorted(failed2), sorted(app_export.YAHOO_SERIES))
         self.assertEqual(out2["usdinr_5y"]["rows"], out["usdinr_5y"]["rows"])
         self.assertEqual(out2["acn_5y"]["rows"], [])
+
+    def test_trader_files_latest_opening_read_and_auto_mode(self):
+        read = {"read": {"nifty_gap_pct": 0.4}, "stocks": [
+            {"symbol": f"S{i}", "score": 10 - i, "rvol": 2.0, "preopen": {"gap_pct": 1.0, "buy_sell": 1.5}}
+            for i in range(7)]}
+        s3 = FakeS3({"opening/2026-11-23.json": json.dumps(read).encode(),
+                     "state/pool_auto.json": json.dumps({"long_term": True}).encode()})
+        morning, auto = app_export.trader_files(s3, "t", today=dt.date(2026, 11, 24))
+        row = morning["rows"][0]
+        self.assertEqual(row["date"], "2026-11-23")
+        self.assertEqual([t["symbol"] for t in row["top"]], ["S0", "S1", "S2", "S3", "S4"])
+        self.assertEqual(row["top"][0]["preopen_gap"], 1.0)
+        self.assertEqual({r["pool"]: r["on"] for r in auto["rows"]}, {"swing": True, "long_term": True})
+        morning2, auto2 = app_export.trader_files(FakeS3({}), "t", today=dt.date(2026, 11, 24))
+        self.assertEqual(morning2["rows"], [])
+        self.assertEqual({r["pool"]: r["on"] for r in auto2["rows"]}, {"swing": True, "long_term": False})
 
 
 if __name__ == "__main__":
