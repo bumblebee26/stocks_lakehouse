@@ -204,68 +204,12 @@ resource "aws_scheduler_schedule" "news_live" {
   }
 }
 
-# One-off backfill (24 Nov 2026, approved by the owner): NSE's older bhavcopy format from 2019 to the day before
-# UDiFF began (8 Jul 2024), for multi-year swing and long-term backtests. First run 23 Nov 22:00 stopped near late
-# 2020: the chain of self-invocations hit AWS's recursive-loop limit (~16 hops). Resumed from 2 Nov 2020 at 01:45 IST
-# on 24 Nov with a 15-minute timeout, stopped again by the same protection at 02:17; restarted at 02:48 with
-# loop detection off for this function (below); that run stopped at 8 Aug 2022 on a malformed delivery file
-# (now skipped), so it resumes from 8 Aug 2022 at 08:30 IST on 24 Nov. The Lambda continues itself until the range
-# is done (~2 hours, 2 s between files). To run it again, change the time and apply.
-resource "aws_scheduler_schedule" "nse_history_backfill" {
-  name        = "${var.name_prefix}-fetch-nse-history-backfill"
-  description = "One-off: NSE bhavcopy 2022-08-08 to 2024-07-05 (older format, converted to UDiFF columns); resumes after the 8 Aug 2022 stop."
-  state       = var.schedules_enabled ? "ENABLED" : "DISABLED"
-
-  schedule_expression          = "at(2026-11-24T08:30:00)"
-  schedule_expression_timezone = "Asia/Kolkata"
-
-  flexible_time_window {
-    mode = "OFF"
-  }
-
-  target {
-    arn      = aws_lambda_function.fetcher["nse"].arn
-    role_arn = aws_iam_role.scheduler.arn
-    input    = jsonencode({ start = "2022-08-08", end = "2024-07-05" })
-
-    retry_policy {
-      maximum_retry_attempts       = 0
-      maximum_event_age_in_seconds = 3600
-    }
-  }
-}
-
-# One-off (24 Nov 2026): five years of FRED history (all series, one file) so the dashboard can chart USD/INR over
-# five years like the phone app. Silver keeps the newest file's value per series and date, so the overlap with the
-# daily window is harmless. To run it again, change the time and apply.
-resource "aws_scheduler_schedule" "fred_history_backfill" {
-  name        = "${var.name_prefix}-fetch-fred-history-backfill"
-  description = "One-off: FRED 2021-11-01 to 2026-11-24 (USD/INR five years for the dashboard)."
-  state       = var.schedules_enabled && var.fred_enabled ? "ENABLED" : "DISABLED"
-
-  schedule_expression          = "at(2026-11-24T04:15:00)"
-  schedule_expression_timezone = "Asia/Kolkata"
-
-  flexible_time_window {
-    mode = "OFF"
-  }
-
-  target {
-    arn      = aws_lambda_function.fetcher["fred"].arn
-    role_arn = aws_iam_role.scheduler.arn
-    input    = jsonencode({ start = "2021-11-01", end = "2026-11-24" })
-
-    retry_policy {
-      maximum_retry_attempts       = 1
-      maximum_event_age_in_seconds = 3600
-    }
-  }
-}
-
 # The NSE fetcher continues long backfills by invoking itself (common.run_dates). AWS stopped that chain as a
 # "recursive loop" on 23-24 Nov 2026 (Health event AWS_LAMBDA_RUNAWAY_TERMINATION_NOTIFICATION), so at the owner's
 # decision loop detection is off for this one function. The chain is bounded: each hop passes only the remaining
 # dates of a fixed range and stops at its end.
+# The 2019-2024 history backfill that needed this ran on 24 Nov 2026 (its one-off schedule is in git history);
+# another backfill = invoke the Lambda with {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}.
 resource "aws_lambda_function_recursion_config" "nse" {
   function_name  = aws_lambda_function.fetcher["nse"].function_name
   recursive_loop = "Allow"

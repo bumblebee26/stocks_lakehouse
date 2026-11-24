@@ -384,24 +384,3 @@ resource "aws_lambda_permission" "app_web_invoke" {
   principal                = "*"
   invoked_via_function_url = true
 }
-
-# One-off export right after a deploy that changes the app's data (24 Nov: new charts), so the phone doesn't wait for
-# the next scheduled run. Change the time to run it again.
-resource "aws_scheduler_schedule" "app_export_once" {
-  name        = "${local.app_function_name}-once"
-  description = "One-off app data export after the 24 Nov daily-history fix."
-  state       = "ENABLED"
-
-  schedule_expression          = "at(2026-11-24T09:55:00)"
-  schedule_expression_timezone = "Asia/Kolkata"
-
-  flexible_time_window {
-    mode = "OFF"
-  }
-
-  target {
-    arn      = aws_lambda_function.app_export.arn
-    role_arn = aws_iam_role.scheduler.arn
-    input    = jsonencode({})
-  }
-}
