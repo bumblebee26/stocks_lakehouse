@@ -122,6 +122,25 @@ class Export(unittest.TestCase):
 
 
 class YahooSeries(unittest.TestCase):
+    def test_whole_history_is_asked_for_by_dates_so_it_stays_daily(self):
+        import yahoo
+        seen = []
+        res = {"chart": {"result": [{"meta": {}, "timestamp": [1795392000],
+                                      "indicators": {"quote": [{"open": [1], "high": [1], "low": [1], "close": [1]}]}}]}}
+
+        def fake(method, url, **kw):
+            seen.append(url)
+            return json.dumps(res).encode()
+        with mock.patch.object(yahoo, "http_request", side_effect=fake):
+            yahoo.daily("INR=X", "all")
+            yahoo.daily("^NSEI", "5y")
+        self.assertIn("period1=0&period2=", seen[0])
+        self.assertNotIn("range=max", seen[0])
+        self.assertIn("%5ENSEI?range=5y&interval=1d", seen[1])
+        calls = []
+        app_export.yahoo_series({}, fetch=lambda sym, rng: (calls.append(rng), ([], {}))[1])
+        self.assertEqual(set(calls), {"all"})
+
     def test_series_and_failure_keeps_previous(self):
         bars = [{"date": "2021-11-24", "close": 74.5}, {"date": "2026-11-23", "close": 93.47}]
         ok = lambda sym, rng: (bars, {})  # noqa: E731

@@ -389,10 +389,10 @@ resource "aws_lambda_permission" "app_web_invoke" {
 # the next scheduled run. Change the time to run it again.
 resource "aws_scheduler_schedule" "app_export_once" {
   name        = "${local.app_function_name}-once"
-  description = "One-off app data export after the 24 Nov holiday-card update."
+  description = "One-off app data export after the 24 Nov daily-history fix."
   state       = "ENABLED"
 
-  schedule_expression          = "at(2026-11-24T09:15:00)"
+  schedule_expression          = "at(2026-11-24T09:55:00)"
   schedule_expression_timezone = "Asia/Kolkata"
 
   flexible_time_window {
