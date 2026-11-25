@@ -446,7 +446,8 @@ locals {
 
     council_test = <<-SQL
       SELECT method, n AS judged, rupees AS rupees_on_yes_trades, hit_pct, brier, disagree_n, council_rs, reviewer_rs, as_of
-      FROM read_files('/Volumes/stocks/bronze/trader_morning/council.jsonl', format => 'json')
+      FROM read_files('/Volumes/stocks/bronze/trader_morning/council.jsonl', format => 'json',
+                      schemaHints => 'method STRING, n INT, rupees DOUBLE, hit_pct DOUBLE, brier DOUBLE, disagree_n INT, council_rs DOUBLE, reviewer_rs DOUBLE, as_of STRING')
     SQL
 
     market_morning = <<-SQL
@@ -881,12 +882,12 @@ locals {
   pool_board_sql = <<-SQL
     WITH s AS (SELECT * FROM (${local.strategy_scoreboard_sql}) WHERE grp = '__GRP__')
     SELECT strategy, initcap(kind) AS kind, start_date AS since, value_rs, pnl_rs, return_pct, trades,
-           ${replace(local.signed_pts_sql, "__V__", "vs_niftybees_pct")} AS vs_niftybees
+           ${replace(local.signed_pts_sql, "__V__", "vs_niftybees_pct")} AS vs_niftybees, niftybees_pct
     FROM s
     UNION ALL
     SELECT 'NIFTYBEES (same days as the real pool)' AS strategy, 'NIFTYBEES' AS kind, start_date AS since,
            CAST(NULL AS DOUBLE) AS value_rs, CAST(NULL AS DOUBLE) AS pnl_rs, niftybees_pct AS return_pct,
-           CAST(NULL AS INT) AS trades, '–' AS vs_niftybees
+           CAST(NULL AS INT) AS trades, '–' AS vs_niftybees, niftybees_pct
     FROM s WHERE kind = 'real'
     ORDER BY return_pct DESC
   SQL
@@ -907,7 +908,9 @@ locals {
            max_by(CASE WHEN kind = 'shadow' THEN value_rs END, CASE WHEN kind = 'shadow' THEN return_pct END) AS best_shadow_value_rs,
            max_by(CASE WHEN kind = 'shadow' THEN pnl_rs END, CASE WHEN kind = 'shadow' THEN return_pct END) AS best_shadow_pnl_rs,
            max(CASE WHEN kind = 'real' THEN niftybees_pct END)   AS niftybees_pct,
-           CAST(count_if(kind = 'shadow' AND vs_niftybees_pct > 0) AS INT) AS shadows_beating
+           -- ahead by at least 0.05 pts (shows as +0.1), each over its own dates; a 0.0 tie doesn't count
+           CAST(count_if(kind = 'shadow' AND vs_niftybees_pct >= 0.05) AS INT) AS shadows_beating,
+           CAST(count_if(kind = 'shadow') AS INT) AS shadows_total
     FROM s
     )
   SQL
@@ -965,10 +968,10 @@ locals {
       backtest_latest      = ["rule", "trades", "total_r", "vs_current_r", "avg_r", "win_pct", "days_up_pct", "worst_day_r", "days", "run_date"]
       backtest_trend       = ["run_date", "rule", "vs_current_r"]
       shadow_trades_recent = ["trade_date", "symbol", "side", "setup", "test", "rule", "actual_rs", "would_have_made_rs", "vs_actual_rs"]
-      swing_kpis           = ["real_value_rs", "real_pnl_rs", "real_return_pct", "real_trades", "shadow_trades", "best_shadow", "best_shadow_value_rs", "best_shadow_pnl_rs", "best_shadow_pct", "niftybees_pct", "shadows_beating"]
-      longterm_kpis        = ["real_value_rs", "real_pnl_rs", "real_return_pct", "real_trades", "shadow_trades", "best_shadow", "best_shadow_value_rs", "best_shadow_pnl_rs", "best_shadow_pct", "niftybees_pct", "shadows_beating"]
-      swing_scoreboard     = ["strategy", "kind", "since", "value_rs", "pnl_rs", "return_pct", "trades", "vs_niftybees"]
-      longterm_scoreboard  = ["strategy", "kind", "since", "value_rs", "pnl_rs", "return_pct", "trades", "vs_niftybees"]
+      swing_kpis           = ["real_value_rs", "real_pnl_rs", "real_return_pct", "real_trades", "shadow_trades", "best_shadow", "best_shadow_value_rs", "best_shadow_pnl_rs", "best_shadow_pct", "niftybees_pct", "shadows_beating", "shadows_total"]
+      longterm_kpis        = ["real_value_rs", "real_pnl_rs", "real_return_pct", "real_trades", "shadow_trades", "best_shadow", "best_shadow_value_rs", "best_shadow_pnl_rs", "best_shadow_pct", "niftybees_pct", "shadows_beating", "shadows_total"]
+      swing_scoreboard     = ["strategy", "kind", "since", "value_rs", "pnl_rs", "return_pct", "trades", "vs_niftybees", "niftybees_pct"]
+      longterm_scoreboard  = ["strategy", "kind", "since", "value_rs", "pnl_rs", "return_pct", "trades", "vs_niftybees", "niftybees_pct"]
       swing_best           = ["line", "strategy", "value_rs", "pnl_rs", "return_pct"]
       longterm_best        = ["line", "strategy", "value_rs", "pnl_rs", "return_pct"]
       swing_trades         = ["trade_date", "strategy", "kind", "side", "symbol", "qty", "price", "value_rs", "pnl_rs", "reason"]
@@ -1148,7 +1151,7 @@ locals {
       desk_setups       = { ds = "desk_setups", title = "Track record by setup (last 30 days)", desc = "Every proposal, taken or skipped, judged on what really happened. Under 10 is too few to judge.", pos = [7, 8, 5, 7] }
       market_morning    = { ds = "market_morning", title = "Market this morning", desc = "India VIX and the trader's market bias, NSE's pre-open gaps (09:00-09:08 auction) and the 09:25 opening read; updated with every app refresh. Information only.", pos = [0, 15, 12, 6] }
       desk_pools        = { ds = "desk_pools", title = "Each pool: value and P&L since 18 Nov", desc = "Real pools only (dummy money). P&L = value now minus starting cash, after costs.", pos = [0, 21, 12, 3] }
-      desk_decisions    = { ds = "desk_decisions", title = "Today's decisions", desc = "Score gate, the independent reviewer, what happened, your rating and the result (R = one unit of risk).", pos = [0, 24, 7, 7] }
+      desk_decisions    = { ds = "desk_decisions", title = "Today's decisions (intraday)", desc = "Score gate, the independent reviewer, what happened, your rating and the result (R = one unit of risk).", pos = [0, 24, 7, 7] }
       desk_board        = { ds = "desk_board", title = "Real and shadow pools", desc = "Return since each started, and vs NIFTYBEES over the same days.", pos = [7, 24, 5, 7] }
       holdings          = { ds = "holdings", title = "What the real pools hold", desc = "Largest first. Weight = share of the whole portfolio.", pos = [0, 32, 6, 6] }
       summary_portfolio = { ds = "summary_portfolio", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 38, 12, 4] }

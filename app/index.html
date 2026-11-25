@@ -351,7 +351,7 @@ function desk() {
   ${glance()}
   ${marketMorning()}
   <section class="card"><h3>Each pool (since 18 Nov)</h3>${rows("desk_pools").map((r) => `<div class="row"><div class="n"><b>${esc(r.pool)}</b><span>${rs(r.value_rs)} now</span></div><div class="r ${cls(r.pnl_rs)}">${rs(r.pnl_rs, true)}<br><span style="font-weight:500;font-size:12px">${pct(r.return_pct, true)}</span></div></div>`).join("") || '<p class="muted">No data yet.</p>'}</section>
-  <section class="card"><h3>Today's decisions</h3>${dec}</section>
+  <section class="card"><h3>Today's decisions (intraday)</h3>${dec}</section>
 `;
 }
 
@@ -518,11 +518,18 @@ function ltTests() {
 
 function pool(title, ds, key) {
   const k = one(ds + "_kpis");
-  const starred = (r) => k.best_shadow != null && r.strategy === k.best_shadow;
+  // best_shadow comes without the "Swing shadow: " prefix and capitalised; match it to the full name
+  const starred = (r) => k.best_shadow != null && r.kind === "Shadow" && String(r.strategy).toLowerCase().endsWith(String(k.best_shadow).toLowerCase());
   const sb = rows(ds + "_scoreboard").filter((r) => keep(key, r.kind)).sort((a, b) => starred(b) - starred(a));
-  const board = sb.map((r) => `<div class="row"><div class="n"><b>${starred(r) ? `<span class="up" aria-label="best shadow">${ICON.star}</span> ` : ""}${esc(r.strategy)}</b><span>${esc(r.kind)} · since ${esc(r.since)}${r.value_rs == null ? "" : " · " + rs(r.value_rs) + " (" + rs(r.pnl_rs, true) + ")"}${r.trades == null ? "" : " · " + esc(r.trades) + " trades"}</span></div><div class="r"><span class="${cls(r.return_pct)}">${pct(r.return_pct, true)}</span><br><span class="${arrowCls(r.vs_niftybees)}" style="font-weight:500;font-size:12px">${esc(r.vs_niftybees)}</span></div></div>`).join("");
-  const trades = rows(ds + "_trades").filter((r) => keep(key, r.kind)).slice(0, 15).map((r) => `<div class="row"><div class="n"><b>${esc(r.side)} ${esc(r.symbol)} · ${esc(r.qty)} @ ${esc(r.price)}</b><span>${esc(r.trade_date)} · ${esc(r.strategy)}${r.reason ? " · " + esc(r.reason) : ""}</span></div><div class="r ${cls(r.pnl_rs)}">${r.pnl_rs == null ? rs(r.value_rs) : rs(r.pnl_rs, true)}</div></div>`).join("");
-  const bestNote = k.best_shadow == null ? "" : `<p class="note">${ICON.star} Best shadow so far; ${esc(k.shadows_beating)} shadow(s) ahead of NIFTYBEES (${pct(k.niftybees_pct, true)}).</p>`;
+  const board = sb.map((r) => `<div class="row"><div class="n"><b>${starred(r) ? `<span class="up" aria-label="best shadow">${ICON.star}</span> ` : ""}${esc(r.strategy)}</b><span>${esc(r.kind)} · since ${esc(r.since)}${r.value_rs == null ? "" : " · " + rs(r.value_rs) + " (" + rs(r.pnl_rs, true) + ")"}${r.trades == null ? "" : " · " + esc(r.trades) + " trades"}${r.kind === "NIFTYBEES" || r.niftybees_pct == null ? "" : ` · NIFTYBEES same days ${pct(r.niftybees_pct, true)}`}</span></div><div class="r"><span class="${cls(r.return_pct)}">${pct(r.return_pct, true)}</span><br><span class="${arrowCls(r.vs_niftybees)}" style="font-weight:500;font-size:12px">${esc(r.vs_niftybees)}</span></div></div>`).join("");
+  // Trades grouped: the real pool first, then each shadow, newest first within each (10 per group)
+  const tradeRow = (r) => `<div class="row"><div class="n"><b>${esc(r.side)} ${esc(r.symbol)} · ${esc(r.qty)} @ ${esc(r.price)}</b><span>${esc(r.trade_date)}${r.reason ? " · " + esc(r.reason) : ""}</span></div><div class="r ${cls(r.pnl_rs)}">${r.pnl_rs == null ? rs(r.value_rs) : rs(r.pnl_rs, true)}</div></div>`;
+  const groups = {};
+  rows(ds + "_trades").filter((r) => keep(key, r.kind)).forEach((r) => { (groups[r.strategy] = groups[r.strategy] || []).push(r); });
+  const order = Object.keys(groups).sort((a, b) => (groups[a][0].kind === "Real" ? -1 : groups[b][0].kind === "Real" ? 1 : a.localeCompare(b)));
+  const trades = order.map((g) => `<div class="sub">${groups[g][0].kind === "Real" ? esc(g) : "Shadow: " + esc(String(g).replace(/^(Swing|Long-term) shadow: /, ""))} · ${groups[g].length} trade${groups[g].length === 1 ? "" : "s"}</div>`
+    + groups[g].slice(0, 10).map(tradeRow).join("")).join("");
+  const bestNote = k.best_shadow == null ? "" : `<p class="note">${ICON.star} Best shadow so far. ${esc(k.shadows_beating)} of ${esc(k.shadows_total ?? "?")} shadows ahead of NIFTYBEES, each over its own dates (shadows started a day after the real pool, so their NIFTYBEES figure differs; it's on each row).</p>`;
   return `<h2>${title}</h2>
   ${autoBanner(key)}
   <div class="tiles">
