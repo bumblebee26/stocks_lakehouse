@@ -94,8 +94,10 @@ def _latest_portfolio_file():
         "snapshot_date", F.to_date("snapshot_date")), "snapshot_date")
     newest = Window.partitionBy("snapshot_date").orderBy(F.col("_file_modified_at").desc())
     files = (raw.select("snapshot_date", "_source_file", "_file_modified_at").distinct()
-             .withColumn("rn", F.row_number().over(newest)).filter("rn = 1").select("snapshot_date", "_source_file"))
-    return raw.join(files, ["snapshot_date", "_source_file"])
+             .withColumn("rn", F.row_number().over(newest)).filter("rn = 1")
+             .select("snapshot_date", "_source_file", "_file_modified_at"))
+    # the modification time too: an overwritten file keeps its path, so the path alone would keep both copies
+    return raw.join(files, ["snapshot_date", "_source_file", "_file_modified_at"])
 
 @dp.materialized_view(
     name="stocks.silver.portfolio_pools",
