@@ -80,9 +80,6 @@ svg.chart { width: 100%; height: 140px; display: block; touch-action: pan-y }
 .cwrap { position: relative }
 .tip { position: absolute; top: -6px; transform: translateY(-100%); background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 6px 9px; font-size: 12px; line-height: 1.35; box-shadow: 0 4px 14px rgba(0,0,0,.15); pointer-events: none; max-width: 92%; z-index: 1 }
 .legend { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px }
-.lgt { cursor: pointer; font-family: inherit; font-weight: 600 }
-.lgt.real { font-weight: 800 }
-svg.hl .lgt { opacity: .35 }
 .lgd { margin-top: 6px }
 .lgd summary { min-height: 44px; display: flex; align-items: center; font-size: 13px; font-weight: 600; color: var(--muted); cursor: pointer; list-style: none }
 .lgd summary::before { content: "▸"; margin-right: 6px }
@@ -130,6 +127,9 @@ svg.chart.hl polyline.on { opacity: 1; stroke-width: 3.5 }
 .heat button:disabled { cursor: default }
 .row.pick { width: 100%; min-height: 52px; background: none; border-left: 0; border-right: 0; border-bottom: 0; color: var(--fg); font: inherit; text-align: left; cursor: pointer }
 .tests { padding: 2px 0 8px }
+.row:has(.you) { display: grid; grid-template-columns: 1fr 60px 112px; align-items: center }
+.you { text-align: center; font-size: 12px }
+.you .ic { width: 18px; height: 18px }
 .more { width: 100%; min-height: 44px; margin-top: 4px; border: 1px dashed var(--line); border-radius: 10px; background: none; color: var(--accent); font: 600 13px/1 inherit; font-family: inherit; cursor: pointer }
 .ch { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 6px }
 .ch h3 { margin: 0 }
@@ -215,8 +215,7 @@ function lineChart(series, label, fmt) {
   if (all.length < 2) return '<p class="muted">Not enough days yet.</p>';
   const dates = [...new Set(series.flatMap((s) => s.points.map((p) => p[0])))].sort();
   const lo = Math.min(...all), hi = Math.max(...all), pad = (hi - lo) * 0.1 || 1;
-  const ends = series.length >= 2 && series.length <= 4;
-  const L = 46, W = 340, H = 130, R = ends ? 84 : 4, pos = Object.fromEntries(dates.map((d, i) => [d, i]));
+  const L = 46, W = 340, H = 130, R = 4, pos = Object.fromEntries(dates.map((d, i) => [d, i]));
   const x = (d) => L + (pos[d] / Math.max(dates.length - 1, 1)) * (W - L - R);
   const y = (v) => H - 6 - ((v - lo + pad) / (hi - lo + 2 * pad)) * (H - 12);
   const f = (v) => (fmt ? fmt(v) : (Math.abs(v) >= 1000 ? Math.round(v).toLocaleString("en-IN") : v.toFixed(2)));
@@ -229,18 +228,11 @@ function lineChart(series, label, fmt) {
   const dfmt = (d) => (long ? new Date(d + "T00:00:00Z").toLocaleDateString("en-IN", { month: "short", year: "numeric", timeZone: "UTC" }) : dayMonth(d));
   const legend = series.length < 2 ? "" : series.map((s, i) => `<button type="button" class="lg${s.real ? " real" : ""}" data-lg="${id}" data-i="${i}" aria-pressed="false"`
     + ` title="${esc(s.name)}"><i class="${s.dash ? "dash" : ""}" style="background:${s.color};color:${s.color}"></i><span>${esc(s.name)}</span></button>`).join("");
-  // line-end labels: each name at its line's last point, nudged apart so they never overlap
-  let labels = "";
-  if (ends) {
-    const tags = series.map((s, i) => ({ i, s, y: y(s.points.at(-1)[1]) })).sort((a, b) => a.y - b.y);
-    tags.forEach((t, k) => { if (k && t.y - tags[k - 1].y < 11) t.y = tags[k - 1].y + 11; });
-    labels = tags.map((t) => `<text class="lgt${t.s.real ? " real" : ""}" data-lg="${id}" data-i="${t.i}" x="${W - R + 5}" y="${(t.y + 3).toFixed(1)}" font-size="9.5" fill="${t.s.color}">${esc(t.s.name.length > 13 ? t.s.name.slice(0, 12) + "…" : t.s.name)}</text>`).join("");
-  }
   CHARTS.push({ dates, f, x, y, dfmt, series: series.map((s) => ({ name: s.name, color: s.color, at: Object.fromEntries(s.points) })) });
   return `<div class="cwrap"><svg class="chart" data-chart="${id}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}. Touch the chart to read values.">`
-    + `${grid}${zero}${lines}${labels}<g class="cur"></g></svg><div class="tip" hidden></div></div>`
+    + `${grid}${zero}${lines}<g class="cur"></g></svg><div class="tip" hidden></div></div>`
     + `<div class="axis" style="padding-left:${(L / W * 100).toFixed(1)}%;padding-right:${(R / W * 100).toFixed(1)}%"><span>${esc(dfmt(dates[0]))}</span><span>${esc(dfmt(dates[dates.length - 1]))}</span></div>`
-    + (legend && !ends ? `<details class="lgd"><summary>Legend (${series.length})</summary><div class="legend" role="group" aria-label="Lines: tap one to highlight it">${legend}</div></details>` : "");
+    + (legend ? `<details class="lgd"><summary>Legend (${series.length})</summary><div class="legend" role="group" aria-label="Lines: tap one to highlight it">${legend}</div></details>` : "");
 }
 
 function cursor(e) {
@@ -371,7 +363,7 @@ function desk() {
   const rg = ranged("desk", [{ ...s("Your portfolio", css.getPropertyValue("--accent").trim()), real: true }, s("NIFTYBEES (index)", css.getPropertyValue("--nb").trim(), true)]);
   const chart = rg.chips + changeLine(rg.series[0], rg.range) + lineChart(rg.series, "Portfolio vs NIFTYBEES");
   const st = dayState(), isToday = k.day === st.today;
-  const dec = rows("desk_decisions").filter((d) => d.trade_date === st.today).map((d) => `<div class="row"><div class="n"><b>${esc(d.symbol)} · ${esc(d.setup)}</b><span>${esc(d.time)} · ${esc(d.decision)} · score ${esc(d.score)} · you ${/👍/.test(d.you || "") ? `<span class="up">${ICON.thumbUp}</span>` : /👎/.test(d.you || "") ? `<span class="down">${ICON.thumbDown}</span>` : "–"}</span></div><div class="r ${arrowCls(d.result) || (String(d.result).includes("−") ? "down" : String(d.result).includes("+") ? "up" : "muted")}">${esc(d.result)}</div></div>`).join("") || `<p class="muted">${st.closed ? "Market closed today: no proposals." : "Today's proposals appear after the close (evening update)."}</p>`;
+  const dec = rows("desk_decisions").filter((d) => d.trade_date === st.today).map((d) => `<div class="row"><div class="n"><b>${esc(d.symbol)} · ${esc(d.setup)}</b><span>${esc(d.time)} · ${esc(d.decision)} · score ${esc(d.score)}</span></div><div class="you">${/👍/.test(d.you || "") ? `<span class="up">${ICON.thumbUp}</span>` : /👎/.test(d.you || "") ? `<span class="down">${ICON.thumbDown}</span>` : '<span class="muted">Unrated</span>'}</div><div class="r ${arrowCls(d.result) || (String(d.result).includes("−") ? "down" : String(d.result).includes("+") ? "up" : "muted")}">${esc(d.result)}</div></div>`).join("") || `<p class="muted">${st.closed ? "Market closed today: no proposals." : "Today's proposals appear after the close (evening update)."}</p>`;
   return holidayCard() + story() + `
   <section class="card"><span class="muted" style="font-size:13px">Whole dummy portfolio</span><div class="big">${rs(k.portfolio_rs)}</div>
     <div class="${cls(k.since_reset_pct)}" style="font-weight:600">${pct(k.since_reset_pct, true)} overall</div>${chart}</section>
@@ -837,8 +829,8 @@ document.getElementById("main").addEventListener("click", (e) => {
     try { localStorage.setItem("range", JSON.stringify(RANGE)); } catch (err) {}
     render(); return;
   }
-  const lg = e.target.closest("button[data-lg], text[data-lg]");
-  if (lg) {   // tap a line's chip or end label to highlight it; tap again to show all
+  const lg = e.target.closest("button[data-lg]");
+  if (lg) {   // tap a line's chip to highlight it; tap again to show all
     const svg = document.querySelector(`svg[data-chart="${lg.dataset.lg}"]`);
     const on = !(svg.classList.contains("hl") && svg.dataset.on === lg.dataset.i);
     svg.dataset.on = on ? lg.dataset.i : "";
