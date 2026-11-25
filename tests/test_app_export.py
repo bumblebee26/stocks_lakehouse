@@ -100,6 +100,18 @@ class Export(unittest.TestCase):
         self.assertEqual((rows["CNG"]["rate"], rows["CNG"]["as_of"]), ("91.50", "2026-11-15"))  # 915 rejected
         self.assertTrue(bad)
 
+    def test_fuel_remembers_the_price_before_a_change(self):
+        prev = {"datasets": {"fuel_mumbai": {"rows": [
+            {"item": "Petrol", "rate": "111.21", "as_of": "2026-11-24", "source": "CarDekho"},
+            {"item": "Diesel", "rate": "97.83", "as_of": "2026-11-24", "source": "CarDekho",
+             "prev_rate": "99.00", "changed_on": "2026-11-01"}]}}}
+        page = "<h2>Petrol</h2><td>₹109.21</td><h2>Diesel</h2><td>₹97.83</td><p>CNG ₹91.50</p>"
+        ds, _ = app_export.fuel_rates(prev, fetch=lambda: page.encode(), today="2026-11-26")
+        rows = {r["item"]: r for r in ds["rows"]}
+        self.assertEqual((rows["Petrol"]["prev_rate"], rows["Petrol"]["changed_on"]), ("111.21", "2026-11-26"))
+        self.assertEqual((rows["Diesel"]["prev_rate"], rows["Diesel"]["changed_on"]), ("99.00", "2026-11-01"))
+        self.assertEqual(rows["CNG"]["prev_rate"], "")                                         # no change yet
+
     def test_fuel_page_down_keeps_the_last_good_prices(self):
         prev = {"datasets": {"fuel_mumbai": {"rows": [{"item": "Petrol", "rate": "112.00", "unit": "Rs / litre",
                                                        "as_of": "2026-11-20", "source": "CarDekho"}]}}}

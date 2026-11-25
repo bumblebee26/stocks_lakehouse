@@ -701,6 +701,10 @@ locals {
       SELECT max(CASE WHEN instrument = 'SP500' THEN round(change_pct, 2) END)        AS sp500_pct,
              max(CASE WHEN instrument = 'NASDAQCOM' THEN round(change_pct, 2) END)    AS nasdaq_pct,
              max(CASE WHEN instrument = 'NIKKEI225' THEN round(change_pct, 2) END)    AS nikkei_pct,
+             max(CASE WHEN instrument = 'SP500' THEN round(value, 2) END)             AS sp500_level,
+             max(CASE WHEN instrument = 'NASDAQCOM' THEN round(value, 2) END)         AS nasdaq_level,
+             max(CASE WHEN instrument = 'NIKKEI225' THEN round(value, 2) END)         AS nikkei_level,
+             max(CASE WHEN instrument = 'DCOILBRENTEU' THEN round(change_pct, 2) END) AS brent_pct,
              max(CASE WHEN instrument = 'DEXINUS' THEN round(value, 2) END)           AS usd_inr,
              max(CASE WHEN instrument = 'DCOILBRENTEU' THEN round(value, 1) END)      AS brent_usd,
              max(CASE WHEN instrument = 'VIXCLS' THEN round(value, 1) END)            AS cboe_vix
@@ -1004,7 +1008,7 @@ locals {
       rating_summary       = ["rating", "decisions", "proposals", "wins", "win_rate_pct", "total_rs", "avg_rs", "avg_r", "right_calls", "right_pct"]
       rating_trades        = ["trade_date", "time", "symbol", "setup", "side", "you", "trader", "score_pct", "outcome_rs", "outcome_r", "your_call"]
       market_read          = ["topic", "what_the_data_says"]
-      markets_kpis         = ["sp500_pct", "nasdaq_pct", "nikkei_pct", "usd_inr", "brent_usd", "cboe_vix"]
+      markets_kpis         = ["sp500_pct", "nasdaq_pct", "nikkei_pct", "sp500_level", "nasdaq_level", "nikkei_level", "brent_pct", "usd_inr", "brent_usd", "cboe_vix"]
       world_moves          = ["market", "type", "region", "last_move", "over_5", "over_20", "as_of"]
       us_after_moves       = ["us_day", "now", "sessions", "avg_nifty_open_pct", "avg_nifty_day_pct", "opened_same_way_pct"]
       breadth_nse          = ["trade_date", "pct_above_20d"]
