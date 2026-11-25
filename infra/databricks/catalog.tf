@@ -71,6 +71,16 @@ resource "databricks_file" "trader_morning_seed" {
   }
 }
 
+# Same for the council test's scorecard (council.jsonl), until its first after-close run.
+resource "databricks_file" "council_seed" {
+  path           = "${databricks_volume.trader_morning.volume_path}/council.jsonl"
+  content_base64 = base64encode("{\"method\": \"Appears after the first after-close council run\"}\n")
+
+  lifecycle {
+    ignore_changes = [content_base64, md5, source]
+  }
+}
+
 # Make sure each source folder exists in the landing volume, so Auto Loader has
 # a path to watch even before a source's first file arrives (e.g. FRED until its
 # API key is set). The pipeline only reads *.csv / *.json, so these are ignored.

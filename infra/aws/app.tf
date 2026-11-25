@@ -196,6 +196,7 @@ data "aws_iam_policy_document" "app_export" {
       "arn:${local.partition}:s3:::${local.trader_state_bucket}/opening/*",
       "arn:${local.partition}:s3:::${local.trader_state_bucket}/plans/*",
       "arn:${local.partition}:s3:::${local.trader_state_bucket}/preopen/*",
+      "arn:${local.partition}:s3:::${local.trader_state_bucket}/council/scorecard.json",
       "arn:${local.partition}:s3:::${local.trader_state_bucket}/state/pool_auto.json",
     ]
   }
