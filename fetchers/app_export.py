@@ -45,7 +45,7 @@ MORNING_DAYS = 6   # how far back to look for the trader's latest morning (plan 
 MORNING_FIELDS = ["date", "read", "top", "plan", "focus", "gaps_up", "gaps_down", "preopen_count"]
 FUEL_URL = "https://www.cardekho.com/fuel-price-in-mumbai-city"
 FUEL_SOURCE = "CarDekho"
-FUEL_FIELDS = ["item", "rate", "unit", "as_of", "source"]
+FUEL_FIELDS = ["item", "rate", "unit", "as_of", "source", "prev_rate", "changed_on"]
 FUEL_UNITS = {"Petrol": "Rs / litre", "Diesel": "Rs / litre", "CNG": "Rs / kg"}
 FUEL_START = {"Petrol": (111.21, "2026-11-16"), "Diesel": (97.83, "2026-11-16"), "CNG": (91.50, "2026-11-15")}
 FUEL_BAND = 0.15
@@ -158,13 +158,19 @@ def fuel_rates(previous, fetch=None, today=None):
                                  "source": FUEL_SOURCE}
         near = [v for v in got.get(fuel, []) if abs(v / float(last["rate"]) - 1) <= FUEL_BAND]
         if near:
-            last = {"rate": f"{near[0]:.2f}", "as_of": today, "source": FUEL_SOURCE}
+            new = f"{near[0]:.2f}"
+            # Remember the price before the latest change, so the app can show the change (from 25 Nov)
+            moved = new != last["rate"]
+            last = {"rate": new, "as_of": today, "source": FUEL_SOURCE,
+                    "prev_rate": last["rate"] if moved else last.get("prev_rate", ""),
+                    "changed_on": today if moved else last.get("changed_on", "")}
         else:
             bad = True
             log.error("No %s price within 15%% of %s on the page (found %s); kept the last one", fuel,
                       last["rate"], got.get(fuel))
         rows.append({"item": fuel, "rate": last["rate"], "unit": unit, "as_of": last["as_of"],
-                     "source": last["source"]})
+                     "source": last["source"], "prev_rate": last.get("prev_rate", ""),
+                     "changed_on": last.get("changed_on", "")})
     return {"fields": FUEL_FIELDS, "rows": rows}, bad
 
 

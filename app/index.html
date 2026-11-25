@@ -417,9 +417,9 @@ function glance() {
   const line = best && worst && best !== worst ? `<p class="note">Best sector ${esc(best.sector)} <span class="up">${pct(best.change_pct, true)}</span>`
     + ` · worst ${esc(worst.sector)} <span class="${cls(worst.change_pct)}">${pct(worst.change_pct, true)}</span> · more on Markets</p>` : "";
   return `<section class="card"><h3>Market at a glance${n.label ? ` (${esc(n.label)})` : ""}</h3><div class="tiles three">`
-    + tile("Nifty 50", lvl(n.nifty), n.nifty && n.nifty.pct)
-    + tile("Sensex", lvl(n.sensex), n.sensex && n.sensex.pct)
-    + tile("India VIX", lvl(n.vix, 1), n.vix && n.vix.pct)
+    + tile("Nifty 50", lvl(n.nifty), n.nifty && n.nifty.pct, "", n.nifty && n.nifty.last)
+    + tile("Sensex", lvl(n.sensex), n.sensex && n.sensex.pct, "", n.sensex && n.sensex.last)
+    + tile("India VIX", lvl(n.vix, 1), n.vix && n.vix.pct, "", n.vix && n.vix.last, 2)
     + `</div>${n.pending ? `<p class="note">${esc(n.pending)}</p>` : line}</section>`;
 }
 
@@ -650,11 +650,17 @@ function suggested(ds) {
     <p class="note">Information only. Not advice.</p></section>`;
 }
 
+function fuelMove(x) {   // change at the last price change, e.g. "−2.00 (−1.77%)" then "on 26 Nov"
+  const now = num(x.rate), was = num(x.prev_rate);
+  if (now == null || was == null || !was) return '<span class="s muted">unchanged</span>';
+  const d = now - was, sign = d > 0 ? "+" : d < 0 ? "−" : "";
+  return `<span class="s ${cls(d)}">${sign}${Math.abs(d).toFixed(2)} (${pct(d / was * 100, true)})</span><span class="l">on ${esc(dayMonth(String(x.changed_on).slice(0, 10)))}</span>`;
+}
 function fuel() {
   const r = rows("fuel_mumbai");
   if (!r.length) return "";
   return `<section class="card"><h3>Fuel in Mumbai</h3><div class="tiles three">${r.map((x) => `<div class="tile"><span class="l">${esc(x.item)}</span>`
-    + `<span class="v">₹${esc(x.rate)}</span><span class="l">${esc(String(x.unit).replace(/^Rs \//, "per"))}</span></div>`).join("")}</div>
+    + `<span class="v">₹${esc(x.rate)}</span>${fuelMove(x)}<span class="l">${esc(String(x.unit).replace(/^Rs \//, "per"))}</span></div>`).join("")}</div>
     <p class="note">${esc(r[0].source)} · ${esc(dayMonth(String(r[0].as_of).slice(0, 10)))}</p></section>`;
 }
 
@@ -719,9 +725,9 @@ function markets() {
   const switcher = `<div class="seg mkt" role="group" aria-label="Series">${Object.entries(MKT_SERIES).map(([key, v]) => `<button type="button" data-mkt="${key}" aria-pressed="${MKT === key}">${esc(v[0].split(" ")[0])}</button>`).join("")}</div>`;
   return `<h2>Markets</h2>
   <section class="card"><h3>India${n.label ? ` (${esc(n.label)})` : ""}</h3><div class="tiles">
-    ${tile("Nifty 50", lvl(n.nifty), n.nifty && n.nifty.pct)}
-    ${tile("Sensex", lvl(n.sensex), n.sensex && n.sensex.pct)}
-    ${tile("India VIX", lvl(n.vix, 2), n.vix && n.vix.pct)}
+    ${tile("Nifty 50", lvl(n.nifty), n.nifty && n.nifty.pct, "", n.nifty && n.nifty.last)}
+    ${tile("Sensex", lvl(n.sensex), n.sensex && n.sensex.pct, "", n.sensex && n.sensex.last)}
+    ${tile("India VIX", lvl(n.vix, 2), n.vix && n.vix.pct, "", n.vix && n.vix.last, 2)}
     ${tile("Breadth (all NSE)", `<span style="font-size:17px">${n.adv == null ? "–" : Number(n.adv).toLocaleString("en-IN")}↑ ${n.dec == null ? "–" : Number(n.dec).toLocaleString("en-IN")}↓</span>`)}
   </div>${n.pending ? `<p class="note">${esc(n.pending)}</p>` : ""}</section>
   ${fuel()}
@@ -729,10 +735,10 @@ function markets() {
   ${sectors()}
   <section class="card"><h3>Today's read</h3>${read || '<p class="muted">No data yet.</p>'}</section>
   <section class="card"><h3>World</h3><div class="tiles four">
-    ${tile("S&P 500", `<span class="${cls(k.sp500_pct)}">${pct(k.sp500_pct, true)}</span>`)}
-    ${tile("Nasdaq", `<span class="${cls(k.nasdaq_pct)}">${pct(k.nasdaq_pct, true)}</span>`)}
-    ${tile("Nikkei", `<span class="${cls(k.nikkei_pct)}">${pct(k.nikkei_pct, true)}</span>`)}
-    ${tile("Brent", k.brent_usd == null ? "–" : "$" + esc(k.brent_usd))}
+    ${tile("S&P 500", lvl({ last: num(k.sp500_level) }), k.sp500_pct, "", k.sp500_level)}
+    ${tile("Nasdaq", lvl({ last: num(k.nasdaq_level) }), k.nasdaq_pct, "", k.nasdaq_level)}
+    ${tile("Nikkei", lvl({ last: num(k.nikkei_level) }), k.nikkei_pct, "", k.nikkei_level)}
+    ${tile("Brent", k.brent_usd == null ? "–" : "$" + esc(k.brent_usd), k.brent_pct, "", k.brent_usd, 1)}
   </div></section>
   <section class="card"><h3>Charts</h3>${switcher}${chart}<p class="note">${MKT === "gold" || MKT === "silver"
     ? (metal && got.scaled ? "Indian price incl. 3% GST: the world price × USD/INR each day, scaled so today matches today's IBJA rate (import duty and local premium), then GST. Making charges extra. "
@@ -776,8 +782,14 @@ function inrSeries(name, grams) {
   return out;
 }
 const rupees = (v) => (v == null ? "–" : "₹" + Math.round(v).toLocaleString("en-IN"));
-const tile = (label, value, move, extra) => `<div class="tile"><span class="l">${esc(label)}</span><span class="v">${value}</span>`
-  + (move == null ? "" : `<span class="s ${cls(move)}">${pct(move, true)}</span>`) + (extra ? `<span class="l">${extra}</span>` : "") + "</div>";
+// level: the current value; with it the move shows the change in points too, e.g. "+102 (+0.42%)"
+const pts = (level, move, dp = 0) => {
+  const d = level * move / (100 + move), a = Math.abs(d).toLocaleString("en-IN", { maximumFractionDigits: dp, minimumFractionDigits: dp });
+  return (d > 0 ? "+" : d < 0 ? "−" : "") + a;
+};
+const tile = (label, value, move, extra, level, dp) => `<div class="tile"><span class="l">${esc(label)}</span><span class="v">${value}</span>`
+  + (move == null ? "" : `<span class="s ${cls(move)}">${num(level) != null && num(move) != null ? pts(num(level), num(move), dp) + " (" + pct(move, true) + ")" : pct(move, true)}</span>`)
+  + (extra ? `<span class="l">${extra}</span>` : "") + "</div>";
 function dateBack(iso, years) { const d = new Date(iso); d.setFullYear(d.getFullYear() - years); return d.toISOString().slice(0, 10); }
 
 function render() {
