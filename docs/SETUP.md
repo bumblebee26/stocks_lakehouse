@@ -340,8 +340,8 @@ type brief.json
 ```
 
 The first call can take 30–90 seconds while the SQL warehouse starts. If the message looks right, send it
-for real with payload `"{}"`, check Telegram, then set `premarket_enabled = true` in
-`infra\aws\project.auto.tfvars` and deploy it.
+for real with payload `"{}"` and check Telegram. The 08:30 schedule is always on (the old `premarket_enabled`
+switch was removed on 25 Nov 2026).
 
 ---
 

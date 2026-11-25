@@ -135,7 +135,7 @@ resource "aws_iam_role_policy" "scheduler_invoke_premarket" {
 resource "aws_scheduler_schedule" "premarket" {
   name        = local.premarket_function_name
   description = "Pre-market brief to Telegram, 08:30 IST Mon-Fri."
-  state       = var.premarket_enabled ? "ENABLED" : "DISABLED"
+  state       = "ENABLED"
 
   schedule_expression          = "cron(30 8 ? * MON-FRI *)"
   schedule_expression_timezone = "Asia/Kolkata"
