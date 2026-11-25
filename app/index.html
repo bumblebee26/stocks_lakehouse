@@ -80,6 +80,13 @@ svg.chart { width: 100%; height: 140px; display: block; touch-action: pan-y }
 .cwrap { position: relative }
 .tip { position: absolute; top: -6px; transform: translateY(-100%); background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 6px 9px; font-size: 12px; line-height: 1.35; box-shadow: 0 4px 14px rgba(0,0,0,.15); pointer-events: none; max-width: 92%; z-index: 1 }
 .legend { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px }
+.lgt { cursor: pointer; font-family: inherit; font-weight: 600 }
+.lgt.real { font-weight: 800 }
+svg.hl .lgt { opacity: .35 }
+.lgd { margin-top: 6px }
+.lgd summary { min-height: 44px; display: flex; align-items: center; font-size: 13px; font-weight: 600; color: var(--muted); cursor: pointer; list-style: none }
+.lgd summary::before { content: "▸"; margin-right: 6px }
+.lgd[open] summary::before { content: "▾" }
 .lg { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 44px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--soft); color: var(--fg); font: 500 12px/1.2 inherit; font-family: inherit; cursor: pointer }
 .lg i { flex: none; width: 14px; height: 3px; border-radius: 2px }
 .lg i.dash { background-image: linear-gradient(90deg, currentColor 55%, transparent 0) !important; background-size: 5px 3px }
@@ -123,6 +130,7 @@ svg.chart.hl polyline.on { opacity: 1; stroke-width: 3.5 }
 .heat button:disabled { cursor: default }
 .row.pick { width: 100%; min-height: 52px; background: none; border-left: 0; border-right: 0; border-bottom: 0; color: var(--fg); font: inherit; text-align: left; cursor: pointer }
 .tests { padding: 2px 0 8px }
+.more { width: 100%; min-height: 44px; margin-top: 4px; border: 1px dashed var(--line); border-radius: 10px; background: none; color: var(--accent); font: 600 13px/1 inherit; font-family: inherit; cursor: pointer }
 .ch { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 6px }
 .ch h3 { margin: 0 }
 .vsw { flex: none; min-height: 44px; padding: 0 4px; border: 0; background: none; color: var(--fg); font: 600 13px/1 inherit; font-family: inherit; cursor: pointer; white-space: nowrap }
@@ -176,6 +184,8 @@ const ICON = {
   cross: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>',
   dash: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M6 12h12"/></svg>',
   sun: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
+  thumbUp: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-label="liked"><path d="M7 11v9H4v-9zM7 11l4-8a2 2 0 0 1 2 2v4h6a2 2 0 0 1 2 2.3l-1.4 7A2 2 0 0 1 17.6 20H7"/></svg>',
+  thumbDown: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-label="disliked"><path d="M17 13V4h3v9zM17 13l-4 8a2 2 0 0 1-2-2v-4H5a2 2 0 0 1-2-2.3l1.4-7A2 2 0 0 1 6.4 4H17"/></svg>',
   moon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11z"/></svg>',
 };
 const isDark = () => (document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) === "dark";
@@ -193,7 +203,7 @@ const rows = (n) => ((D.datasets || {})[n] || {}).rows || [];
 const one = (n) => rows(n)[0] || {};
 const esc = (s) => String(s == null ? "–" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const num = (v) => (v == null || v === "" || isNaN(Number(v)) ? null : Number(v));
-const rs = (v, sign) => { const n = num(v); if (n == null) return "–"; const s = "Rs " + Math.abs(Math.round(n)).toLocaleString("en-IN"); return sign ? (n < 0 ? "−" : "+") + s : (n < 0 ? "−" : "") + s; };
+const rs = (v, sign) => { const n = num(v); if (n == null) return "–"; const s = "₹" + Math.abs(Math.round(n)).toLocaleString("en-IN"); return sign ? (n < 0 ? "−" : "+") + s : (n < 0 ? "−" : "") + s; };
 const pct = (v, sign) => { const n = num(v); if (n == null) return "–"; return (sign && n > 0 ? "+" : n < 0 ? "−" : "") + Math.abs(n).toFixed(2) + "%"; };
 const cls = (v) => { const n = num(v); return n == null ? "" : n > 0 ? "up" : n < 0 ? "down" : ""; };
 const arrowCls = (s) => (String(s).startsWith("▲") ? "up" : String(s).startsWith("▼") ? "down" : "");
@@ -205,22 +215,32 @@ function lineChart(series, label, fmt) {
   if (all.length < 2) return '<p class="muted">Not enough days yet.</p>';
   const dates = [...new Set(series.flatMap((s) => s.points.map((p) => p[0])))].sort();
   const lo = Math.min(...all), hi = Math.max(...all), pad = (hi - lo) * 0.1 || 1;
-  const L = 46, W = 340, H = 130, pos = Object.fromEntries(dates.map((d, i) => [d, i]));
-  const x = (d) => L + (pos[d] / Math.max(dates.length - 1, 1)) * (W - L - 4);
+  const ends = series.length >= 2 && series.length <= 4;
+  const L = 46, W = 340, H = 130, R = ends ? 84 : 4, pos = Object.fromEntries(dates.map((d, i) => [d, i]));
+  const x = (d) => L + (pos[d] / Math.max(dates.length - 1, 1)) * (W - L - R);
   const y = (v) => H - 6 - ((v - lo + pad) / (hi - lo + 2 * pad)) * (H - 12);
   const f = (v) => (fmt ? fmt(v) : (Math.abs(v) >= 1000 ? Math.round(v).toLocaleString("en-IN") : v.toFixed(2)));
-  const grid = [lo, (lo + hi) / 2, hi].map((v) => `<line x1="${L}" x2="${W}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="var(--soft)"/>`
+  const grid = [lo, (lo + hi) / 2, hi].map((v) => `<line x1="${L}" x2="${W - R}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="var(--soft)"/>`
     + `<text x="${L - 4}" y="${(y(v) + 3).toFixed(1)}" text-anchor="end" font-size="9" fill="var(--muted)">${esc(f(v))}</text>`).join("");
-  const zero = lo < 0 && hi > 0 ? `<line x1="${L}" x2="${W}" y1="${y(0).toFixed(1)}" y2="${y(0).toFixed(1)}" stroke="var(--line)"/>` : "";
+  const zero = lo < 0 && hi > 0 ? `<line x1="${L}" x2="${W - R}" y1="${y(0).toFixed(1)}" y2="${y(0).toFixed(1)}" stroke="var(--line)"/>` : "";
   const lines = series.map((s, i) => `<polyline data-i="${i}" fill="none" stroke="${s.color}" stroke-width="${s.dash ? 2 : 2.5}" ${s.dash ? 'stroke-dasharray="5 4"' : ""} points="${s.points.map((p) => x(p[0]).toFixed(1) + "," + y(p[1]).toFixed(1)).join(" ")}"/>`).join("");
   const id = CHARTS.length;
+  const long = dates.length > 1 && dates.at(-1).slice(0, 4) !== dates[0].slice(0, 4);
+  const dfmt = (d) => (long ? new Date(d + "T00:00:00Z").toLocaleDateString("en-IN", { month: "short", year: "numeric", timeZone: "UTC" }) : dayMonth(d));
   const legend = series.length < 2 ? "" : series.map((s, i) => `<button type="button" class="lg${s.real ? " real" : ""}" data-lg="${id}" data-i="${i}" aria-pressed="false"`
     + ` title="${esc(s.name)}"><i class="${s.dash ? "dash" : ""}" style="background:${s.color};color:${s.color}"></i><span>${esc(s.name)}</span></button>`).join("");
-  CHARTS.push({ dates, f, x, y, series: series.map((s) => ({ name: s.name, color: s.color, at: Object.fromEntries(s.points) })) });
+  // line-end labels: each name at its line's last point, nudged apart so they never overlap
+  let labels = "";
+  if (ends) {
+    const tags = series.map((s, i) => ({ i, s, y: y(s.points.at(-1)[1]) })).sort((a, b) => a.y - b.y);
+    tags.forEach((t, k) => { if (k && t.y - tags[k - 1].y < 11) t.y = tags[k - 1].y + 11; });
+    labels = tags.map((t) => `<text class="lgt${t.s.real ? " real" : ""}" data-lg="${id}" data-i="${t.i}" x="${W - R + 5}" y="${(t.y + 3).toFixed(1)}" font-size="9.5" fill="${t.s.color}">${esc(t.s.name.length > 13 ? t.s.name.slice(0, 12) + "…" : t.s.name)}</text>`).join("");
+  }
+  CHARTS.push({ dates, f, x, y, dfmt, series: series.map((s) => ({ name: s.name, color: s.color, at: Object.fromEntries(s.points) })) });
   return `<div class="cwrap"><svg class="chart" data-chart="${id}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}. Touch the chart to read values.">`
-    + `${grid}${zero}${lines}<g class="cur"></g></svg><div class="tip" hidden></div></div>`
-    + `<div class="axis" style="padding-left:${(L / W * 100).toFixed(1)}%"><span>${esc(dates[0])}</span><span>${esc(dates[dates.length - 1])}</span></div>`
-    + (legend ? `<div class="legend" role="group" aria-label="Lines: tap one to highlight it">${legend}</div>` : "");
+    + `${grid}${zero}${lines}${labels}<g class="cur"></g></svg><div class="tip" hidden></div></div>`
+    + `<div class="axis" style="padding-left:${(L / W * 100).toFixed(1)}%;padding-right:${(R / W * 100).toFixed(1)}%"><span>${esc(dfmt(dates[0]))}</span><span>${esc(dfmt(dates[dates.length - 1]))}</span></div>`
+    + (legend && !ends ? `<details class="lgd"><summary>Legend (${series.length})</summary><div class="legend" role="group" aria-label="Lines: tap one to highlight it">${legend}</div></details>` : "");
 }
 
 function cursor(e) {
@@ -236,7 +256,7 @@ function cursor(e) {
     + hits.map((s) => `<circle cx="${cx}" cy="${c.y(s.at[d]).toFixed(1)}" r="3.5" fill="${s.color}" stroke="var(--card)"/>`).join("");
   const tip = svg.parentNode.querySelector(".tip");
   tip.hidden = false;
-  tip.innerHTML = `<b>${esc(d)}</b>` + hits.slice(0, 9).map((s) => `<div><span style="color:${s.color}">●</span> ${esc(s.name)}: <b>${esc(c.f(s.at[d]))}</b></div>`).join("");
+  tip.innerHTML = `<b>${esc(dayMonth(d))}${d.slice(0, 4) !== String(new Date().getFullYear()) ? " " + d.slice(0, 4) : ""}</b>` + hits.slice(0, 9).map((s) => `<div><span style="color:${s.color}">●</span> ${esc(s.name)}: <b>${esc(c.f(s.at[d]))}</b></div>`).join("");
   const left = Math.min(Math.max(cx / 340 * box.width - tip.offsetWidth / 2, 0), box.width - tip.offsetWidth);
   tip.style.left = `${left}px`;
 }
@@ -268,10 +288,10 @@ function ranged(key, series, defaultRange = "All") {
   return { series: clipTo(series, RANGES.find((r) => r[0] === pick)), chips, range: pick };
 }
 function changeLine(s, range, kind) {
-  // "1M: +2.3%" (values) or "1M: real +Rs 1,240" (P&L in rupees), from the first to the last point shown
+  // "1M: +2.3%" (values) or "1M: real +₹1,240" (P&L in rupees), from the first to the last point shown
   if (!s || s.points.length < 2) return "";
   const a = s.points[0][1], b = s.points.at(-1)[1];
-  const label = range === "1D" ? `${s.points[0][0]} → ${s.points.at(-1)[0]}` : range;
+  const label = range === "1D" ? `${dayMonth(s.points[0][0])} → ${dayMonth(s.points.at(-1)[0])}` : range;
   if (kind === "rs") return `<p class="chg"><b>${esc(label)}</b> · ${esc(s.name)} <span class="${cls(b - a)}">${rs(b - a, true)}</span></p>`;
   return `<p class="chg"><b>${esc(label)}</b> · ${esc(s.name)} <span class="${cls(b - a)}">${pct(a ? (b / a - 1) * 100 : null, true)}</span></p>`;
 }
@@ -302,13 +322,13 @@ function plChart(rows, o) {
   const best = rest.slice(0, 5), worst = rest.slice(5).slice(-2);
   const names = [...real, ...best, ...worst];
   const total = Object.keys(by).length;
-  const series = names.map((n, i) => ({ name: n, real: by[n].kind === "real", color: by[n].kind === "real" ? "var(--fg)" : palette()[i % palette().length],
+  const series = names.map((n, i) => ({ name: by[n].kind === "real" ? "Real" : shortName(n, "Shadow"), real: by[n].kind === "real", color: by[n].kind === "real" ? "var(--fg)" : palette()[i % palette().length],
     dash: by[n].kind === "benchmark", points: by[n].points }));
   const css = getComputedStyle(document.documentElement);
   series.forEach((s) => { if (s.color === "var(--fg)") s.color = css.getPropertyValue("--fg").trim(); });
-  const note = total > names.length ? `<p class="note">Showing ${real.length ? "real + " : ""}the 5 best and the 2 worst of ${total} lines.</p>` : "";
+  const note = total > names.length ? `<p class="note">Real + 5 best + 2 worst of ${total}.</p>` : "";
   const head = rg.chips + changeLine(series.find((x) => x.real) || series[0], rg.range, "rs");
-  return series.length ? head + lineChart(series, o.label, (v) => (Math.abs(v) >= 1000 ? "Rs " + Math.round(v).toLocaleString("en-IN") : "Rs " + Math.round(v))) + note
+  return series.length ? head + lineChart(series, o.label, (v) => rs(v)) + note
     : '<p class="muted">No lines for this choice yet.</p>';
 }
 
@@ -322,13 +342,13 @@ function story() {
   const head = today != null ? (today > 0 ? "A green day" : today < 0 ? "A red day" : "A flat day")
     : st.closed ? "Markets closed today" : "Today's desk";
   const parts = [];
-  parts.push(today != null ? `Today ${rs(today, true)}; ${pct(since, true)} since 18 Nov.` : `${pct(since, true)} since 18 Nov.`);
+  parts.push(today != null ? `Today ${rs(today, true)}; ${pct(since, true)} overall.` : `${pct(since, true)} overall.`);
   if (!dec.length && !st.closed && today == null) parts.push("Today's trades appear after the close (evening update).");
   if (placed.length) parts.push(`${placed.length} trade${placed.length > 1 ? "s" : ""} placed: ${placed.map((d) => `${esc(d.symbol)} ${esc(d.result)}`).join(", ")}.`);
   if (skipped.length) parts.push(`${skipped.length} skipped${savedBy ? `, ${savedBy} of them would have lost` : ""}.`);
   const best = rows("intra_board").filter((r) => r.kind !== "Real" && num(r.vs_real_rs) != null).sort((a, b) => b.vs_real_rs - a.vs_real_rs)[0];
   if (best) parts.push(`Best shadow so far: ${esc(best.rule)} (${rs(best.vs_real_rs, true)} vs real).`);
-  return `<section class="card story"><span class="when">${esc(st.today)}</span><h1>${head}</h1>${parts.map((p) => `<p>${p}</p>`).join("")}</section>`;
+  return `<section class="card story"><span class="when">${esc(new Date(st.today + "T00:00:00Z").toLocaleDateString("en-IN", { weekday: "short", timeZone: "UTC" }))} ${esc(dayMonth(st.today))}</span><h1>${head}</h1>${parts.map((p) => `<p>${p}</p>`).join("")}</section>`;
 }
 
 // Market-holiday card (24 Nov): only on an NSE holiday, from NSE's own list; × hides it for the day.
@@ -351,10 +371,10 @@ function desk() {
   const rg = ranged("desk", [{ ...s("Your portfolio", css.getPropertyValue("--accent").trim()), real: true }, s("NIFTYBEES (index)", css.getPropertyValue("--nb").trim(), true)]);
   const chart = rg.chips + changeLine(rg.series[0], rg.range) + lineChart(rg.series, "Portfolio vs NIFTYBEES");
   const st = dayState(), isToday = k.day === st.today;
-  const dec = rows("desk_decisions").filter((d) => d.trade_date === st.today).map((d) => `<div class="row"><div class="n"><b>${esc(d.symbol)} · ${esc(d.setup)}</b><span>${esc(d.time)} · ${esc(d.decision)} · score ${esc(d.score)} · you ${d.you && d.you !== "–" ? esc(d.you) : "not rated"}</span></div><div class="r ${arrowCls(d.result) || (String(d.result).includes("−") ? "down" : String(d.result).includes("+") ? "up" : "muted")}">${esc(d.result)}</div></div>`).join("") || `<p class="muted">${st.closed ? "Market closed today: no proposals." : "Today's proposals appear after the close (evening update)."}</p>`;
+  const dec = rows("desk_decisions").filter((d) => d.trade_date === st.today).map((d) => `<div class="row"><div class="n"><b>${esc(d.symbol)} · ${esc(d.setup)}</b><span>${esc(d.time)} · ${esc(d.decision)} · score ${esc(d.score)} · you ${/👍/.test(d.you || "") ? `<span class="up">${ICON.thumbUp}</span>` : /👎/.test(d.you || "") ? `<span class="down">${ICON.thumbDown}</span>` : "–"}</span></div><div class="r ${arrowCls(d.result) || (String(d.result).includes("−") ? "down" : String(d.result).includes("+") ? "up" : "muted")}">${esc(d.result)}</div></div>`).join("") || `<p class="muted">${st.closed ? "Market closed today: no proposals." : "Today's proposals appear after the close (evening update)."}</p>`;
   return holidayCard() + story() + `
   <section class="card"><span class="muted" style="font-size:13px">Whole dummy portfolio</span><div class="big">${rs(k.portfolio_rs)}</div>
-    <div class="${cls(k.since_reset_pct)}" style="font-weight:600">${pct(k.since_reset_pct, true)} since 18 Nov</div>${chart}</section>
+    <div class="${cls(k.since_reset_pct)}" style="font-weight:600">${pct(k.since_reset_pct, true)} overall</div>${chart}</section>
   <div class="tiles">
     <div class="tile"><span class="l">Today's P&amp;L</span><span class="v ${isToday ? cls(k.today_pnl_rs) : ""}">${isToday ? rs(k.today_pnl_rs, true) : "–"}</span></div>
     <div class="tile"><span class="l">Trades today</span><span class="v">${k.trades_day === st.today ? esc(k.trades_today) : "–"}</span></div>
@@ -405,10 +425,10 @@ function glance() {
   const line = best && worst && best !== worst ? `<p class="note">Best sector ${esc(best.sector)} <span class="up">${pct(best.change_pct, true)}</span>`
     + ` · worst ${esc(worst.sector)} <span class="${cls(worst.change_pct)}">${pct(worst.change_pct, true)}</span> · more on Markets</p>` : "";
   return `<section class="card"><h3>Market at a glance${n.label ? ` (${esc(n.label)})` : ""}</h3><div class="tiles three">`
-    + tile("Nifty 50", `<span class="${cls(n.nifty && n.nifty.pct)}">${pct(n.nifty && n.nifty.pct, true)}</span>`)
-    + tile("Sensex", `<span class="${cls(n.sensex && n.sensex.pct)}">${pct(n.sensex && n.sensex.pct, true)}</span>`)
+    + tile("Nifty 50", lvl(n.nifty), n.nifty && n.nifty.pct)
+    + tile("Sensex", lvl(n.sensex), n.sensex && n.sensex.pct)
     + tile("India VIX", lvl(n.vix, 1), n.vix && n.vix.pct)
-    + `</div>${n.pending ? `<p class="note">${esc(n.pending)}</p>` : line + (n.note ? `<p class="note">${esc(n.note)}</p>` : "")}</section>`;
+    + `</div>${n.pending ? `<p class="note">${esc(n.pending)}</p>` : line}</section>`;
 }
 
 function eachPool() {
@@ -416,7 +436,7 @@ function eachPool() {
   const body = rows("desk_pools").map((r) => {
     const inv = num(r.value_rs) != null && num(r.pnl_rs) != null ? num(r.value_rs) - num(r.pnl_rs) : null;
     const right = sw.i === 0 ? two(rs(r.value_rs), `(${rs(inv)})`, cls(r.pnl_rs)) : two(rs(r.pnl_rs, true), `(${pct(r.return_pct, true)})`, cls(r.pnl_rs));
-    return `<div class="row"><div class="n"><b>${esc(r.pool)}</b><span>since ${esc(dShort(r.since) || "18 Nov")}</span></div><div class="r">${right}</div></div>`;
+    return `<div class="row"><div class="n"><b>${esc(r.pool)}</b></div><div class="r">${right}</div></div>`;
   }).join("");
   return `<section class="card">${cardHead("Each pool", sw)}${body || '<p class="muted">No data yet.</p>'}</section>`;
 }
@@ -430,30 +450,34 @@ const keep = (key, kind) => show[key] === "both" || (show[key] === "real" ? /rea
 function intraday() {
   const k = one("intraday_kpis");
   const rsw = viewSwitch("rules", ["Total", "vs real"]);
-  const board = rows("intra_board").filter((r) => keep("intraday", r.kind === "Real" ? "real" : "shadow"))
-    .sort((a, b) => (a.kind === "Real" ? -1 : b.kind === "Real" ? 1 : (num(b.vs_real_rs) ?? -1e12) - (num(a.vs_real_rs) ?? -1e12)))
-    .map((r) => {
+  const ruleRow = (r) => {
       const right = rsw.i === 0 ? two(rs(r.total_rs, true), `${esc(r.trades)} trades`, cls(r.total_rs))
         : r.vs_real_rs == null ? two("–", "the real result") : two(rs(r.vs_real_rs, true), "vs real", cls(r.vs_real_rs));
-      return `<div class="row"><div class="n"><b>${esc(r.rule)}</b><span>${esc(r.kind)}</span></div><div class="r">${right}</div></div>`;
-    }).join("");
+      return `<div class="row"><div class="n"><b>${esc(r.rule)}</b></div><div class="r">${right}</div></div>`;
+  };
+  const ib = rows("intra_board").filter((r) => keep("intraday", r.kind === "Real" ? "real" : "shadow"));
+  const byVs = (a, b) => (num(b.vs_real_rs ?? b.total_rs) ?? -1e12) - (num(a.vs_real_rs ?? a.total_rs) ?? -1e12);
+  const kinds = [...new Set(ib.filter((r) => r.kind !== "Real").map((r) => r.kind))];
+  const board = ib.filter((r) => r.kind === "Real").map(ruleRow).join("") + kinds.map((kd) => {
+    const g = ib.filter((r) => r.kind === kd).sort(byVs), all = SHOW_ALL.has("rules|" + kd);
+    return `<div class="sub">${esc(kd)} · ${g.length}</div>` + (all ? g : g.slice(0, 5)).map(ruleRow).join("")
+      + (g.length > 5 ? `<button type="button" class="more" data-all="rules|${esc(kd)}">${all ? "Show fewer" : `Show all ${g.length}`}</button>` : "");
+  }).join("");
   const ladder = rows("intra_bar_ladder").map((r) => `<div class="row"><div class="n"><b>${esc(r.version)}</b><span>${esc(r.trades)} trades · ${r.won_pct == null ? "–" : esc(r.won_pct) + "% won"}</span></div><div class="r ${cls(r.total_rs)}">${rs(r.total_rs, true)}</div></div>`).join("");
-  const sel = rows("intra_selector").map((r) => `<div class="row"><div class="n"><b>${esc(r.family)}</b><span>${esc(r.latest_pick)}</span></div><div class="r ${cls(num(r.selector_rs) - num(r.fixed_rs))}">${rs(r.selector_rs, true)}<br><span class="muted" style="font-weight:500">fixed ${rs(r.fixed_rs, true)}</span></div></div>`).join("");
   return `<h2>Intraday</h2>
   <div class="tiles">
-    <div class="tile"><span class="l">P&amp;L since 18 Nov</span><span class="v ${cls(k.net_pnl_rs)}">${rs(k.net_pnl_rs, true)}</span></div>
+    <div class="tile"><span class="l">P&amp;L</span><span class="v ${cls(k.net_pnl_rs)}">${rs(k.net_pnl_rs, true)}</span></div>
     <div class="tile"><span class="l">Trades · win rate</span><span class="v">${esc(k.trades)} · ${k.win_rate_pct == null ? "–" : esc(k.win_rate_pct) + "%"}</span></div>
     <div class="tile"><span class="l">Average R a trade</span><span class="v ${cls(k.expectancy_r)}">${esc(k.expectancy_r)}</span></div>
     <div class="tile"><span class="l">Profit factor</span><span class="v">${esc(k.profit_factor)}</span></div>
   </div>
   ${intradayPlan()}
   ${seg("intraday")}
-  <section class="card"><h3>P&amp;L since 18 Nov</h3>${plChart(rows("intra_lines"), { key: "intraday", x: "trade_date", y: "total_rs", line: "line",
+  <section class="card"><h3>P&amp;L</h3>${plChart(rows("intra_lines"), { key: "intraday", x: "trade_date", y: "total_rs", line: "line",
     kindOf: (r) => (r.kind === "Real" ? "real" : "shadow"), label: "Intraday P&L, real and shadows", max: 8 })}</section>
   <section class="card">${cardHead("Rules compared (same trades)", rsw)}${board || '<p class="muted">No data yet.</p>'}</section>
   ${councilCard()}
-  <section class="card"><h3>Auto bar and sizing (every proposal)</h3>${ladder || '<p class="muted">No data yet.</p>'}</section>
-  <section class="card"><h3>Selector (paper)</h3>${sel || '<p class="muted">Starts after Monday\'s day report.</p>'}</section>`;
+  <section class="card"><h3>Auto bar and sizing (every proposal)</h3>${ladder || '<p class="muted">No data yet.</p>'}</section>`;
 }
 
 // The trader's morning (paper-trader files), today only (dayState): the market part on Desk, the trader's own plan
@@ -508,11 +532,8 @@ function autoBanner(key) {
   const on = (rows("pool_auto").find((r) => r.pool === (key === "swing" ? "swing" : "long_term")) || {}).on;
   const isOn = on == null ? key === "swing" : !!on;
   const cmd = key === "swing" ? "/swing" : "/longterm";
-  const text = key === "swing"
-    ? (isOn ? "History 2019–26: trailed NIFTYBEES (−19% vs +11% on 2025–26). Reviewed 1 Dec." : "Each buy asks you first on Telegram.")
-    : (isOn ? "Quality picks, bought by the pool's own rules." : "Each buy asks you first on Telegram. Go/no-go review on 18 Dec.");
-  return `<section class="card banner${isOn ? "" : " off"}"><h3>Auto mode ${isOn ? "ON" : "OFF"}${key === "swing" ? " · momentum + news" : " · quality picks"}</h3>`
-    + `<p>${text} <span class="muted">${cmd} auto ${isOn ? "off" : "on"} ${isOn ? "stops" : "starts"} it.</span></p></section>`;
+  const what = key === "swing" ? "momentum + news · review 1 Dec" : (isOn ? "quality picks" : "asks before each buy · go/no-go 18 Dec");
+  return `<section class="card banner${isOn ? "" : " off"}"><h3>Auto ${isOn ? "ON" : "OFF"} · ${what}</h3><p class="muted" style="font-size:12px">${cmd} auto ${isOn ? "off" : "on"}</p></section>`;
 }
 
 function holdingsNow(name) {
@@ -527,6 +548,7 @@ function holdingsNow(name) {
 
 // Why each quality pick qualifies (24 Nov): every test, passed or failed, and its margin from the line.
 let OPEN_PICK = "";
+const SHOW_ALL = new Set();   // lists showing every row ("Show all")
 // Groww-style column switch: one button in a card's header changes what the right column shows for every row.
 const VIEW = {};
 try { Object.assign(VIEW, JSON.parse(localStorage.getItem("views") || "{}")); } catch (e) {}
@@ -550,22 +572,6 @@ function shortReason(r) {
   return t.replace(/^swing rules on hold: pool held in the index$/i, "parked in NIFTYBEES")
     .replace(/^to pay for your (\S+) buy$/i, "funds $1").replace(/^your own trade$/i, "your trade")
     .replace(/momentum rank (\d+)(\.0)?/i, "rank $1").replace(/^news breakout: /i, "news: ");
-}
-function ltTests() {
-  const r = rows("longterm_tests");
-  if (!r.length) return "";
-  const mk = (t) => {
-    const v = String(t || "–"), pass = v.startsWith("✓"), fail = v.startsWith("✕");
-    const text = v.replace(/^[✓✕–]\s*/, ""), word = pass ? "Passed: " : fail ? "Failed: " : "";
-    return `<div class="tl ok ${pass ? "up" : fail ? "down" : "muted"}">${pass ? ICON.check : fail ? ICON.cross : ICON.dash}<span><span class="vh">${word}</span>${esc(text)}</span></div>`;
-  };
-  const body = r.map((x) => {
-    const open = OPEN_PICK === x.symbol;
-    return `<button type="button" class="row pick" data-pick="${esc(x.symbol)}" aria-expanded="${open}"><span class="n"><b>${esc(x.rank)}. ${esc(x.symbol)}</b>`
-      + `<span>${esc(x.company)}</span></span><span class="r">${esc(x.passed)}<br><span class="muted" style="font-weight:500;font-size:12px">${open ? "hide" : "tests"}</span></span></button>`
-      + (open ? `<div class="tests">${["capital", "debt", "cash", "growth", "price"].map((k) => mk(x[k])).join("")}</div>` : "");
-  }).join("");
-  return `<section class="card"><h3>Why the quality picks qualify</h3>${body}</section>`;
 }
 
 function pool(title, ds, key) {
@@ -610,24 +616,44 @@ function pool(title, ds, key) {
   </div>
   ${holdingsNow(key === "swing" ? "Swing" : "Long-term")}
   ${seg(key)}
-  <section class="card"><h3>P&amp;L since each started</h3>${plChart(rows(ds + "_returns"), { key, x: "snapshot_date", y: "pnl_rs", line: "strategy",
+  <section class="card"><h3>P&amp;L</h3>${plChart(rows(ds + "_returns"), { key, x: "snapshot_date", y: "pnl_rs", line: "strategy",
     kindOf: (r) => String(r.kind).toLowerCase(), label: title + " P&L, real and shadows" })}</section>
   ${suggested(ds)}
-  ${key === "long" ? ltTests() : ""}
   <section class="card">${cardHead("Scoreboard", ssw)}${board || '<p class="muted">No data yet.</p>'}</section>
-  <section class="card">${cardHead("Trades placed (last 30 days)", tsw)}${trades || '<p class="muted">No trades yet.</p>'}</section>`;
+  <section class="card">${cardHead("Trades placed (last 30 days)", tsw)}${trades || '<p class="muted">No trades yet.</p>'}</section>
+  <p class="note">${ICON.star} = best shadow</p>`;
 }
 
 const chartLink = (r) => (r.chart ? ` · <a href="${esc(r.chart)}" target="_blank" rel="noopener">chart ↗</a>` : "");
+const SUG_LABEL = { "Momentum + news (auto rules)": "Momentum + news · exit: 2×ATR trailing or 20 days",
+  "Scanner strict pick": "Scanner pick", "Quality pick (weekly)": "Quality picks (weekly)", "Momentum top 15": "Momentum top 15" };
+function testsFor(symbol) {
+  const x = rows("longterm_tests").find((t) => t.symbol === symbol);
+  if (!x) return "";
+  const mk = (t) => {
+    const v = String(t || "–"), pass = v.startsWith("✓"), fail = v.startsWith("✕");
+    const text = v.replace(/^[✓✕–]\s*/, ""), word = pass ? "Passed: " : fail ? "Failed: " : "";
+    return `<div class="tl ok ${pass ? "up" : fail ? "down" : "muted"}">${pass ? ICON.check : fail ? ICON.cross : ICON.dash}<span><span class="vh">${word}</span>${esc(text)}</span></div>`;
+  };
+  return `<div class="tests"><div class="sub">${esc(x.passed)} tests passed</div>${["capital", "debt", "cash", "growth", "price"].map((k) => mk(x[k])).join("")}</div>`;
+}
 function suggested(ds) {
   const r = rows(ds + "_suggest");
   const groups = [...new Set(r.map((x) => x.strategy))];
-  const body = groups.map((g) => `<div class="sub">${esc(g)}</div>` + r.filter((x) => x.strategy === g).map((x) => {
-    const lv = x.stop == null ? "" : `stop ${esc(x.stop)}` + (x.target == null ? "" : `<br>target ${esc(x.target)}`) + (x.rr == null ? "" : ` · R:R ${esc(x.rr)}`);
-    return `<div class="row"><div class="n"><b>${esc(x.rank)}. ${esc(x.symbol)}</b><span>${esc(x.why)}${chartLink(x)}</span></div>`
-      + `<div class="r">${x.entry ? esc(x.entry) : "Rs " + esc(x.close)}${lv ? `<br><span class="muted" style="font-weight:500;font-size:12px">${lv}</span>` : ""}</div></div>`;
-  }).join("")).join("");
-  const asOf = r[0] && r[0].trade_date ? ` (prices from ${esc(r[0].trade_date)})` : "";
+  const body = groups.map((g) => {
+    const list = r.filter((x) => x.strategy === g), id = ds + "|" + g, all = SHOW_ALL.has(id), quality = /quality/i.test(g);
+    return `<div class="sub">${esc(SUG_LABEL[g] || g)}</div>` + (all ? list : list.slice(0, 5)).map((x) => {
+      const lv = x.stop == null ? "" : `stop ${esc(x.stop)}` + (x.target == null ? "" : ` · target ${esc(x.target)}`);
+      const right = `${x.entry ? esc(x.entry) : "₹" + esc(x.close)}${lv ? `<br><span class="muted" style="font-weight:500;font-size:12px">${lv}</span>` : ""}`;
+      if (quality) {
+        const open = OPEN_PICK === x.symbol;
+        return `<button type="button" class="row pick" data-pick="${esc(x.symbol)}" aria-expanded="${open}"><span class="n"><b>${esc(x.rank)}. ${esc(x.symbol)}</b><span>${esc(x.why)}</span></span><span class="r">${right}</span></button>`
+          + (open ? testsFor(x.symbol) : "");
+      }
+      return `<div class="row"><div class="n"><b>${esc(x.rank)}. ${esc(x.symbol)}</b><span>${esc(x.why)}${chartLink(x)}</span></div><div class="r">${right}</div></div>`;
+    }).join("") + (list.length > 5 ? `<button type="button" class="more" data-all="${esc(id)}">${all ? "Show fewer" : `Show all ${list.length}`}</button>` : "");
+  }).join("");
+  const asOf = r[0] && r[0].trade_date ? ` (${esc(dayMonth(String(r[0].trade_date).slice(0, 10)))})` : "";
   return `<section class="card sug"><h3>Suggested today${asOf}</h3>${body || '<p class="muted">Appears after the next export.</p>'}
     <p class="note">Information only. Not advice.</p></section>`;
 }
@@ -636,8 +662,8 @@ function fuel() {
   const r = rows("fuel_mumbai");
   if (!r.length) return "";
   return `<section class="card"><h3>Fuel in Mumbai</h3><div class="tiles three">${r.map((x) => `<div class="tile"><span class="l">${esc(x.item)}</span>`
-    + `<span class="v">₹${esc(x.rate)}</span><span class="l">${esc(x.unit)}<br>${esc(x.as_of)}</span></div>`).join("")}</div>
-    <p class="note">Source: ${esc(r[0].source)}.</p></section>`;
+    + `<span class="v">₹${esc(x.rate)}</span><span class="l">${esc(String(x.unit).replace(/^Rs \//, "per"))}</span></div>`).join("")}</div>
+    <p class="note">${esc(r[0].source)} · ${esc(dayMonth(String(r[0].as_of).slice(0, 10)))}</p></section>`;
 }
 
 let MKT = "nifty";
@@ -672,7 +698,7 @@ function sectors() {
   const list = OPEN_SECTOR ? rows("sector_stocks").filter((x) => x.sector === OPEN_SECTOR).sort((a, b) => num(b.change_pct) - num(a.change_pct)) : [];
   const detail = OPEN_SECTOR ? `<div class="sub" style="margin-top:10px">${esc(OPEN_SECTOR)}: ${list.length} stocks</div>`
     + list.map((x) => `<div class="row"><div class="n"><b>${esc(x.symbol)}</b><span>₹${esc(x.close)}</span></div><div class="r ${cls(x.change_pct)}">${pct(x.change_pct, true)}</div></div>`).join("") : "";
-  return `<section class="card"><h3>Sectors at the close (${esc(r[0].trade_date)})</h3><div class="heat">${tiles}</div>${detail}`
+  return `<section class="card"><h3>Sectors at the close (${esc(dayMonth(String(r[0].trade_date).slice(0, 10)))})</h3><div class="heat">${tiles}</div>${detail}`
     + `<p class="note">Nifty 200 stocks, equal weight.</p></section>`;
 }
 let OPEN_SECTOR = "";
@@ -686,7 +712,7 @@ function markets() {
   const metalTile = (label, r) => tile(label, rupees(num(r.rate) * GST), num(r.change_pct), `${rupees(num(r.rate))} before GST`);
   const bullion = g24 ? `<div class="tiles three bul">${metalTile("24K gold", g24)}`
       + `${g22 ? metalTile("22K gold", g22) : ""}${sil ? metalTile("Silver", sil) : ""}</div>`
-      + `<p class="note">Price incl. 3% GST: gold per 10 g, silver per kg. Making charges on jewellery (usually 8–25%) extra. IBJA rates, ${esc(dm(g24.as_of))} (${esc(g24.session)}).</p>`
+      + `<p class="note">Gold per 10 g, silver per kg · IBJA ${esc(dm(g24.as_of))} ${esc(g24.session)} · incl. 3% GST · making charges extra</p>`
     : '<p class="muted">Appears after the next update.</p>';
   const [label, get, fmt] = MKT_SERIES[MKT] || MKT_SERIES.nifty;
   const got = get(), metal = !Array.isArray(got);
@@ -705,7 +731,7 @@ function markets() {
     ${tile("Sensex", lvl(n.sensex), n.sensex && n.sensex.pct)}
     ${tile("India VIX", lvl(n.vix, 2), n.vix && n.vix.pct)}
     ${tile("Breadth (all NSE)", `<span style="font-size:17px">${n.adv == null ? "–" : Number(n.adv).toLocaleString("en-IN")}↑ ${n.dec == null ? "–" : Number(n.dec).toLocaleString("en-IN")}↓</span>`)}
-  </div>${n.pending || n.note ? `<p class="note">${esc(n.pending || n.note)}</p>` : ""}</section>
+  </div>${n.pending ? `<p class="note">${esc(n.pending)}</p>` : ""}</section>
   ${fuel()}
   <section class="card"><h3>Gold &amp; silver</h3>${bullion}</section>
   ${sectors()}
@@ -797,6 +823,8 @@ document.getElementById("main").addEventListener("click", (e) => {
   }
   const mk = e.target.closest("button[data-mkt]");
   if (mk) { MKT = mk.dataset.mkt; try { localStorage.setItem("mkt", MKT); } catch (err) {} render(); return; }
+  const ab = e.target.closest("button[data-all]");
+  if (ab) { const id = ab.dataset.all; if (SHOW_ALL.has(id)) SHOW_ALL.delete(id); else SHOW_ALL.add(id); render(); return; }
   const vb = e.target.closest("button[data-view]");
   if (vb) { const id = vb.dataset.view; VIEW[id] = ((VIEW[id] || 0) + 1) % Number(vb.dataset.n); try { localStorage.setItem("views", JSON.stringify(VIEW)); } catch (err) {} render(); return; }
   const pk = e.target.closest("button[data-pick]");
@@ -809,12 +837,12 @@ document.getElementById("main").addEventListener("click", (e) => {
     try { localStorage.setItem("range", JSON.stringify(RANGE)); } catch (err) {}
     render(); return;
   }
-  const lg = e.target.closest("button[data-lg]");
-  if (lg) {   // tap a line's chip to highlight it; tap again to show all
-    const on = lg.getAttribute("aria-pressed") !== "true";
+  const lg = e.target.closest("button[data-lg], text[data-lg]");
+  if (lg) {   // tap a line's chip or end label to highlight it; tap again to show all
     const svg = document.querySelector(`svg[data-chart="${lg.dataset.lg}"]`);
-    lg.parentNode.querySelectorAll("button[data-lg]").forEach((x) => x.setAttribute("aria-pressed", "false"));
-    lg.setAttribute("aria-pressed", String(on));
+    const on = !(svg.classList.contains("hl") && svg.dataset.on === lg.dataset.i);
+    svg.dataset.on = on ? lg.dataset.i : "";
+    document.querySelectorAll(`button[data-lg="${lg.dataset.lg}"]`).forEach((x) => x.setAttribute("aria-pressed", String(on && x.dataset.i === lg.dataset.i)));
     svg.classList.toggle("hl", on);
     svg.querySelectorAll("polyline").forEach((p) => p.classList.toggle("on", on && p.dataset.i === lg.dataset.i));
     return;

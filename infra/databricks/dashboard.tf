@@ -385,10 +385,9 @@ locals {
         SELECT 'Momentum + news (auto rules)' AS strategy, 1 AS grp, swing_rank AS rank, symbol, company, close,
                concat('near ', format_number(close, 2)) AS entry, round(close - 2 * atr14, 2) AS stop,
                CAST(NULL AS DOUBLE) AS target, CAST(NULL AS DOUBLE) AS rr,
-               concat('1m ', format_number(ret_1m_pct, 1), '% · 3m ', format_number(ret_3m_pct, 1), '% · ',
-                      format_number(pct_of_52w_high, 0), '% of 52-week high',
-                      CASE WHEN news_pos_5d > 0 THEN ' · fresh good news' ELSE '' END,
-                      ' · exit: 2xATR trailing stop or after 20 days') AS why,
+               concat(concat(CASE WHEN ret_1m_pct >= 0 THEN '+' ELSE '' END, format_number(ret_1m_pct, 0)), '% 1m · ', concat(CASE WHEN ret_3m_pct >= 0 THEN '+' ELSE '' END, format_number(ret_3m_pct, 0)), '% 3m · ',
+                      format_number(pct_of_52w_high, 0), '% of high',
+                      CASE WHEN news_pos_5d > 0 THEN ' · news' ELSE '' END) AS why,
                concat('https://www.tradingview.com/chart/?symbol=NSE%3A', translate(symbol, '&-', '__')) AS chart, trade_date
         FROM stocks.gold.momentum_ranks
         WHERE swing_rank <= 6
@@ -408,17 +407,18 @@ locals {
       SELECT strategy, CAST(rank AS INT) AS rank, symbol, company, close, why, chart
       FROM (
         SELECT 'Quality pick (weekly)' AS strategy, 1 AS grp, c.rank, c.symbol, c.company, m.close,
-               concat('score ', format_number(c.score, 1),
-                      coalesce(concat(' · weight ', format_number(c.target_weight_pct, 0), '%'), ''),
-                      coalesce(concat(' · ', c.reasons), '')) AS why,
+               concat_ws(' · ', concat('score ', format_number(c.score, 0)),
+                         CASE WHEN c.is_financial THEN concat('ROA ', format_number(c.roa_pct, 1), '%')
+                              ELSE concat('ROCE ', format_number(c.roce_pct, 0), '%') END,
+                         concat('growth ', format_number(c.profit_cagr_3y_pct, 0), '%'),
+                         concat('P/E below ', format_number(100 - c.pe_percentile, 0), '%')) AS why,
                concat('https://www.tradingview.com/chart/?symbol=NSE%3A', translate(c.symbol, '&-', '__')) AS chart
         FROM stocks.gold.longterm_candidates c
         LEFT JOIN stocks.gold.momentum_ranks m ON m.symbol = c.symbol
         WHERE c.rank <= 10
         UNION ALL
         SELECT 'Momentum top 15', 2, lt_rank, symbol, company, close,
-               concat('6m ', format_number(ret_6m_pct, 1), '% · 12m ', format_number(ret_12m_pct, 1),
-                      '% · volatility ', format_number(vol_1y_pct, 0), '%'),
+               concat(concat(CASE WHEN ret_6m_pct >= 0 THEN '+' ELSE '' END, format_number(ret_6m_pct, 0)), '% 6m · ', concat(CASE WHEN ret_12m_pct >= 0 THEN '+' ELSE '' END, format_number(ret_12m_pct, 0)), '% 12m · vol ', format_number(vol_1y_pct, 0), '%'),
                concat('https://www.tradingview.com/chart/?symbol=NSE%3A', translate(symbol, '&-', '__'))
         FROM stocks.gold.momentum_ranks
         WHERE lt_rank <= 15
