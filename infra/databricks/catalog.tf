@@ -60,6 +60,17 @@ resource "databricks_volume" "trader_morning" {
   comment      = "paper-trader's latest morning (plan, pre-open, stocks in play) as latest.jsonl, overwritten by the stocks-app-export Lambda. Managed by Terraform."
 }
 
+# A first latest.jsonl so the dashboard's two morning tables (and the SQL check) work before the app export writes
+# the real one; the export overwrites it, and Terraform leaves it alone after that.
+resource "databricks_file" "trader_morning_seed" {
+  path           = "${databricks_volume.trader_morning.volume_path}/latest.jsonl"
+  content_base64 = base64encode("{\"date\": \"\", \"page\": \"desk\", \"section\": \"0 Waiting\", \"item\": \"Appears after the next app refresh\", \"detail\": \"\"}\n{\"date\": \"\", \"page\": \"intraday\", \"section\": \"0 Waiting\", \"item\": \"Appears after the next app refresh\", \"detail\": \"\"}\n")
+
+  lifecycle {
+    ignore_changes = [content_base64, md5, source]
+  }
+}
+
 # Make sure each source folder exists in the landing volume, so Auto Loader has
 # a path to watch even before a source's first file arrives (e.g. FRED until its
 # API key is set). The pipeline only reads *.csv / *.json, so these are ignored.
