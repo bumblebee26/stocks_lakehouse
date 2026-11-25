@@ -265,33 +265,41 @@ def _pct(v):
 
 
 def morning_lines(row):
-    """The morning as flat rows (section, item, detail) for the dashboard's 'This morning' table."""
+    """The morning as flat rows (page, section, item, detail) for the dashboard: page 'desk' = the market (India VIX
+    and bias, pre-open gaps, the opening read); page 'intraday' = the trader's plan (risk per trade, focus list,
+    stocks in play)."""
     if not row:
         return []
     out, p, r = [], row.get("plan") or {}, row.get("read") or {}
-    add = lambda sec, item, detail="": out.append({"date": row["date"], "section": sec, "item": item, "detail": detail})  # noqa: E731
-    if p.get("vix") is not None:
-        add("1 Plan", f"India VIX {p['vix']:.1f}", f"risk {p.get('risk_pct')}% per trade")
-    if p.get("bias"):
-        add("1 Plan", f"Bias: {p['bias']}", p.get("regime") or "")
-    if row.get("focus"):
-        add("2 Focus", f"{len(row['focus'])} stocks", ", ".join(row["focus"]))
+
+    def add(page, sec, item, detail=""):
+        out.append({"date": row["date"], "page": page, "section": sec, "item": item, "detail": detail})
+
+    def gap(g):
+        return _pct(g["gap_pct"]) + (f", buy/sell {g['buy_sell']:g}x" if g.get("buy_sell") else "")
+    if p.get("vix") is not None or p.get("bias"):
+        add("desk", "1 Market", f"India VIX {p['vix']:.1f}" if p.get("vix") is not None else "India VIX –",
+            "; ".join(x for x in [f"bias: {p['bias']}" if p.get("bias") else "", p.get("regime") or ""] if x))
     for g in row.get("gaps_up") or []:
-        add("3 Pre-open gaps up", g["symbol"], _pct(g["gap_pct"]) + (f", buy/sell {g['buy_sell']:g}x" if g.get("buy_sell") else ""))
+        add("desk", "2 Pre-open gaps up", g["symbol"], gap(g))
     for g in row.get("gaps_down") or []:
-        add("4 Pre-open gaps down", g["symbol"], _pct(g["gap_pct"]) + (f", buy/sell {g['buy_sell']:g}x" if g.get("buy_sell") else ""))
+        add("desk", "3 Pre-open gaps down", g["symbol"], gap(g))
     if r.get("nifty_gap_pct") is not None:
-        add("5 Opening read", f"Nifty opened {_pct(r['nifty_gap_pct'])}, {_pct(r.get('nifty_first10_pct'))} in 10 min ({r.get('nifty_gap')})",
+        add("desk", "4 Opening read", f"Nifty opened {_pct(r['nifty_gap_pct'])}, {_pct(r.get('nifty_first10_pct'))} in 10 min ({r.get('nifty_gap')})",
             "; ".join(x for x in [f"{r['up_from_open']} stocks up from their open" if r.get("up_from_open") else "",
                                   f"opening range {round(r['median_or_vs_day_range'] * 100)}% of a usual day's"
                                   if r.get("median_or_vs_day_range") is not None else "",
                                   f"India VIX {_pct(r.get('india_vix_change_pct'))}" if r.get("india_vix_change_pct") is not None else ""] if x))
+    if p.get("risk_pct") is not None:
+        add("intraday", "1 Plan", f"Risk {p['risk_pct']}% per trade", f"set from India VIX {p['vix']:.1f}" if p.get("vix") is not None else "")
+    if row.get("focus"):
+        add("intraday", "2 Focus", f"{len(row['focus'])} stocks", ", ".join(row["focus"]))
     for i, t in enumerate(row.get("top") or [], 1):
         bits = [f"score {t.get('score')}", f"{t.get('rvol')}x usual volume", f"gap {_pct(t.get('gap_pct'))}"]
         bits += ["news"] if t.get("news") else []
         bits += [f"pre-open {_pct(t['preopen_gap'])}" + (f", buy/sell {t['buy_sell']:g}x" if t.get("buy_sell") else "")] \
             if t.get("preopen_gap") is not None else []
-        add("6 In play at 09:25", f"{i}. {t.get('symbol')}", " · ".join(bits))
+        add("intraday", "3 In play at 09:25", f"{i}. {t.get('symbol')}", " · ".join(bits))
     return out
 
 

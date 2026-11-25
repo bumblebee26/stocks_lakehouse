@@ -126,7 +126,8 @@ svg.chart.hl polyline.on { opacity: 1; stroke-width: 3.5 }
 .tests .tl { font-size: 13px; padding: 3px 0 }
 .tests .tl > span { color: var(--fg) }
 .vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap }
-.mkt { grid-template-columns: repeat(5, minmax(0, 1fr)); margin-bottom: 6px }
+.mkt { grid-template-columns: repeat(6, minmax(0, 1fr)); margin-bottom: 6px }
+.mkt button { padding: 0 2px }
 .mkt button { font-size: 12px }
 .axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; margin-top: 2px }
 nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 3; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); background: var(--card); border-top: 1px solid var(--line); padding: 4px 4px calc(env(safe-area-inset-bottom) + 6px) }
@@ -348,9 +349,10 @@ function desk() {
     <div class="tile"><span class="l">Your calls right</span><span class="v">${k.calls_right_pct == null ? "–" : esc(k.calls_right_pct) + "%"}</span></div>
   </div>
   ${glance()}
+  ${marketMorning()}
   <section class="card"><h3>Each pool (since 18 Nov)</h3>${rows("desk_pools").map((r) => `<div class="row"><div class="n"><b>${esc(r.pool)}</b><span>${rs(r.value_rs)} now</span></div><div class="r ${cls(r.pnl_rs)}">${rs(r.pnl_rs, true)}<br><span style="font-weight:500;font-size:12px">${pct(r.return_pct, true)}</span></div></div>`).join("") || '<p class="muted">No data yet.</p>'}</section>
   <section class="card"><h3>Today's decisions</h3>${dec}</section>
-  ${custom()}`;
+`;
 }
 
 // Today-only rule (24 Nov): the Desk and Markets' India figures show only today's (IST) values, from the evening
@@ -416,7 +418,7 @@ function intraday() {
     <div class="tile"><span class="l">Average R a trade</span><span class="v ${cls(k.expectancy_r)}">${esc(k.expectancy_r)}</span></div>
     <div class="tile"><span class="l">Profit factor</span><span class="v">${esc(k.profit_factor)}</span></div>
   </div>
-  ${morning()}
+  ${intradayPlan()}
   ${seg("intraday")}
   <section class="card"><h3>P&amp;L since 18 Nov</h3>${plChart(rows("intra_lines"), { key: "intraday", x: "trade_date", y: "total_rs", line: "line",
     kindOf: (r) => (r.kind === "Real" ? "real" : "shadow"), label: "Intraday P&L, real and shadows", max: 8 })}
@@ -426,30 +428,42 @@ function intraday() {
   <section class="card"><h3>Selector (paper)</h3>${sel || '<p class="muted">Starts after Monday\'s day report.</p>'}</section>`;
 }
 
-function morning() {
-  // The trader's morning (paper-trader files): the day plan (India VIX -> risk, bias, focus list), NSE's pre-open
-  // gaps, the 09:25 opening read and the top 5 stocks in play. Information only.
-  const m = rows("morning")[0];
-  if (!m) return '<section class="card"><h3>This morning</h3><p class="muted">Appears after the next trading morning.</p></section>';
+// The trader's morning (paper-trader files), today only (dayState): the market part on Desk, the trader's own plan
+// on Intraday. Information only.
+function todaysMorning() {
+  const m = rows("morning")[0], d = dayState();
+  return m && m.date === d.today && !d.closed ? m : null;
+}
+const gapRow = (g) => `<div class="row"><div class="n"><b>${esc(g.symbol)}</b>${g.buy_sell == null ? "" : `<span>buy/sell ${esc(g.buy_sell)}x</span>`}</div><div class="r ${cls(g.gap_pct)}">${pct(g.gap_pct, true)}</div></div>`;
+function marketMorning() {
+  const m = todaysMorning();
+  if (!m) return "";
   const p = m.plan || {}, r = m.read || {}, bits = [];
-  const planLine = p.vix != null ? `India VIX ${Number(p.vix).toFixed(1)} → risk ${esc(p.risk_pct)}% a trade` : p.risk_pct != null ? `Risk ${esc(p.risk_pct)}% a trade` : "";
-  const plan = planLine || p.bias ? `<div class="sub">Plan</div><p style="margin:2px 0 4px;font-size:14px">${[planLine, p.bias ? `bias: ${esc(p.bias)}` : ""].filter(Boolean).join(" · ")}</p>` : "";
-  const focus = (m.focus || []).length ? `<div class="sub">Focus (${m.focus.length})</div><div>${m.focus.map((f) => `<span class="pill">${esc(f)}</span>`).join("")}</div>` : "";
-  const gap = (g) => `<div class="row"><div class="n"><b>${esc(g.symbol)}</b>${g.buy_sell == null ? "" : `<span>buy/sell ${esc(g.buy_sell)}x</span>`}</div><div class="r ${cls(g.gap_pct)}">${pct(g.gap_pct, true)}</div></div>`;
+  const mood = [p.vix != null ? `India VIX ${Number(p.vix).toFixed(1)}` : "", p.bias ? `bias: ${esc(p.bias)}` : ""].filter(Boolean).join(" · ");
   const gaps = (m.gaps_up || []).length || (m.gaps_down || []).length
-    ? `<div class="sub">Pre-open gaps (${esc(m.preopen_count)} stocks)</div><div class="tiles" style="gap:0 14px"><div>${(m.gaps_up || []).map(gap).join("") || '<p class="muted">None up</p>'}</div>`
-      + `<div>${(m.gaps_down || []).map(gap).join("") || '<p class="muted">None down</p>'}</div></div>` : "";
+    ? `<div class="sub">Pre-open gaps (${esc(m.preopen_count)} stocks)</div><div class="tiles" style="gap:0 14px"><div>${(m.gaps_up || []).map(gapRow).join("") || '<p class="muted">None up</p>'}</div>`
+      + `<div>${(m.gaps_down || []).map(gapRow).join("") || '<p class="muted">None down</p>'}</div></div>` : "";
   if (r.nifty_gap_pct != null) bits.push(`Nifty opened ${pct(r.nifty_gap_pct, true)} and moved ${pct(r.nifty_first10_pct, true)} in 10 min (${esc(r.nifty_gap)})`);
   if (r.up_from_open) bits.push(`${esc(r.up_from_open)} stocks up from their open`);
   if (r.median_or_vs_day_range != null) bits.push(`opening range ${Math.round(r.median_or_vs_day_range * 100)}% of a usual day's`);
   if (r.india_vix_change_pct != null) bits.push(`India VIX ${pct(r.india_vix_change_pct, true)}`);
-  const read = bits.length ? `<div class="sub">Opening read, 09:25</div><p style="margin:2px 0 4px;font-size:14px">${bits.join("; ")}.</p>` : "";
+  const read = bits.length ? `<div class="sub">Opening read, 09:25</div><p style="margin:2px 0 4px;font-size:14px">${bits.join("; ")}.</p>`
+    : '<p class="note">The opening read appears after 09:25.</p>';
+  return `<section class="card"><h3>Market this morning</h3>${mood ? `<p style="margin:0 0 4px;font-size:14px">${mood}</p>` : ""}${read}${gaps}`
+    + `<p class="note">NSE pre-open auction 09:00–09:08 and the first minutes of trading. Information only.</p></section>`;
+}
+function intradayPlan() {
+  const m = todaysMorning();
+  if (!m) return `<section class="card"><h3>Intraday plan</h3><p class="muted">${dayState().closed ? "Market closed today." : "Appears with the next trading morning's plan."}</p></section>`;
+  const p = m.plan || {};
+  const risk = p.risk_pct != null ? `<p style="margin:0 0 4px;font-size:14px">Risk ${esc(p.risk_pct)}% a trade${p.vix != null ? ` (set from India VIX ${Number(p.vix).toFixed(1)})` : ""}</p>` : "";
+  const focus = (m.focus || []).length ? `<div class="sub">Focus (${m.focus.length})</div><div>${m.focus.map((f) => `<span class="pill">${esc(f)}</span>`).join("")}</div>` : "";
   const top = (m.top || []).map((t, i) => `<div class="row"><div class="n"><b>${i + 1}. ${esc(t.symbol)}${t.news ? ' <span class="pill">news</span>' : ""}</b><span>${esc(t.rvol)}x usual volume · gap ${pct(t.gap_pct, true)}`
     + `${t.preopen_gap == null ? "" : ` · pre-open ${pct(t.preopen_gap, true)}`}${t.buy_sell == null ? "" : `, buy/sell ${esc(t.buy_sell)}x`}</span></div>`
     + `<div class="r">score ${esc(t.score)}</div></div>`).join("");
-  const play = top ? `<div class="sub">Stocks in play</div>${top}` : '<p class="note">Opening read and stocks in play appear after 09:25.</p>';
-  return `<section class="card"><h3>This morning (${esc(dayMonth(m.date))})</h3>${plan}${focus}${gaps}${read}${play}`
-    + `<p class="note">Rankings by opening activity, not a chance of profit. Information only.</p></section>`;
+  const play = top ? `<div class="sub">Stocks in play, 09:25</div>${top}` : '<p class="note">Stocks in play appear after 09:25.</p>';
+  return `<section class="card"><h3>Intraday plan (${esc(dayMonth(m.date))})</h3>${risk}${focus}${play}`
+    + `<p class="note">Ranked by opening activity, not a chance of profit. Market mood and pre-open gaps are on Desk.</p></section>`;
 }
 
 function autoBanner(key) {
@@ -545,6 +559,7 @@ const MKT_SERIES = {
   gold: ["Gold ₹/10 g", () => indianSeries("gold_5y", 10, "Gold 24K (999)"), (v) => rupees(v)],
   silver: ["Silver ₹/kg", () => indianSeries("silver_5y", 1000, "Silver (999)"), (v) => rupees(v)],
   usdinr: ["USD/INR", () => rows("usdinr_5y").map((x) => [x.date, num(x.close)]), (v) => v.toFixed(2)],
+  acn: ["ACN (Accenture, $)", () => rows("acn_5y").map((x) => [x.date, num(x.close)]), (v) => "$" + v.toFixed(2)],
 };
 // Gold and silver as you'd pay in India before making charges (25 Nov): the world price converted at USD/INR,
 // scaled so today's point equals today's IBJA rate (that gap is import duty and the local premium), plus 3% GST.
@@ -615,7 +630,7 @@ function markets() {
   <section class="card"><h3>Charts</h3>${switcher}${chart}<p class="note">${MKT === "gold" || MKT === "silver"
     ? (metal && got.scaled ? "Indian price incl. 3% GST: the world price × USD/INR each day, scaled so today matches today's IBJA rate (import duty and local premium), then GST. Making charges extra. "
        : "World price × USD/INR, before Indian duty and GST (the IBJA rate isn't in yet). ")
-    : ""}Daily closes from Yahoo Finance (weekly before the last five years).</p></section>`;
+    : MKT === "acn" ? "Accenture, NYSE: ACN, in US dollars. " : ""}Daily closes from Yahoo Finance (weekly before the last five years).</p></section>`;
 }
 
 function series5y(name, label) {
@@ -657,12 +672,6 @@ const rupees = (v) => (v == null ? "–" : "₹" + Math.round(v).toLocaleString(
 const tile = (label, value, move, extra) => `<div class="tile"><span class="l">${esc(label)}</span><span class="v">${value}</span>`
   + (move == null ? "" : `<span class="s ${cls(move)}">${pct(move, true)}</span>`) + (extra ? `<span class="l">${extra}</span>` : "") + "</div>";
 function dateBack(iso, years) { const d = new Date(iso); d.setFullYear(d.getFullYear() - years); return d.toISOString().slice(0, 10); }
-
-function custom() {
-  const ds = (D.datasets || {}).acn_5y || {};
-  return `<section class="card"><h3>${esc(ds.label || "Accenture (NYSE: ACN)")}</h3>${series5y("acn_5y", "Accenture")}
-    <p class="note">Daily closes in US dollars from Yahoo Finance, refreshed with each export.</p></section>`;
-}
 
 function render() {
   CHARTS.length = 0;

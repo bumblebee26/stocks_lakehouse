@@ -440,6 +440,14 @@ locals {
     trader_morning = <<-SQL
       SELECT date, regexp_replace(section, '^[0-9] ', '') AS part, item, detail
       FROM read_files('/Volumes/stocks/bronze/trader_morning/latest.jsonl', format => 'json')
+      WHERE page = 'intraday'
+      ORDER BY section, item
+    SQL
+
+    market_morning = <<-SQL
+      SELECT date, regexp_replace(section, '^[0-9] ', '') AS part, item, detail
+      FROM read_files('/Volumes/stocks/bronze/trader_morning/latest.jsonl', format => 'json')
+      WHERE page = 'desk'
       ORDER BY section, item
     SQL
 
@@ -969,6 +977,7 @@ locals {
       scanner_record       = ["signal", "days_after", "signals", "avg_return_pct", "vs_niftybees_pct", "beat_niftybees_pct"]
       market_banner        = ["market"]
       trader_morning       = ["date", "part", "item", "detail"]
+      market_morning       = ["date", "part", "item", "detail"]
       india_kpis           = ["trade_date", "nifty_close", "nifty_pct", "vix_close", "vix_pct", "advances", "declines"]
       sector_board         = ["kind", "sector", "change_pct", "up", "down", "stocks", "trade_date"]
       sector_stocks        = ["sector", "symbol", "close", "change_pct"]
@@ -1082,8 +1091,8 @@ locals {
   chart = {
     for k, c in {
       port_vs_nifty  = { ds = "portfolio_vs_nifty", type = "line", x = "snapshot_date", xt = "temporal", y = "index_value", color = "series", title = "Portfolio vs NIFTYBEES (both start at 100)", desc = "Above the NIFTYBEES line = beating simply holding the index.", pos = [0, 8, 7, 7] }
-      port_alloc     = { ds = "allocation_pool", type = "bar", x = "pool", xt = "categorical", y = "value_rs", color = null, title = "Where the money is (Rs)", desc = "Value of each real pool today.", pos = [6, 26, 3, 6] }
-      port_drawdown  = { ds = "portfolio_drawdown", type = "area", x = "snapshot_date", xt = "temporal", y = "drawdown_pct", color = null, title = "Below the best value so far (%)", desc = "0 = at its best; -5 = 5% below. Shallow, short dips are what you want.", pos = [9, 26, 3, 6] }
+      port_alloc     = { ds = "allocation_pool", type = "bar", x = "pool", xt = "categorical", y = "value_rs", color = null, title = "Where the money is (Rs)", desc = "Value of each real pool today.", pos = [6, 32, 3, 6] }
+      port_drawdown  = { ds = "portfolio_drawdown", type = "area", x = "snapshot_date", xt = "temporal", y = "drawdown_pct", color = null, title = "Below the best value so far (%)", desc = "0 = at its best; -5 = 5% below. Shallow, short dips are what you want.", pos = [9, 32, 3, 6] }
       intra_all      = { ds = "intra_lines", type = "line", x = "trade_date", xt = "temporal", y = "total_rs", color = "line", title = "Total since 18 Nov: real vs shadow (Rs)", desc = "Every version: exit rules (incl. the fixed 2R target, the trailing stop and the early exits) and models replay your real trades, so above the 'Real' line = it would have made more on the same trades. The opening-range test is separate paper trades. Use Show to pick lines.", pos = [0, 14, 12, 7] }
       intra_daily    = { ds = "intraday_daily_pnl", type = "bar", x = "trade_date", xt = "temporal", y = "day_pnl_rs", color = "result", title = "P&L each day (Rs)", desc = "One bar per trading day.", pos = [6, 21, 6, 7] }
       intra_setup    = { ds = "intraday_setup_chart", type = "bar", x = "setup", xt = "categorical", y = "net_pnl_rs", color = null, title = "By setup (Rs)", desc = "Which kinds of trade made or lost money.", pos = [0, 28, 4, 5] }
@@ -1131,12 +1140,13 @@ locals {
       market_banner     = { ds = "market_banner", title = "Market today", desc = "From NSE's own holiday list (read at 08:30 each weekday). On a market holiday it says so; otherwise it shows the next holiday.", pos = [0, 3, 12, 2] }
       desk_status       = { ds = "desk_status", title = "Today", desc = "Auto mode, India VIX and risk from the trader's export; mood from its latest proposal.", pos = [8, 0, 4, 3] }
       desk_setups       = { ds = "desk_setups", title = "Track record by setup (last 30 days)", desc = "Every proposal, taken or skipped, judged on what really happened. Under 10 is too few to judge.", pos = [7, 8, 5, 7] }
-      desk_pools        = { ds = "desk_pools", title = "Each pool: value and P&L since 18 Nov", desc = "Real pools only (dummy money). P&L = value now minus starting cash, after costs.", pos = [0, 15, 12, 3] }
-      desk_decisions    = { ds = "desk_decisions", title = "Today's decisions", desc = "Score gate, the independent reviewer, what happened, your rating and the result (R = one unit of risk).", pos = [0, 18, 7, 7] }
-      desk_board        = { ds = "desk_board", title = "Real and shadow pools", desc = "Return since each started, and vs NIFTYBEES over the same days.", pos = [7, 18, 5, 7] }
-      holdings          = { ds = "holdings", title = "What the real pools hold", desc = "Largest first. Weight = share of the whole portfolio.", pos = [0, 26, 6, 6] }
-      summary_portfolio = { ds = "summary_portfolio", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 32, 12, 4] }
-      intra_morning     = { ds = "trader_morning", title = "This morning (trader)", desc = "The day plan (India VIX -> risk per trade, bias, focus list), NSE's pre-open gaps and the 09:25 stocks in play, from the trader's own files; updated with every app refresh. Information only: a ranking, not a chance of profit.", pos = [0, 6, 12, 8] }
+      market_morning    = { ds = "market_morning", title = "Market this morning", desc = "India VIX and the trader's market bias, NSE's pre-open gaps (09:00-09:08 auction) and the 09:25 opening read; updated with every app refresh. Information only.", pos = [0, 15, 12, 6] }
+      desk_pools        = { ds = "desk_pools", title = "Each pool: value and P&L since 18 Nov", desc = "Real pools only (dummy money). P&L = value now minus starting cash, after costs.", pos = [0, 21, 12, 3] }
+      desk_decisions    = { ds = "desk_decisions", title = "Today's decisions", desc = "Score gate, the independent reviewer, what happened, your rating and the result (R = one unit of risk).", pos = [0, 24, 7, 7] }
+      desk_board        = { ds = "desk_board", title = "Real and shadow pools", desc = "Return since each started, and vs NIFTYBEES over the same days.", pos = [7, 24, 5, 7] }
+      holdings          = { ds = "holdings", title = "What the real pools hold", desc = "Largest first. Weight = share of the whole portfolio.", pos = [0, 32, 6, 6] }
+      summary_portfolio = { ds = "summary_portfolio", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 38, 12, 4] }
+      intra_morning     = { ds = "trader_morning", title = "Intraday plan this morning", desc = "Risk per trade (set from India VIX), the focus list and the 09:25 stocks in play, from the trader's own files; updated with every app refresh. Information only: a ranking, not a chance of profit.", pos = [0, 6, 12, 8] }
       intra_board       = { ds = "intra_board", title = "Real vs every shadow, same trades (since 18 Nov)", desc = "Total = what each would have made. Beat real = how often it did better trade by trade.", pos = [0, 21, 6, 7] }
       intra_recent      = { ds = "trading_recent", title = "Latest trades", desc = "Since 18 Nov, newest first.", pos = [0, 33, 12, 7] }
       intra_bt_table    = { ds = "backtest_latest", title = "Backtest details (latest run)", desc = "All rules on the same setups. Worst day = the worst single day's total.", pos = [0, 47, 12, 6] }
@@ -1195,7 +1205,7 @@ locals {
   text = {
     for k, t in {
       desk_title     = { lines = ["## Paper Trader · Desk", "Whole portfolio, dummy money, since the 18 Nov reset. Updated after 15:45 and 23:30 IST. Not advice."], pos = [0, 0, 8, 3] }
-      desk_details   = { lines = ["### Details"], pos = [0, 25, 12, 1] }
+      desk_details   = { lines = ["### Details"], pos = [0, 31, 12, 1] }
       intra_title    = { lines = ["## Intraday", "Real pool Rs 40,000 since 18 Nov. Shadow lines replay your real trades under other exit rules and the shadow models; the opening-range test trades on paper."], pos = [0, 0, 8, 3] }
       intra_tests    = { lines = ["### Model tests on ~200 stocks (paper)"], pos = [0, 40, 12, 1] }
       swing_title    = { lines = ["## Swing", "Real pool Rs 60,000 in auto mode from 24 Nov (momentum + news rules; idle cash in NIFTYBEES) vs four shadow strategies on paper, same costs. Not advice."], pos = [0, 0, 8, 3] }
@@ -1230,7 +1240,7 @@ locals {
           local.text.desk_title, local.table_widget.desk_status, local.table_widget.market_banner,
           local.counter.desk_value, local.counter.desk_return, local.counter.desk_today,
           local.counter.desk_trades, local.counter.desk_proposals, local.counter.desk_calls,
-          local.chart.port_vs_nifty, local.table_widget.desk_setups,
+          local.chart.port_vs_nifty, local.table_widget.desk_setups, local.table_widget.market_morning,
           local.table_widget.desk_pools, local.table_widget.desk_decisions, local.table_widget.desk_board,
           local.text.desk_details, local.table_widget.holdings, local.chart.port_alloc, local.chart.port_drawdown,
           local.table_widget.summary_portfolio,

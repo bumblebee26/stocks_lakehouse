@@ -202,11 +202,15 @@ class YahooSeries(unittest.TestCase):
         self.assertEqual([g["symbol"] for g in row["gaps_down"]], ["APLAPOLLO"])
         self.assertTrue(row["top"][0]["news"])
         lines = app_export.morning_lines(row)
-        self.assertIn({"date": "2026-11-25", "section": "1 Plan", "item": "India VIX 17.7", "detail": "risk 1.0% per trade"}, lines)
-        self.assertIn("2 Focus", {x["section"] for x in lines})
-        up = [x for x in lines if x["section"] == "3 Pre-open gaps up"]
-        self.assertEqual(up[0]["detail"], "+5.9%, buy/sell 1.38x")
-        play = [x for x in lines if x["section"] == "6 In play at 09:25"][0]
+        self.assertIn({"date": "2026-11-25", "page": "desk", "section": "1 Market", "item": "India VIX 17.7",
+                       "detail": "bias: uptrend"}, lines)
+        self.assertIn({"date": "2026-11-25", "page": "intraday", "section": "1 Plan", "item": "Risk 1.0% per trade",
+                       "detail": "set from India VIX 17.7"}, lines)
+        self.assertEqual({x["page"] for x in lines if x["section"] == "2 Focus"}, {"intraday"})
+        up = [x for x in lines if x["section"] == "2 Pre-open gaps up"]
+        self.assertEqual((up[0]["page"], up[0]["detail"]), ("desk", "+5.9%, buy/sell 1.38x"))
+        self.assertEqual({x["page"] for x in lines if x["section"] == "4 Opening read"}, {"desk"})
+        play = [x for x in lines if x["section"] == "3 In play at 09:25"][0]
         self.assertEqual(play["item"], "1. APLAPOLLO")
         self.assertIn("news", play["detail"])
         # plan only (before 09:25) still makes a morning
