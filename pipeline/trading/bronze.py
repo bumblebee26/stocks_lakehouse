@@ -47,7 +47,9 @@ def with_lineage(df):
 #   /Volumes/stocks/bronze/landing/trades/date=YYYY-MM-DD/events.jsonl
 # One line per event (proposed, filled, exited, rejected, ...), a unique event_id on each,
 # and a final ledger_snapshot line (balance and realized P&L at export time).
-# A re-export overwrites the same file; silver keeps the newest copy of each event_id.
+# A re-export overwrites the same file. Auto Loader skips a file it has seen unless allowOverwrites is on (it
+# wasn't until 26 Nov, so the 23:30 export and evening ratings never arrived); silver keeps the newest copy of
+# each event_id.
 #
 # SQL equivalent:
 #   CREATE OR REFRESH STREAMING TABLE stocks.bronze.trades_raw
@@ -82,6 +84,7 @@ def trades_raw():
         .option("pathGlobFilter", "*.jsonl")
         .option("rescuedDataColumn", "_rescued_data")
         .option("cloudFiles.partitionColumns", "")
+        .option("cloudFiles.allowOverwrites", "true")   # re-exports overwrite a day's file: read it again
         .schema(TRADES_SCHEMA)
         .load(f"{LANDING}/trades/")
     )
@@ -114,6 +117,7 @@ def portfolio_raw():
         .option("pathGlobFilter", "*.jsonl")
         .option("rescuedDataColumn", "_rescued_data")
         .option("cloudFiles.partitionColumns", "")
+        .option("cloudFiles.allowOverwrites", "true")   # re-exports overwrite a day's file: read it again
         .schema(PORTFOLIO_SCHEMA)
         .load(f"{LANDING}/portfolio/")
     )
@@ -146,6 +150,7 @@ def pool_trades_raw():
         .option("pathGlobFilter", "*.jsonl")
         .option("rescuedDataColumn", "_rescued_data")
         .option("cloudFiles.partitionColumns", "")
+        .option("cloudFiles.allowOverwrites", "true")   # re-exports overwrite a day's file: read it again
         .schema(POOL_TRADES_SCHEMA)
         .load(f"{LANDING}/pool_trades/")
     )
