@@ -16,7 +16,7 @@ import urllib.request
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 HEREDOC = re.compile(r"^\s*(\w+)\s*=\s*<<-SQL\n(.*?)^\s*SQL\s*$", re.S | re.M)
 CTAS = re.compile(r"^\s*CREATE\s+OR\s+REPLACE\s+TABLE\s+\S+\s*(?:COMMENT\s+'[^']*'\s*)?AS\s*", re.I | re.S)
-NOT_FOUND = ("TABLE_OR_VIEW_NOT_FOUND",)
+NOT_FOUND = ("TABLE_OR_VIEW_NOT_FOUND", "UC_VOLUME_NOT_FOUND")   # new tables or volumes this change creates
 
 
 ONE_LINE_SQL = re.compile(r'^\s*(\w+_sql)\s*=\s*"(.*)"\s*$', re.M)
