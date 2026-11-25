@@ -363,7 +363,10 @@ function desk() {
   const rg = ranged("desk", [{ ...s("Your portfolio", css.getPropertyValue("--accent").trim()), real: true }, s("NIFTYBEES (index)", css.getPropertyValue("--nb").trim(), true)]);
   const chart = rg.chips + changeLine(rg.series[0], rg.range) + lineChart(rg.series, "Portfolio vs NIFTYBEES");
   const st = dayState(), isToday = k.day === st.today;
-  const dec = rows("desk_decisions").filter((d) => d.trade_date === st.today).map((d) => `<div class="row"><div class="n"><b>${esc(d.symbol)} · ${esc(d.setup)}</b><span>${esc(d.time)} · ${esc(d.decision)} · score ${esc(d.score)}</span></div><div class="you">${/👍/.test(d.you || "") ? `<span class="up">${ICON.thumbUp}</span>` : /👎/.test(d.you || "") ? `<span class="down">${ICON.thumbDown}</span>` : '<span class="muted">Unrated</span>'}</div><div class="r ${arrowCls(d.result) || (String(d.result).includes("−") ? "down" : String(d.result).includes("+") ? "up" : "muted")}">${esc(d.result)}</div></div>`).join("") || `<p class="muted">${st.closed ? "Market closed today: no proposals." : "Today's proposals appear after the close (evening update)."}</p>`;
+  // Today's proposals arrive after the close; until then the last session's stay, with a note (26 Nov)
+  const allDec = rows("desk_decisions"), decDay = allDec.some((d) => d.trade_date === st.today) ? st.today
+    : allDec.map((d) => d.trade_date).sort().at(-1);
+  const dec = allDec.filter((d) => d.trade_date === decDay).map((d) => `<div class="row"><div class="n"><b>${esc(d.symbol)} · ${esc(d.setup)}</b><span>${esc(d.time)} · ${esc(d.decision)} · score ${esc(d.score)}</span></div><div class="you">${/👍/.test(d.you || "") ? `<span class="up">${ICON.thumbUp}</span>` : /👎/.test(d.you || "") ? `<span class="down">${ICON.thumbDown}</span>` : '<span class="muted">Unrated</span>'}</div><div class="r ${arrowCls(d.result) || (String(d.result).includes("−") ? "down" : String(d.result).includes("+") ? "up" : "muted")}">${esc(d.result)}</div></div>`).join("") || `<p class="muted">${st.closed ? "Market closed today: no proposals." : "Today's proposals appear after the close (evening update)."}</p>`;
   return holidayCard() + story() + `
   <section class="card"><span class="muted" style="font-size:13px">Whole dummy portfolio</span><div class="big">${rs(k.portfolio_rs)}</div>
     <div class="${cls(k.since_reset_pct)}" style="font-weight:600">${pct(k.since_reset_pct, true)} overall</div>${chart}</section>
@@ -376,7 +379,7 @@ function desk() {
   ${glance()}
   ${marketMorning()}
   ${eachPool()}
-  <section class="card"><h3>Today's decisions (intraday)</h3>${dec}</section>
+  <section class="card"><h3>${decDay && decDay !== st.today ? `Decisions (intraday, ${esc(dayMonth(decDay))})` : "Today's decisions (intraday)"}</h3>${decDay && decDay !== st.today ? `<p class="note" style="margin-top:0">Recent trades. ${st.closed ? "Market closed today." : "Today's proposals load after the close."}</p>` : ""}${dec}</section>
 `;
 }
 
