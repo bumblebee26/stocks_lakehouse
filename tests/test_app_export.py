@@ -185,6 +185,35 @@ class YahooSeries(unittest.TestCase):
             "<tr><td>20/11/2026</td><td>123893</td><td>123397</td><td>113486</td><td>92920</td><td>72477</td>"
             "<td>152528</td><td>48730</td></tr></table></div>")
 
+    def test_morning_has_plan_focus_preopen_gaps_and_dashboard_lines(self):
+        plan = {"plan": {"india_vix": 17.7, "risk_per_trade_pct": 1.0, "bias": "uptrend"}, "focus": ["HDFCBANK", "INFY"]}
+        pre = {"stocks": {"POLICYBZR": {"gap_pct": 5.9, "buy_sell": 1.38}, "INFY": {"gap_pct": 3.5, "buy_sell": 0.51},
+                          "APLAPOLLO": {"gap_pct": -10.0, "buy_sell": None}, "TCS": {"gap_pct": 0.0}}}
+        opening = {"read": {"nifty_gap_pct": 1.15, "nifty_first10_pct": 0.28, "nifty_gap": "kept",
+                            "up_from_open": "21/44", "median_or_vs_day_range": 0.54, "india_vix_change_pct": -4.2},
+                   "stocks": [{"symbol": "APLAPOLLO", "score": 29.03, "rvol": 28.03, "gap_pct": -10.0, "news": True,
+                               "preopen": {"gap_pct": -10.0}}]}
+        s3 = FakeS3({"plans/2026-11-25.json": json.dumps(plan).encode(), "preopen/2026-11-25.json": json.dumps(pre).encode(),
+                     "opening/2026-11-25.json": json.dumps(opening).encode()})
+        morning, _ = app_export.trader_files(s3, "t", today=dt.date(2026, 11, 25))
+        row = morning["rows"][0]
+        self.assertEqual(row["plan"], {"vix": 17.7, "risk_pct": 1.0, "bias": "uptrend", "regime": None})
+        self.assertEqual([g["symbol"] for g in row["gaps_up"]], ["POLICYBZR", "INFY"])
+        self.assertEqual([g["symbol"] for g in row["gaps_down"]], ["APLAPOLLO"])
+        self.assertTrue(row["top"][0]["news"])
+        lines = app_export.morning_lines(row)
+        self.assertIn({"date": "2026-11-25", "section": "1 Plan", "item": "India VIX 17.7", "detail": "risk 1.0% per trade"}, lines)
+        self.assertIn("2 Focus", {x["section"] for x in lines})
+        up = [x for x in lines if x["section"] == "3 Pre-open gaps up"]
+        self.assertEqual(up[0]["detail"], "+5.9%, buy/sell 1.38x")
+        play = [x for x in lines if x["section"] == "6 In play at 09:25"][0]
+        self.assertEqual(play["item"], "1. APLAPOLLO")
+        self.assertIn("news", play["detail"])
+        # plan only (before 09:25) still makes a morning
+        s3b = FakeS3({"plans/2026-11-25.json": json.dumps(plan).encode()})
+        mb, _ = app_export.trader_files(s3b, "t", today=dt.date(2026, 11, 25))
+        self.assertEqual((mb["rows"][0]["top"], mb["rows"][0]["focus"]), ([], ["HDFCBANK", "INFY"]))
+
     def test_bullion_takes_the_latest_pm_rates_with_the_change(self):
         data, failed = app_export.bullion_rates({}, fetch=lambda: self.IBJA)
         self.assertFalse(failed)

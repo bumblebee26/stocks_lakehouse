@@ -4,7 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
-<meta name="theme-color" content="#0f151b">
+<meta name="theme-color" content="#020617">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<script>
+  // Theme before first paint (no flash): the saved choice, else the phone's setting.
+  try { const t = localStorage.getItem("theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch (e) {}
+</script>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Trading Desk">
@@ -15,27 +22,42 @@
 <style>
 /* NSE Paper Trading Desk, mobile. Layout A+B: tab bar app, the Desk tab opens with the day's story.
    Data: data/desk.json, written by the app-export Lambda after each Databricks job. Dummy money only. */
-:root {
-  --bg: #f4f6f8; --card: #ffffff; --fg: #16202a; --muted: #57636f; --line: #dfe4e9; --soft: #edf1f4;
-  --accent: #2563a6; --up: #1f6a40; --down: #a3311f; --nb: #8a96a2; --chip: #e3f2e9; --chip-fg: #1f6a40;
+:root {   /* light (ui-ux-pro-max "Financial Dashboard" palette, light variant; text contrast >= 4.5:1) */
+  --bg: #f1f5f9; --card: #ffffff; --fg: #0f172a; --muted: #475569; --line: #e2e8f0; --soft: #f1f5f9;
+  --accent: #2563eb; --up: #15803d; --down: #b91c1c; --nb: #64748b; --chip: #dcfce7; --chip-fg: #166534;
+  --heat-up: 22, 163, 74; --heat-down: 220, 38, 38; --shadow: 0 1px 2px rgba(15, 23, 42, .06);
+  color-scheme: light;
 }
-@media (prefers-color-scheme: dark) { :root {
-  --bg: #0f151b; --card: #161e26; --fg: #e5eaef; --muted: #9ba7b3; --line: #2b3641; --soft: #1d2731;
-  --accent: #75aee9; --up: #71c797; --down: #ff8a7a; --nb: #7d8995; --chip: #15301f; --chip-fg: #71c797;
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #020617; --card: #0e1223; --fg: #f8fafc; --muted: #94a3b8; --line: #1e293b; --soft: #1a1e2f;
+  --accent: #60a5fa; --up: #22c55e; --down: #f87171; --nb: #94a3b8; --chip: #052e16; --chip-fg: #4ade80;
+  --heat-up: 34, 197, 94; --heat-down: 248, 113, 113; --shadow: none; color-scheme: dark;
 } }
+:root[data-theme="dark"] {
+  --bg: #020617; --card: #0e1223; --fg: #f8fafc; --muted: #94a3b8; --line: #1e293b; --soft: #1a1e2f;
+  --accent: #60a5fa; --up: #22c55e; --down: #f87171; --nb: #94a3b8; --chip: #052e16; --chip-fg: #4ade80;
+  --heat-up: 34, 197, 94; --heat-down: 248, 113, 113; --shadow: none; color-scheme: dark;
+}
+@media (prefers-reduced-motion: no-preference) { button, .card, .tile { transition: background-color .2s, color .2s, border-color .2s } }
 * { box-sizing: border-box }
-html, body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif; -webkit-text-size-adjust: 100% }
-header { position: sticky; top: 0; z-index: 2; background: var(--bg); padding: calc(env(safe-area-inset-top) + 14px) 16px 10px; display: flex; justify-content: space-between; align-items: center; gap: 10px }
+html, body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-feature-settings: "tnum" 1, "cv11" 1; -webkit-text-size-adjust: 100% }
+header { position: sticky; top: 0; z-index: 2; background: var(--bg); padding: calc(env(safe-area-inset-top) + 10px) 16px 8px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px 10px }
+header .chips { grid-column: 1 / -1; justify-content: flex-start }
+header .chips:empty { display: none }
 header .t { display: flex; flex-direction: column }
 header .t b { font-size: 12px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted) }
 header .t span { font-size: 13px; color: var(--muted) }
+.hr { display: flex; align-items: center; gap: 8px }
 .chips { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end }
+.theme { flex: none; width: 44px; height: 44px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--fg); cursor: pointer; padding: 0 }
+.theme svg { width: 20px; height: 20px }
+.ic { width: 14px; height: 14px; vertical-align: -2px; flex: none }
 .chip { font-size: 12px; font-weight: 600; padding: 5px 9px; border-radius: 999px; background: var(--soft); color: var(--muted); white-space: nowrap }
 .chip.on { background: var(--chip); color: var(--chip-fg) }
 main { padding: 0 14px calc(env(safe-area-inset-bottom) + 86px); display: flex; flex-direction: column; gap: 12px; max-width: 640px; margin: 0 auto }
 h2 { font-size: 22px; margin: 4px 2px 0 }
-.card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px }
-.card h3 { font-size: 14px; margin: 0 0 8px }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px; box-shadow: var(--shadow) }
+.card h3 { font-size: 15px; font-weight: 600; margin: 0 0 10px }
 .story h1 { font-size: 22px; line-height: 1.2; margin: 2px 0 8px }
 .story p { margin: 6px 0; color: var(--fg) }
 .story .when { font-size: 12px; color: var(--muted) }
@@ -52,13 +74,13 @@ h2 { font-size: 22px; margin: 4px 2px 0 }
 .row .n span { font-size: 12px; color: var(--muted) }
 .row .r { font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap }
 .seg { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); background: var(--soft); border-radius: 10px; padding: 3px }
-.seg button { min-height: 40px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font: 600 13px inherit; font-family: inherit }
+.seg button { min-height: 44px; cursor: pointer; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font: 600 13px inherit; font-family: inherit }
 .seg button[aria-pressed="true"] { background: var(--card); color: var(--fg) }
 svg.chart { width: 100%; height: 140px; display: block; touch-action: pan-y }
 .cwrap { position: relative }
 .tip { position: absolute; top: -6px; transform: translateY(-100%); background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 6px 9px; font-size: 12px; line-height: 1.35; box-shadow: 0 4px 14px rgba(0,0,0,.15); pointer-events: none; max-width: 92%; z-index: 1 }
 .legend { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px }
-.lg { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 30px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--soft); color: var(--fg); font: 500 12px/1.2 inherit; font-family: inherit; cursor: pointer }
+.lg { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 44px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--soft); color: var(--fg); font: 500 12px/1.2 inherit; font-family: inherit; cursor: pointer }
 .lg i { flex: none; width: 14px; height: 3px; border-radius: 2px }
 .lg i.dash { background-image: linear-gradient(90deg, currentColor 55%, transparent 0) !important; background-size: 5px 3px }
 .lg span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
@@ -66,7 +88,7 @@ svg.chart { width: 100%; height: 140px; display: block; touch-action: pan-y }
 .lg[aria-pressed="true"] { background: var(--card); border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset }
 svg.chart.hl polyline { opacity: .15 }
 .rng { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; background: var(--soft); border-radius: 10px; padding: 3px; margin: 2px 0 6px }
-.rng button { min-height: 34px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font: 600 12px inherit; font-family: inherit }
+.rng button { min-height: 44px; cursor: pointer; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font: 600 12px inherit; font-family: inherit }
 .rng button[aria-pressed="true"] { background: var(--card); color: var(--fg); box-shadow: 0 1px 2px rgba(0,0,0,.08) }
 .rng button:disabled { opacity: .35 }
 .holiday { position: relative; padding-right: 48px }
@@ -94,27 +116,32 @@ svg.chart.hl polyline.on { opacity: 1; stroke-width: 3.5 }
 .banner p { margin: 0; font-size: 13px; color: var(--fg) }
 .tiles.bul .v { font-size: 17px; white-space: nowrap }
 .heat { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px }
-.heat button { min-height: 56px; min-width: 0; border: 1px solid transparent; border-radius: 10px; padding: 6px 7px; text-align: left; color: var(--fg); font: 500 11px/1.3 inherit; font-family: inherit; cursor: pointer; white-space: nowrap }
+.heat button { min-height: 60px; min-width: 0; border: 1px solid transparent; border-radius: 10px; padding: 6px 7px; text-align: left; color: var(--fg); font: 500 11px/1.3 inherit; font-family: inherit; cursor: pointer; white-space: nowrap }
 .heat button span { display: block; font-size: 12px; font-weight: 700 }
 .heat button b { display: block; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .heat button[aria-pressed="true"] { border-color: var(--fg) }
 .heat button:disabled { cursor: default }
-.row.pick { width: 100%; background: none; border-left: 0; border-right: 0; border-bottom: 0; color: var(--fg); font: inherit; text-align: left; cursor: pointer }
+.row.pick { width: 100%; min-height: 52px; background: none; border-left: 0; border-right: 0; border-bottom: 0; color: var(--fg); font: inherit; text-align: left; cursor: pointer }
 .tests { padding: 2px 0 8px }
 .tests .tl { font-size: 13px; padding: 3px 0 }
+.tests .tl > span { color: var(--fg) }
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap }
 .mkt { grid-template-columns: repeat(5, minmax(0, 1fr)); margin-bottom: 6px }
 .mkt button { font-size: 12px }
 .axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; margin-top: 2px }
 nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 3; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); background: var(--card); border-top: 1px solid var(--line); padding: 4px 4px calc(env(safe-area-inset-bottom) + 6px) }
-nav button { min-height: 50px; border: 0; background: none; color: var(--muted); font: 600 12px inherit; font-family: inherit; border-top: 3px solid transparent }
+nav button { min-height: 52px; border: 0; background: none; cursor: pointer; color: var(--muted); font: 600 12px inherit; font-family: inherit; border-top: 3px solid transparent }
 nav button[aria-current="page"] { color: var(--accent); border-top-color: var(--accent) }
 .err { border-color: var(--down) }
-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+.pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--soft); margin: 2px 4px 2px 0 }
+.ok { display: flex; gap: 6px; align-items: flex-start }
 </style>
 </head>
 <body>
 <header>
   <div class="t"><b>NSE Paper Trading Desk</b><span id="updated">Loading…</span></div>
+  <button type="button" class="theme" id="theme" aria-label="Switch to light theme"></button>
   <div class="chips" id="chips"></div>
 </header>
 <main id="main" aria-live="polite"></main>
@@ -128,6 +155,22 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
 <script>
 "use strict";
 let D = {};
+// Small inline SVG icons (Lucide-style strokes); the meaning is always also in the text next to them.
+const ICON = {
+  star: '<svg class="ic" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4 6.1 20.5l1.2-6.5L2.5 9.4l6.6-.9z"/></svg>',
+  check: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>',
+  cross: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+  dash: '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M6 12h12"/></svg>',
+  sun: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
+  moon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11z"/></svg>',
+};
+const isDark = () => (document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) === "dark";
+function paintThemeButton() {
+  const b = document.getElementById("theme"), dark = isDark();
+  b.innerHTML = dark ? ICON.sun : ICON.moon;
+  b.setAttribute("aria-label", dark ? "Switch to light theme" : "Switch to dark theme");
+  document.querySelector('meta[name="theme-color"]').setAttribute("content", dark ? "#020617" : "#f1f5f9");
+}
 let tab = "desk";
 let show = { swing: "both", long: "both", intraday: "both" };
 try { tab = localStorage.getItem("tab") || "desk"; if (tab === "custom") tab = "desk"; } catch (e) {}
@@ -219,7 +262,10 @@ function changeLine(s, range, kind) {
   return `<p class="chg"><b>${esc(label)}</b> · ${esc(s.name)} <span class="${cls(b - a)}">${pct(a ? (b / a - 1) * 100 : null, true)}</span></p>`;
 }
 
-const PALETTE = ["#2563a6", "#b4560b", "#6a4fb9", "#1f6a40", "#a3311f", "#0e7c86", "#8a6d00", "#c0368c", "#4b5563"];
+// Line colours per theme (distinct hues, >= 3:1 against the card in both themes).
+const PAL_LIGHT = ["#2563eb", "#c2410c", "#7c3aed", "#15803d", "#b91c1c", "#0e7490", "#a16207", "#be185d", "#475569"];
+const PAL_DARK = ["#60a5fa", "#fb923c", "#a78bfa", "#4ade80", "#f87171", "#22d3ee", "#facc15", "#f472b6", "#cbd5e1"];
+const palette = () => (isDark() ? PAL_DARK : PAL_LIGHT);
 function thin(points, max = 260) {   // keep long series light on a phone: every nth point, always the last
   if (points.length <= max) return points;
   const step = Math.ceil(points.length / max);
@@ -242,7 +288,7 @@ function plChart(rows, o) {
   const best = rest.slice(0, 5), worst = rest.slice(5).slice(-2);
   const names = [...real, ...best, ...worst];
   const total = Object.keys(by).length;
-  const series = names.map((n, i) => ({ name: n, real: by[n].kind === "real", color: by[n].kind === "real" ? "var(--fg)" : PALETTE[i % PALETTE.length],
+  const series = names.map((n, i) => ({ name: n, real: by[n].kind === "real", color: by[n].kind === "real" ? "var(--fg)" : palette()[i % palette().length],
     dash: by[n].kind === "benchmark", points: by[n].points }));
   const css = getComputedStyle(document.documentElement);
   series.forEach((s) => { if (s.color === "var(--fg)") s.color = css.getPropertyValue("--fg").trim(); });
@@ -381,19 +427,29 @@ function intraday() {
 }
 
 function morning() {
-  // The trader's 09:25 opening read and its top 5 stocks in play (paper-trader opening/<day>.json). Information only.
+  // The trader's morning (paper-trader files): the day plan (India VIX -> risk, bias, focus list), NSE's pre-open
+  // gaps, the 09:25 opening read and the top 5 stocks in play. Information only.
   const m = rows("morning")[0];
-  if (!m) return '<section class="card"><h3>This morning</h3><p class="muted">Appears after the next trading morning (09:25).</p></section>';
-  const r = m.read || {}, bits = [];
+  if (!m) return '<section class="card"><h3>This morning</h3><p class="muted">Appears after the next trading morning.</p></section>';
+  const p = m.plan || {}, r = m.read || {}, bits = [];
+  const planLine = p.vix != null ? `India VIX ${Number(p.vix).toFixed(1)} → risk ${esc(p.risk_pct)}% a trade` : p.risk_pct != null ? `Risk ${esc(p.risk_pct)}% a trade` : "";
+  const plan = planLine || p.bias ? `<div class="sub">Plan</div><p style="margin:2px 0 4px;font-size:14px">${[planLine, p.bias ? `bias: ${esc(p.bias)}` : ""].filter(Boolean).join(" · ")}</p>` : "";
+  const focus = (m.focus || []).length ? `<div class="sub">Focus (${m.focus.length})</div><div>${m.focus.map((f) => `<span class="pill">${esc(f)}</span>`).join("")}</div>` : "";
+  const gap = (g) => `<div class="row"><div class="n"><b>${esc(g.symbol)}</b>${g.buy_sell == null ? "" : `<span>buy/sell ${esc(g.buy_sell)}x</span>`}</div><div class="r ${cls(g.gap_pct)}">${pct(g.gap_pct, true)}</div></div>`;
+  const gaps = (m.gaps_up || []).length || (m.gaps_down || []).length
+    ? `<div class="sub">Pre-open gaps (${esc(m.preopen_count)} stocks)</div><div class="tiles" style="gap:0 14px"><div>${(m.gaps_up || []).map(gap).join("") || '<p class="muted">None up</p>'}</div>`
+      + `<div>${(m.gaps_down || []).map(gap).join("") || '<p class="muted">None down</p>'}</div></div>` : "";
   if (r.nifty_gap_pct != null) bits.push(`Nifty opened ${pct(r.nifty_gap_pct, true)} and moved ${pct(r.nifty_first10_pct, true)} in 10 min (${esc(r.nifty_gap)})`);
   if (r.up_from_open) bits.push(`${esc(r.up_from_open)} stocks up from their open`);
   if (r.median_or_vs_day_range != null) bits.push(`opening range ${Math.round(r.median_or_vs_day_range * 100)}% of a usual day's`);
   if (r.india_vix_change_pct != null) bits.push(`India VIX ${pct(r.india_vix_change_pct, true)}`);
-  const top = (m.top || []).map((t, i) => `<div class="row"><div class="n"><b>${i + 1}. ${esc(t.symbol)}</b><span>${esc(t.rvol)}x usual volume · gap ${pct(t.gap_pct, true)}`
+  const read = bits.length ? `<div class="sub">Opening read, 09:25</div><p style="margin:2px 0 4px;font-size:14px">${bits.join("; ")}.</p>` : "";
+  const top = (m.top || []).map((t, i) => `<div class="row"><div class="n"><b>${i + 1}. ${esc(t.symbol)}${t.news ? ' <span class="pill">news</span>' : ""}</b><span>${esc(t.rvol)}x usual volume · gap ${pct(t.gap_pct, true)}`
     + `${t.preopen_gap == null ? "" : ` · pre-open ${pct(t.preopen_gap, true)}`}${t.buy_sell == null ? "" : `, buy/sell ${esc(t.buy_sell)}x`}</span></div>`
     + `<div class="r">score ${esc(t.score)}</div></div>`).join("");
-  return `<section class="card"><h3>This morning (${esc(m.date)}, 09:25)</h3>${bits.length ? `<p style="margin:0 0 6px;font-size:14px">${bits.join("; ")}.</p>` : ""}`
-    + `${top ? `<div class="sub">Stocks in play</div>${top}` : ""}<p class="note">Ranked by opening activity, not a chance of profit. Information only.</p></section>`;
+  const play = top ? `<div class="sub">Stocks in play</div>${top}` : '<p class="note">Opening read and stocks in play appear after 09:25.</p>';
+  return `<section class="card"><h3>This morning (${esc(dayMonth(m.date))})</h3>${plan}${focus}${gaps}${read}${play}`
+    + `<p class="note">Rankings by opening activity, not a chance of profit. Information only.</p></section>`;
 }
 
 function autoBanner(key) {
@@ -420,23 +476,27 @@ let OPEN_PICK = "";
 function ltTests() {
   const r = rows("longterm_tests");
   if (!r.length) return "";
-  const mk = (t) => { const v = String(t || "–"); return `<div class="tl ${v.startsWith("✓") ? "up" : v.startsWith("✕") ? "down" : "muted"}">${esc(v)}</div>`; };
+  const mk = (t) => {
+    const v = String(t || "–"), pass = v.startsWith("✓"), fail = v.startsWith("✕");
+    const text = v.replace(/^[✓✕–]\s*/, ""), word = pass ? "Passed: " : fail ? "Failed: " : "";
+    return `<div class="tl ok ${pass ? "up" : fail ? "down" : "muted"}">${pass ? ICON.check : fail ? ICON.cross : ICON.dash}<span><span class="vh">${word}</span>${esc(text)}</span></div>`;
+  };
   const body = r.map((x) => {
     const open = OPEN_PICK === x.symbol;
     return `<button type="button" class="row pick" data-pick="${esc(x.symbol)}" aria-expanded="${open}"><span class="n"><b>${esc(x.rank)}. ${esc(x.symbol)}</b>`
       + `<span>${esc(x.company)}</span></span><span class="r">${esc(x.passed)}<br><span class="muted" style="font-weight:500;font-size:12px">${open ? "hide" : "tests"}</span></span></button>`
       + (open ? `<div class="tests">${["capital", "debt", "cash", "growth", "price"].map((k) => mk(x[k])).join("")}</div>` : "");
   }).join("");
-  return `<section class="card"><h3>Why the quality picks qualify</h3>${body}<p class="note">Tap a pick for each test: ✓ passed, ✕ failed, and how far from the line. A thin margin can flip at the next results.</p></section>`;
+  return `<section class="card"><h3>Why the quality picks qualify</h3>${body}<p class="note">Tap a pick for each test: tick = passed, cross = failed, and how far from the line. A thin margin can flip at the next results.</p></section>`;
 }
 
 function pool(title, ds, key) {
   const k = one(ds + "_kpis");
   const starred = (r) => k.best_shadow != null && r.strategy === k.best_shadow;
   const sb = rows(ds + "_scoreboard").filter((r) => keep(key, r.kind)).sort((a, b) => starred(b) - starred(a));
-  const board = sb.map((r) => `<div class="row"><div class="n"><b>${starred(r) ? "★ " : ""}${esc(r.strategy)}</b><span>${esc(r.kind)} · since ${esc(r.since)}${r.value_rs == null ? "" : " · " + rs(r.value_rs) + " (" + rs(r.pnl_rs, true) + ")"}${r.trades == null ? "" : " · " + esc(r.trades) + " trades"}</span></div><div class="r"><span class="${cls(r.return_pct)}">${pct(r.return_pct, true)}</span><br><span class="${arrowCls(r.vs_niftybees)}" style="font-weight:500;font-size:12px">${esc(r.vs_niftybees)}</span></div></div>`).join("");
+  const board = sb.map((r) => `<div class="row"><div class="n"><b>${starred(r) ? `<span class="up" aria-label="best shadow">${ICON.star}</span> ` : ""}${esc(r.strategy)}</b><span>${esc(r.kind)} · since ${esc(r.since)}${r.value_rs == null ? "" : " · " + rs(r.value_rs) + " (" + rs(r.pnl_rs, true) + ")"}${r.trades == null ? "" : " · " + esc(r.trades) + " trades"}</span></div><div class="r"><span class="${cls(r.return_pct)}">${pct(r.return_pct, true)}</span><br><span class="${arrowCls(r.vs_niftybees)}" style="font-weight:500;font-size:12px">${esc(r.vs_niftybees)}</span></div></div>`).join("");
   const trades = rows(ds + "_trades").filter((r) => keep(key, r.kind)).slice(0, 15).map((r) => `<div class="row"><div class="n"><b>${esc(r.side)} ${esc(r.symbol)} · ${esc(r.qty)} @ ${esc(r.price)}</b><span>${esc(r.trade_date)} · ${esc(r.strategy)}${r.reason ? " · " + esc(r.reason) : ""}</span></div><div class="r ${cls(r.pnl_rs)}">${r.pnl_rs == null ? rs(r.value_rs) : rs(r.pnl_rs, true)}</div></div>`).join("");
-  const bestNote = k.best_shadow == null ? "" : `<p class="note">★ Best shadow so far; ${esc(k.shadows_beating)} shadow(s) ahead of NIFTYBEES (${pct(k.niftybees_pct, true)}).</p>`;
+  const bestNote = k.best_shadow == null ? "" : `<p class="note">${ICON.star} Best shadow so far; ${esc(k.shadows_beating)} shadow(s) ahead of NIFTYBEES (${pct(k.niftybees_pct, true)}).</p>`;
   return `<h2>${title}</h2>
   ${autoBanner(key)}
   <div class="tiles">
@@ -482,15 +542,23 @@ try { MKT = localStorage.getItem("mkt") || "nifty"; } catch (e) {}
 const MKT_SERIES = {
   nifty: ["Nifty 50", () => rows("nifty_5y").map((x) => [x.date, num(x.close)]), (v) => Math.round(v).toLocaleString("en-IN")],
   sensex: ["Sensex", () => rows("sensex_5y").map((x) => [x.date, num(x.close)]), (v) => Math.round(v).toLocaleString("en-IN")],
-  gold: ["Gold ₹/10 g", () => inrSeries("gold_5y", 10), (v) => rupees(v)],
-  silver: ["Silver ₹/kg", () => inrSeries("silver_5y", 1000), (v) => rupees(v)],
+  gold: ["Gold ₹/10 g", () => indianSeries("gold_5y", 10, "Gold 24K (999)"), (v) => rupees(v)],
+  silver: ["Silver ₹/kg", () => indianSeries("silver_5y", 1000, "Silver (999)"), (v) => rupees(v)],
   usdinr: ["USD/INR", () => rows("usdinr_5y").map((x) => [x.date, num(x.close)]), (v) => v.toFixed(2)],
 };
+// Gold and silver as you'd pay in India before making charges (25 Nov): the world price converted at USD/INR,
+// scaled so today's point equals today's IBJA rate (that gap is import duty and the local premium), plus 3% GST.
+const GST = 1.03;
+function indianSeries(name, grams, item) {
+  const pts = inrSeries(name, grams), r = rows("bullion_in").find((x) => x.item === item);
+  const k = r && num(r.rate) && pts.length ? num(r.rate) / pts.at(-1)[1] : null;
+  return { pts: k ? pts.map(([d, v]) => [d, v * k * GST]) : pts, scaled: !!k };
+}
 function sectors() {
   const r = rows("sector_board");
   if (!r.length) return '<section class="card"><h3>Sectors at the close</h3><p class="muted">Appears after the next export.</p></section>';
   const shade = (v) => { const n = num(v) || 0, a = (0.12 + Math.min(Math.abs(n) / 2.5, 1) * 0.5).toFixed(2);
-    return n >= 0 ? `rgba(46,160,96,${a})` : `rgba(214,72,52,${a})`; };
+    return `rgba(var(--heat-${n >= 0 ? "up" : "down"}),${a})`; };
   const tiles = r.map((x) => {
     const isInd = x.kind === "industry";
     const counts = isInd ? `${esc(x.up)}↑ ${esc(x.down)}↓` : "index";
@@ -511,12 +579,14 @@ function markets() {
   const ibja = rows("bullion_in"), b = (i) => ibja.find((r) => r.item === i);
   const g24 = b("Gold 24K (999)"), g22 = b("Gold 22K (916)"), sil = b("Silver (999)");
   const dm = dayMonth;
-  const bullion = g24 ? `<div class="tiles three bul">${tile("24K gold", rupees(num(g24.rate)), num(g24.change_pct))}`
-      + `${g22 ? tile("22K gold", rupees(num(g22.rate)), num(g22.change_pct)) : ""}${sil ? tile("Silver", rupees(num(sil.rate)), num(sil.change_pct)) : ""}</div>`
-      + `<p class="note">Gold per 10 g, silver per kg. IBJA rates, ${esc(dm(g24.as_of))} (${esc(g24.session)}); excl. 3% GST and making charges.</p>`
+  const metalTile = (label, r) => tile(label, rupees(num(r.rate) * GST), num(r.change_pct), `${rupees(num(r.rate))} before GST`);
+  const bullion = g24 ? `<div class="tiles three bul">${metalTile("24K gold", g24)}`
+      + `${g22 ? metalTile("22K gold", g22) : ""}${sil ? metalTile("Silver", sil) : ""}</div>`
+      + `<p class="note">Price incl. 3% GST: gold per 10 g, silver per kg. Making charges on jewellery (usually 8–25%) extra. IBJA rates, ${esc(dm(g24.as_of))} (${esc(g24.session)}).</p>`
     : '<p class="muted">Appears after the next update.</p>';
   const [label, get, fmt] = MKT_SERIES[MKT] || MKT_SERIES.nifty;
-  const pts = get().filter((p) => p[1] != null);
+  const got = get(), metal = !Array.isArray(got);
+  const pts = (metal ? got.pts : got).filter((p) => p[1] != null);
   let chart = '<p class="muted">Appears after the next export.</p>';
   if (pts.length >= 2) {
     const rg = ranged("mkt_" + MKT, [{ name: label, points: pts }], "1Y");
@@ -543,7 +613,8 @@ function markets() {
     ${tile("Brent", k.brent_usd == null ? "–" : "$" + esc(k.brent_usd))}
   </div></section>
   <section class="card"><h3>Charts</h3>${switcher}${chart}<p class="note">${MKT === "gold" || MKT === "silver"
-    ? "Gold and silver history: the world price in dollars converted at that day's USD/INR, without Indian import duty and GST, so it reads below the IBJA rates above. "
+    ? (metal && got.scaled ? "Indian price incl. 3% GST: the world price × USD/INR each day, scaled so today matches today's IBJA rate (import duty and local premium), then GST. Making charges extra. "
+       : "World price × USD/INR, before Indian duty and GST (the IBJA rate isn't in yet). ")
     : ""}Daily closes from Yahoo Finance (weekly before the last five years).</p></section>`;
 }
 
@@ -595,16 +666,24 @@ function custom() {
 
 function render() {
   CHARTS.length = 0;
+  paintThemeButton();
   const st = one("desk_status");
   document.getElementById("chips").innerHTML = [st.auto_mode, st.india_vix, st.risk].filter((c) => c && c !== "–")
     .map((c) => `<span class="chip ${String(c).includes("ON") ? "on" : ""}">${esc(c)}</span>`).join("");
-  document.getElementById("updated").textContent = D.updated_at ? `Updated ${D.updated_at} IST` + ((D.failed || []).length ? " · some parts older" : "") : "No data yet";
+  document.getElementById("updated").textContent = D.updated_at ? `Updated ${dayMonth(String(D.updated_at).slice(0, 10))}, ${String(D.updated_at).slice(11, 16)} IST` + ((D.failed || []).length ? " · some parts older" : "") : "No data yet";
   const view = { desk, intraday, swing: () => pool("Swing", "swing", "swing"),
                  long: () => pool("Long term", "longterm", "long"), markets }[tab] || desk;
   document.getElementById("main").innerHTML = view() + '<p class="note">Dummy money only. Not investment advice.</p>';
   document.querySelectorAll("nav button").forEach((b) => b.setAttribute("aria-current", b.dataset.tab === tab ? "page" : "false"));
 }
 
+document.getElementById("theme").addEventListener("click", () => {
+  const next = isDark() ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("theme", next); } catch (err) {}
+  paintThemeButton(); render();   // charts read their colours from the theme
+});
+matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => { paintThemeButton(); render(); });
 document.querySelector("nav").addEventListener("click", (e) => {
   const b = e.target.closest("button[data-tab]"); if (!b) return;
   tab = b.dataset.tab; try { localStorage.setItem("tab", tab); } catch (err) {}

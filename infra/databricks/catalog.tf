@@ -50,6 +50,16 @@ resource "databricks_volume" "news" {
   comment      = "NSE company news JSON lines, pushed every 30 minutes by the stocks-fetch-news Lambda. Managed by Terraform."
 }
 
+# The trader's morning (day plan, pre-open gaps, 09:25 stocks in play), copied by the app export Lambda as one
+# latest.jsonl for the dashboard's "This morning" table. Its own volume, outside the job's file-arrival trigger.
+resource "databricks_volume" "trader_morning" {
+  catalog_name = databricks_catalog.stocks.name
+  schema_name  = databricks_schema.layer["bronze"].name
+  name         = "trader_morning"
+  volume_type  = "MANAGED"
+  comment      = "paper-trader's latest morning (plan, pre-open, stocks in play) as latest.jsonl, overwritten by the stocks-app-export Lambda. Managed by Terraform."
+}
+
 # Make sure each source folder exists in the landing volume, so Auto Loader has
 # a path to watch even before a source's first file arrives (e.g. FRED until its
 # API key is set). The pipeline only reads *.csv / *.json, so these are ignored.
