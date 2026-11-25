@@ -153,7 +153,7 @@ class YahooSeries(unittest.TestCase):
         self.assertIn("%5ENSEI?range=5y&interval=1d", seen[1])
         calls = []
         app_export.yahoo_series({}, fetch=lambda sym, rng: (calls.append(rng), ([], {}))[1])
-        self.assertEqual(set(calls), {"all"})
+        self.assertEqual(set(calls), {"all"})   # no history: failed, no second call
 
     def test_series_and_failure_keeps_previous(self):
         bars = [{"date": "2021-11-24", "close": 74.5}, {"date": "2026-11-23", "close": 93.47}]
@@ -170,6 +170,13 @@ class YahooSeries(unittest.TestCase):
         self.assertEqual(sorted(failed2), sorted(app_export.YAHOO_SERIES))
         self.assertEqual(out2["usdinr_5y"]["rows"], out["usdinr_5y"]["rows"])
         self.assertEqual(out2["acn_5y"]["rows"], [])
+
+    def test_series_adds_the_days_the_whole_history_lacks(self):
+        whole = [{"date": "2026-11-20", "close": 80800.0}, {"date": "2026-11-23", "close": 80900.0}]
+        month = [{"date": "2026-11-23", "close": 80900.0}, {"date": "2026-11-24", "close": 81000.0},
+                 {"date": "2026-11-25", "close": 81500.0}]
+        out, _ = app_export.yahoo_series({}, fetch=lambda sym, rng: (whole if rng == "all" else month, {}))
+        self.assertEqual([r["date"] for r in out["sensex_5y"]["rows"]][-3:], ["2026-11-23", "2026-11-24", "2026-11-25"])
 
     def test_series_never_loses_the_last_day(self):
         prev = {"datasets": {"sensex_5y": {"rows": [{"date": "2026-11-24", "close": 81000.0},
