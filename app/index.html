@@ -123,6 +123,15 @@ svg.chart.hl polyline.on { opacity: 1; stroke-width: 3.5 }
 .heat button:disabled { cursor: default }
 .row.pick { width: 100%; min-height: 52px; background: none; border-left: 0; border-right: 0; border-bottom: 0; color: var(--fg); font: inherit; text-align: left; cursor: pointer }
 .tests { padding: 2px 0 8px }
+.tgroup { border: 1px solid var(--line); border-radius: 12px; padding: 4px 12px; margin: 10px 0; background: var(--soft) }
+.tgroup.real { border-color: var(--up) }
+.tgroup .row { border-top: 1px solid var(--line) }
+.thead { display: flex; align-items: center; gap: 8px; padding: 8px 0; flex-wrap: wrap }
+.thead b { flex: 1 1 auto; font-size: 14px }
+.thead .muted { font-size: 12px }
+.tag { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 2px 8px; border-radius: 999px }
+.tag-real { background: var(--chip); color: var(--chip-fg) }
+.tag-shadow { background: var(--line); color: var(--muted) }
 .tests .tl { font-size: 13px; padding: 3px 0 }
 .tests .tl > span { color: var(--fg) }
 .vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap }
@@ -499,6 +508,7 @@ function holdingsNow(name) {
 
 // Why each quality pick qualifies (24 Nov): every test, passed or failed, and its margin from the line.
 let OPEN_PICK = "";
+const OPEN_SB = new Set();   // scoreboard rows showing P&L instead of value
 function ltTests() {
   const r = rows("longterm_tests");
   if (!r.length) return "";
@@ -518,18 +528,40 @@ function ltTests() {
 
 function pool(title, ds, key) {
   const k = one(ds + "_kpis");
-  // best_shadow comes without the "Swing shadow: " prefix and capitalised; match it to the full name
-  const starred = (r) => k.best_shadow != null && r.kind === "Shadow" && String(r.strategy).toLowerCase().endsWith(String(k.best_shadow).toLowerCase());
-  const sb = rows(ds + "_scoreboard").filter((r) => keep(key, r.kind)).sort((a, b) => starred(b) - starred(a));
-  const board = sb.map((r) => `<div class="row"><div class="n"><b>${starred(r) ? `<span class="up" aria-label="best shadow">${ICON.star}</span> ` : ""}${esc(r.strategy)}</b><span>${esc(r.kind)} · since ${esc(r.since)}${r.value_rs == null ? "" : " · " + rs(r.value_rs) + " (" + rs(r.pnl_rs, true) + ")"}${r.trades == null ? "" : " · " + esc(r.trades) + " trades"}${r.kind === "NIFTYBEES" || r.niftybees_pct == null ? "" : ` · NIFTYBEES same days ${pct(r.niftybees_pct, true)}`}</span></div><div class="r"><span class="${cls(r.return_pct)}">${pct(r.return_pct, true)}</span><br><span class="${arrowCls(r.vs_niftybees)}" style="font-weight:500;font-size:12px">${esc(r.vs_niftybees)}</span></div></div>`).join("");
+  // Scoreboard: sorted by what each is worth now (highest first). NIFTYBEES is shown as the real pool's money
+  // put into NIFTYBEES on the same days. Tap a row: the right side switches from value to net P&L and invested.
+  const sbRows = rows(ds + "_scoreboard").filter((r) => keep(key, r.kind));
+  const realCap = (() => { const r = sbRows.find((x) => x.kind === "Real"); return r && num(r.value_rs) != null ? num(r.value_rs) - num(r.pnl_rs) : null; })();
+  const sb = sbRows.map((r) => {
+    if (r.kind !== "NIFTYBEES" || realCap == null) return { ...r, invested: num(r.value_rs) != null ? num(r.value_rs) - num(r.pnl_rs) : null };
+    const v = realCap * (1 + num(r.return_pct) / 100);
+    return { ...r, value_rs: v, pnl_rs: v - realCap, invested: realCap };
+  }).sort((a, b) => (num(b.value_rs) ?? -1e12) - (num(a.value_rs) ?? -1e12));
+  const bestShadow = sb.find((r) => r.kind === "Shadow");
+  const board = sb.map((r) => {
+    const open = OPEN_SB.has(ds + "|" + r.strategy), best = r === bestShadow;
+    const right = open
+      ? `<span class="${cls(r.pnl_rs)}">${rs(r.pnl_rs, true)}</span><br><span class="muted" style="font-weight:500;font-size:12px">invested ${rs(r.invested)}</span>`
+      : `<span>${rs(r.value_rs)}</span><br><span class="${cls(r.return_pct)}" style="font-weight:500;font-size:12px">${pct(r.return_pct, true)}</span>`
+        + `${r.kind === "NIFTYBEES" ? "" : ` <span class="${arrowCls(r.vs_niftybees)}" style="font-weight:500;font-size:12px">${esc(r.vs_niftybees)}</span>`}`;
+    return `<button type="button" class="row pick" data-sb="${esc(ds + "|" + r.strategy)}" aria-expanded="${open}"><span class="n"><b>${best ? `<span class="up" aria-label="best shadow">${ICON.star}</span> ` : ""}${esc(r.strategy)}</b>`
+      + `<span>${esc(r.kind)} · since ${esc(r.since)}${r.trades == null ? "" : " · " + esc(r.trades) + " trades"}${r.kind === "NIFTYBEES" || r.niftybees_pct == null ? "" : ` · NIFTYBEES same days ${pct(r.niftybees_pct, true)}`}</span></span>`
+      + `<span class="r">${right}</span></button>`;
+  }).join("");
   // Trades grouped: the real pool first, then each shadow, newest first within each (10 per group)
   const tradeRow = (r) => `<div class="row"><div class="n"><b>${esc(r.side)} ${esc(r.symbol)} · ${esc(r.qty)} @ ${esc(r.price)}</b><span>${esc(r.trade_date)}${r.reason ? " · " + esc(r.reason) : ""}</span></div><div class="r ${cls(r.pnl_rs)}">${r.pnl_rs == null ? rs(r.value_rs) : rs(r.pnl_rs, true)}</div></div>`;
   const groups = {};
   rows(ds + "_trades").filter((r) => keep(key, r.kind)).forEach((r) => { (groups[r.strategy] = groups[r.strategy] || []).push(r); });
   const order = Object.keys(groups).sort((a, b) => (groups[a][0].kind === "Real" ? -1 : groups[b][0].kind === "Real" ? 1 : a.localeCompare(b)));
-  const trades = order.map((g) => `<div class="sub">${groups[g][0].kind === "Real" ? esc(g) : "Shadow: " + esc(String(g).replace(/^(Swing|Long-term) shadow: /, ""))} · ${groups[g].length} trade${groups[g].length === 1 ? "" : "s"}</div>`
-    + groups[g].slice(0, 10).map(tradeRow).join("")).join("");
-  const bestNote = k.best_shadow == null ? "" : `<p class="note">${ICON.star} Best shadow so far. ${esc(k.shadows_beating)} of ${esc(k.shadows_total ?? "?")} shadows ahead of NIFTYBEES, each over its own dates (shadows started a day after the real pool, so their NIFTYBEES figure differs; it's on each row).</p>`;
+  const trades = order.map((g) => {
+    const real = groups[g][0].kind === "Real", n = groups[g].length;
+    return `<div class="tgroup${real ? " real" : ""}"><div class="thead"><span class="tag ${real ? "tag-real" : "tag-shadow"}">${real ? "Real" : "Shadow"}</span>`
+      + `<b>${esc(real ? String(g).replace(/^(Swing|Long-term) /, "") : String(g).replace(/^(Swing|Long-term) shadow: /, ""))}</b><span class="muted">${n} trade${n === 1 ? "" : "s"}</span></div>`
+      + groups[g].slice(0, 10).map(tradeRow).join("") + "</div>";
+  }).join("");
+  const bestNote = `<p class="note">Sorted by value now. ${bestShadow ? `${ICON.star} = the shadow worth the most. ` : ""}`
+    + `${k.shadows_total ? `${esc(k.shadows_beating)} of ${esc(k.shadows_total)} shadows ahead of NIFTYBEES, each over its own dates. ` : ""}`
+    + `NIFTYBEES row = the real pool's money in NIFTYBEES. Tap a row for net P&amp;L and the amount invested.</p>`;
   return `<h2>${title}</h2>
   ${autoBanner(key)}
   <div class="tiles">
@@ -544,7 +576,7 @@ function pool(title, ds, key) {
     kindOf: (r) => String(r.kind).toLowerCase(), label: title + " P&L, real and shadows" })}</section>
   ${suggested(ds)}
   ${key === "long" ? ltTests() : ""}
-  <section class="card"><h3>Scoreboard (best shadow on top)</h3>${board || '<p class="muted">No data yet.</p>'}${bestNote}</section>
+  <section class="card"><h3>Scoreboard</h3>${board || '<p class="muted">No data yet.</p>'}${bestNote}</section>
   <section class="card"><h3>Trades placed (last 30 days)</h3>${trades || '<p class="muted">No trades yet.</p>'}<p class="note">Right column: realized P&amp;L on sells, value on buys.</p></section>`;
 }
 
@@ -727,6 +759,8 @@ document.getElementById("main").addEventListener("click", (e) => {
   }
   const mk = e.target.closest("button[data-mkt]");
   if (mk) { MKT = mk.dataset.mkt; try { localStorage.setItem("mkt", MKT); } catch (err) {} render(); return; }
+  const sbb = e.target.closest("button[data-sb]");
+  if (sbb) { const id = sbb.dataset.sb; if (OPEN_SB.has(id)) OPEN_SB.delete(id); else OPEN_SB.add(id); render(); return; }
   const pk = e.target.closest("button[data-pick]");
   if (pk) { OPEN_PICK = OPEN_PICK === pk.dataset.pick ? "" : pk.dataset.pick; render(); return; }
   const sc = e.target.closest("button[data-sector]");
