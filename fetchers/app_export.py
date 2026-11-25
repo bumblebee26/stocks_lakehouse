@@ -119,6 +119,14 @@ def yahoo_series(previous, fetch=None):
             rows = thin_old([{"date": b["date"], "close": round(float(b["close"]), 4)} for b in bars if b.get("close")])
             if not rows:
                 raise ValueError("no closes")
+            # Yahoo's whole-history answer can be a few days behind (Sensex stopped at 23 Nov on 26 Nov); its
+            # one-month answer is current, so its newer days are added.
+            try:
+                recent, _ = fetch(sym, "1mo")
+                rows += [{"date": b["date"], "close": round(float(b["close"]), 4)} for b in recent
+                         if b.get("close") and b["date"] > rows[-1]["date"]]
+            except Exception as err:  # noqa: BLE001 - the whole history is still good
+                log.warning("Yahoo recent days %s failed: %s", name, err)
             # Never lose a day: just after midnight Yahoo can leave the last session's close out for a while
             # (Sensex showed "–" on 26 Nov), so days the previous export had and this one lacks are kept.
             prev = (old.get(name) or {}).get("rows") or []
