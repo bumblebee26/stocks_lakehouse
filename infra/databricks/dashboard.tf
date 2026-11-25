@@ -446,7 +446,8 @@ locals {
 
     council_test = <<-SQL
       SELECT method, n AS judged, rupees AS rupees_on_yes_trades, hit_pct, brier, disagree_n, council_rs, reviewer_rs, as_of
-      FROM read_files('/Volumes/stocks/bronze/trader_morning/council.jsonl', format => 'json')
+      FROM read_files('/Volumes/stocks/bronze/trader_morning/council.jsonl', format => 'json',
+                      schemaHints => 'method STRING, n INT, rupees DOUBLE, hit_pct DOUBLE, brier DOUBLE, disagree_n INT, council_rs DOUBLE, reviewer_rs DOUBLE, as_of STRING')
     SQL
 
     market_morning = <<-SQL
