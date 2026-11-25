@@ -32,7 +32,7 @@ locals {
     morning   = "cron(40 11 ? * TUE-SAT *)"
     afternoon = "cron(15 16 ? * MON-FRI *)"
     close     = "cron(30 20 ? * MON-FRI *)"
-    late      = "cron(55 23 ? * MON-FRI *)"
+    late      = "cron(20 0 ? * TUE-SAT *)" # 00:20 (was 23:55): after the 23:30 export's lakehouse run, so evening ratings show
     weekend   = "cron(45 8 ? * SAT *)"
   }
 }

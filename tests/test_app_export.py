@@ -171,6 +171,14 @@ class YahooSeries(unittest.TestCase):
         self.assertEqual(out2["usdinr_5y"]["rows"], out["usdinr_5y"]["rows"])
         self.assertEqual(out2["acn_5y"]["rows"], [])
 
+    def test_series_never_loses_the_last_day(self):
+        prev = {"datasets": {"sensex_5y": {"rows": [{"date": "2026-11-24", "close": 81000.0},
+                                                    {"date": "2026-11-25", "close": 81500.0}]}}}
+        late = lambda sym, rng: ([{"date": "2026-11-23", "close": 80900.0},  # noqa: E731
+                                  {"date": "2026-11-24", "close": 81000.0}], {})
+        out, _ = app_export.yahoo_series(prev, fetch=late)
+        self.assertEqual(out["sensex_5y"]["rows"][-1], {"date": "2026-11-25", "close": 81500.0})
+
     def test_trader_files_latest_opening_read_and_auto_mode(self):
         read = {"read": {"nifty_gap_pct": 0.4}, "stocks": [
             {"symbol": f"S{i}", "score": 10 - i, "rvol": 2.0, "preopen": {"gap_pct": 1.0, "buy_sell": 1.5}}

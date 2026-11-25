@@ -15,6 +15,6 @@ Money tables count from the 18 Nov 2026 reset; history tables keep everything.
 
 ## On your phone
 The same numbers as a mobile app (`app/`): Desk (with the day's story and each pool's value and P&L), Intraday, Swing and Long term (each with a P&L chart that follows the Real / Shadows / Both switch), Markets (with five years of USD/INR); Accenture's five-year chart at the bottom of Desk
-tabs, refreshed a few minutes after each Databricks job (about 09:10, 11:40, 16:15, 20:30, 23:55, Sat 08:30 IST).
+tabs, refreshed a few minutes after each Databricks job (about 09:10, 11:40, 16:15, 20:30, 00:20, Sat 08:30 IST).
 The link is the app's address (a Lambda function URL for now; CloudFront once AWS enables it on the account) plus a secret path, stored in AWS Systems Manager → Parameter Store →
 `/stocks/desk-app-url` (Show decrypted value). Open it on the phone and use "Add to Home Screen".

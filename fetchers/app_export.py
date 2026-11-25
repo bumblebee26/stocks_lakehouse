@@ -119,6 +119,10 @@ def yahoo_series(previous, fetch=None):
             rows = thin_old([{"date": b["date"], "close": round(float(b["close"]), 4)} for b in bars if b.get("close")])
             if not rows:
                 raise ValueError("no closes")
+            # Never lose a day: just after midnight Yahoo can leave the last session's close out for a while
+            # (Sensex showed "–" on 26 Nov), so days the previous export had and this one lacks are kept.
+            prev = (old.get(name) or {}).get("rows") or []
+            rows += [r for r in prev if r["date"] > rows[-1]["date"]]
             out[name] = {"fields": ["date", "close"], "rows": rows, "label": label}
         except Exception as err:  # noqa: BLE001 - keep the last good series
             log.error("Yahoo series %s failed: %s", name, err)
