@@ -444,6 +444,11 @@ locals {
       ORDER BY section, item
     SQL
 
+    council_test = <<-SQL
+      SELECT method, n AS judged, rupees AS rupees_on_yes_trades, hit_pct, brier, disagree_n, council_rs, reviewer_rs, as_of
+      FROM read_files('/Volumes/stocks/bronze/trader_morning/council.jsonl', format => 'json')
+    SQL
+
     market_morning = <<-SQL
       SELECT date, regexp_replace(section, '^[0-9] ', '') AS part, item, detail
       FROM read_files('/Volumes/stocks/bronze/trader_morning/latest.jsonl', format => 'json')
@@ -978,6 +983,7 @@ locals {
       market_banner        = ["market"]
       trader_morning       = ["date", "part", "item", "detail"]
       market_morning       = ["date", "part", "item", "detail"]
+      council_test         = ["method", "judged", "rupees_on_yes_trades", "hit_pct", "brier", "disagree_n", "council_rs", "reviewer_rs", "as_of"]
       india_kpis           = ["trade_date", "nifty_close", "nifty_pct", "vix_close", "vix_pct", "advances", "declines"]
       sector_board         = ["kind", "sector", "change_pct", "up", "down", "stocks", "trade_date"]
       sector_stocks        = ["sector", "symbol", "close", "change_pct"]
@@ -1153,6 +1159,7 @@ locals {
       intra_shadow_list = { ds = "shadow_trades_recent", title = "Your trades under other rules (last 14 days)", desc = "Every real trade, what happened, and what each rule or model would have made.", pos = [0, 53, 12, 6] }
       intra_ladder      = { ds = "intra_bar_ladder", title = "Auto bar and sizing, on every proposal (since 18 Nov)", desc = "Placed trades count as they happened; skipped ones as they would have. The live bar is 55% (+5 for losing groups, 60% to flip a stock's direction).", pos = [0, 63, 6, 6] }
       intra_fills       = { ds = "intra_fill_check", title = "Paper fills vs the real minute", desc = "Positive bps = the paper fill was worse than that minute's close (stricter than the market).", pos = [6, 63, 6, 6] }
+      intra_council     = { ds = "council_test", title = "Council test (paper, after the close)", desc = "Every proposal scored on the same paper fill. Brier: lower is better (0.25 = coin flip). Disagreements: where the council and the live reviewer differ; judged at a review after 30+. Nothing live changes.", pos = [0, 74, 12, 5] }
       intra_select      = { ds = "intra_selector", title = "Selector (paper): picks tomorrow's version from the last 20 days", desc = "Each day scored on results it couldn't see when it picked. Beats the fixed rules for weeks = worth a review; until then it is luck.", pos = [0, 69, 12, 5] }
       summary_intraday  = { ds = "summary_intraday", title = "In plain words", desc = "Written from the latest data after every refresh (Databricks AI). Not advice.", pos = [0, 59, 12, 4] }
       swing_board       = { ds = "swing_scoreboard", title = "Scoreboard", desc = "Return since each started; vs NIFTYBEES over the same days.", pos = [0, 20, 6, 7] }
@@ -1263,7 +1270,7 @@ locals {
           local.table_widget.intra_bt_table, local.table_widget.intra_shadow_list,
           local.table_widget.summary_intraday,
           local.table_widget.intra_ladder, local.table_widget.intra_fills,
-          local.table_widget.intra_select,
+          local.table_widget.intra_select, local.table_widget.intra_council,
         ]
       },
       {

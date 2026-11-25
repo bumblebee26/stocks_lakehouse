@@ -424,6 +424,7 @@ function intraday() {
     kindOf: (r) => (r.kind === "Real" ? "real" : "shadow"), label: "Intraday P&L, real and shadows", max: 8 })}
     <p class="note">Black line, bold chip = real; tap a chip to highlight its line. Shadows replay the same trades; the opening-range test is its own paper trades.</p></section>
   <section class="card"><h3>Rules compared (same trades)</h3>${board || '<p class="muted">No data yet.</p>'}<p class="note">Real first, then every shadow rule, best first. Right column: what it would have made vs the real result.</p></section>
+  ${councilCard()}
   <section class="card"><h3>Auto bar and sizing (every proposal)</h3>${ladder || '<p class="muted">No data yet.</p>'}</section>
   <section class="card"><h3>Selector (paper)</h3>${sel || '<p class="muted">Starts after Monday\'s day report.</p>'}</section>`;
 }
@@ -451,6 +452,17 @@ function marketMorning() {
     : '<p class="note">The opening read appears after 09:25.</p>';
   return `<section class="card"><h3>Market this morning</h3>${mood ? `<p style="margin:0 0 4px;font-size:14px">${mood}</p>` : ""}${read}${gaps}`
     + `<p class="note">NSE pre-open auction 09:00–09:08 and the first minutes of trading. Information only.</p></section>`;
+}
+// The council test (paper, after the close): every proposal judged the same way by each method.
+function councilCard() {
+  const r = rows("council");
+  if (!r.length) return "";
+  const d = r[0];
+  const body = r.map((x) => `<div class="row"><div class="n"><b>${esc(x.method)}</b><span>${esc(x.n)} judged · right ${esc(x.hit_pct)}%`
+    + `${x.brier == null ? "" : ` · Brier ${esc(x.brier)}`}</span></div><div class="r ${cls(x.rupees)}">${rs(x.rupees, true)}</div></div>`).join("");
+  return `<section class="card"><h3>Council test (paper)</h3>${body}`
+    + `<p class="note">Rupees if only each method's YES trades were taken; all on the same paper fill. Brier: lower is better (0.25 = coin flip). `
+    + `Council and reviewer disagreed on ${esc(d.disagree_n ?? 0)}: council ${rs(d.council_rs, true)} vs reviewer ${rs(d.reviewer_rs, true)}. Judged after 30+ disagreements; nothing live changes.</p></section>`;
 }
 function intradayPlan() {
   const m = todaysMorning();

@@ -303,20 +303,40 @@ def morning_lines(row):
     return out
 
 
-def push_morning(row):
-    """Copy the morning to the Databricks trader_morning volume (latest.jsonl, overwritten) for the dashboard. Not the
-    landing volume: that one starts a pipeline run on every new file. Never fails the export."""
+COUNCIL_METHODS = (("real", "Real decisions"), ("reviewer", "Live reviewer"),
+                   ("council", "Council (reviewer + tape + base rate)"), ("control", "Control (reviewer x3)"))
+
+
+def council_card(s3, bucket):
+    """The council test's scorecard (paper-trader council/scorecard.json, written after the close) as rows."""
+    card = (load_previous(s3, bucket, "council/scorecard.json") if bucket else None) or {}
+    rows = [{"method": label, "n": (card.get(k) or {}).get("n"), "rupees": (card.get(k) or {}).get("rupees"),
+             "hit_pct": (card.get(k) or {}).get("hit_pct"), "brier": (card.get(k) or {}).get("brier")}
+            for k, label in COUNCIL_METHODS if card.get(k)]
+    d = card.get("disagreements") or {}
+    return {"fields": ["method", "n", "rupees", "hit_pct", "brier", "as_of", "disagree_n", "council_rs", "reviewer_rs"],
+            "rows": [{**r, "as_of": card.get("as_of"), "disagree_n": d.get("n"), "council_rs": d.get("council_rupees"),
+                      "reviewer_rs": d.get("reviewer_rupees")} for r in rows]}
+
+
+def push_volume(name, rows):
+    """Copy rows as <name> (JSON lines, overwritten) to the Databricks trader_morning volume for the dashboard. Not
+    the landing volume: that one starts a pipeline run on every new file. Never fails the export."""
     vol = os.environ.get("MORNING_VOLUME_PATH")
-    if not vol or not row:
+    if not vol or not rows:
         return False
     try:
         import databricks_volume
-        body = "\n".join(json.dumps(x) for x in morning_lines(row)).encode()
-        databricks_volume.upload("latest.jsonl", body, volume=vol)
+        databricks_volume.upload(name, "\n".join(json.dumps(x) for x in rows).encode(), volume=vol)
         return True
     except Exception as err:  # noqa: BLE001
-        log.error("Morning copy to Databricks failed: %s", err)
+        log.error("Copy of %s to Databricks failed: %s", name, err)
         return False
+
+
+def push_morning(row):
+    """The morning for the dashboard (latest.jsonl in the trader_morning volume)."""
+    return bool(row) and push_volume("latest.jsonl", morning_lines(row))
 
 
 def handler(event, context):
@@ -337,6 +357,8 @@ def handler(event, context):
     failed += ["nse_holidays"] if hol_failed else []
     datasets["morning"], datasets["pool_auto"] = trader_files(s3, os.environ.get("TRADER_BUCKET"))
     push_morning((datasets["morning"]["rows"] or [None])[0])
+    datasets["council"] = council_card(s3, os.environ.get("TRADER_BUCKET"))
+    push_volume("council.jsonl", datasets["council"]["rows"])
     datasets["bullion_in"], bullion_failed = bullion_rates(previous)
     failed += ["bullion_in"] if bullion_failed else []
     datasets["fuel_mumbai"], fuel_failed = fuel_rates(previous)

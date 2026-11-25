@@ -58,7 +58,7 @@ class Export(unittest.TestCase):
         self.assertEqual(put["Key"], "abc123/data/desk.json")
         body = json.loads(put["Body"])
         self.assertEqual(set(body["datasets"]), set(QUERIES) | {"fuel_mumbai", "nse_holidays", "market_status",
-                                                         "morning", "pool_auto", "bullion_in"})
+                                                         "morning", "pool_auto", "bullion_in", "council"})
         self.assertEqual(body["failed"], ["nse_holidays", "bullion_in", "fuel_mumbai"])
         fuel = body["datasets"]["fuel_mumbai"]["rows"]
         self.assertEqual([r["item"] for r in fuel], ["Petrol", "Diesel", "CNG"])
@@ -217,6 +217,15 @@ class YahooSeries(unittest.TestCase):
         s3b = FakeS3({"plans/2026-11-25.json": json.dumps(plan).encode()})
         mb, _ = app_export.trader_files(s3b, "t", today=dt.date(2026, 11, 25))
         self.assertEqual((mb["rows"][0]["top"], mb["rows"][0]["focus"]), ([], ["HDFCBANK", "INFY"]))
+
+    def test_council_scorecard_rows(self):
+        card = {"as_of": "2026-11-25", "real": {"n": 9, "rupees": -120, "hit_pct": 44.4},
+                "council": {"n": 9, "rupees": 80, "hit_pct": 55.6, "brier": 0.231},
+                "disagreements": {"n": 3, "council_rupees": 60, "reviewer_rupees": -40}}
+        data = app_export.council_card(FakeS3({"council/scorecard.json": json.dumps(card).encode()}), "t")
+        self.assertEqual([r["method"] for r in data["rows"]], ["Real decisions", "Council (reviewer + tape + base rate)"])
+        self.assertEqual((data["rows"][1]["brier"], data["rows"][1]["disagree_n"]), (0.231, 3))
+        self.assertEqual(app_export.council_card(FakeS3({}), "t")["rows"], [])
 
     def test_bullion_takes_the_latest_pm_rates_with_the_change(self):
         data, failed = app_export.bullion_rates({}, fetch=lambda: self.IBJA)
