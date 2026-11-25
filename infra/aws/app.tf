@@ -194,6 +194,8 @@ data "aws_iam_policy_document" "app_export" {
     actions = ["s3:GetObject"]
     resources = [
       "arn:${local.partition}:s3:::${local.trader_state_bucket}/opening/*",
+      "arn:${local.partition}:s3:::${local.trader_state_bucket}/plans/*",
+      "arn:${local.partition}:s3:::${local.trader_state_bucket}/preopen/*",
       "arn:${local.partition}:s3:::${local.trader_state_bucket}/state/pool_auto.json",
     ]
   }
@@ -232,6 +234,7 @@ resource "aws_lambda_function" "app_export" {
       APP_BUCKET                 = module.app_bucket.id
       APP_PREFIX                 = "app"
       TRADER_BUCKET              = local.trader_state_bucket
+      MORNING_VOLUME_PATH        = "/Volumes/stocks/bronze/trader_morning"
     }
   }
 

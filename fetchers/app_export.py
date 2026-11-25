@@ -41,7 +41,8 @@ YAHOO_SERIES = {"usdinr_5y": ("INR=X", "USD/INR"), "acn_5y": ("ACN", "Accenture 
                 # with USD/INR (before Indian duty and GST).
                 "nifty_5y": ("^NSEI", "Nifty 50"), "sensex_5y": ("^BSESN", "Sensex"),
                 "gold_5y": ("GC=F", "Gold (USD/oz)"), "silver_5y": ("SI=F", "Silver (USD/oz)")}
-MORNING_DAYS = 6   # how far back to look for the trader's latest opening read
+MORNING_DAYS = 6   # how far back to look for the trader's latest morning (plan / opening read)
+MORNING_FIELDS = ["date", "read", "top", "plan", "focus", "gaps_up", "gaps_down", "preopen_count"]
 FUEL_URL = "https://www.cardekho.com/fuel-price-in-mumbai-city"
 FUEL_SOURCE = "CarDekho"
 FUEL_FIELDS = ["item", "rate", "unit", "as_of", "source"]
@@ -218,25 +219,104 @@ def market_status(previous, fetch=None, today=None):
                        "message": st["message"], "next_open": st["next_open"]}]}, failed)
 
 
+def _gaps(pre, up=True, n=5):
+    """Top n pre-open gaps up (or down) from preopen/<day>.json's {symbol: {gap_pct, buy_sell}}."""
+    rows = [{"symbol": sym, "gap_pct": r.get("gap_pct"), "buy_sell": r.get("buy_sell")}
+            for sym, r in (pre or {}).items() if isinstance(r, dict) and r.get("gap_pct") is not None]
+    rows = [r for r in rows if (r["gap_pct"] > 0 if up else r["gap_pct"] < 0)]
+    return sorted(rows, key=lambda r: -r["gap_pct"] if up else r["gap_pct"])[:n]
+
+
 def trader_files(s3, bucket, today=None):
-    """From paper-trader's state bucket (read-only): the latest opening read (opening/<day>.json, written at 09:25)
-    as dataset `morning`, and which delivery pools are in auto mode (state/pool_auto.json) as `pool_auto`."""
+    """From paper-trader's state bucket (read-only), the latest trading morning as dataset `morning`: the day plan
+    (plans/<day>.json: India VIX, risk per trade, bias, focus list), NSE's pre-open gaps (preopen/<day>.json) and the
+    09:25 opening read with the stocks in play (opening/<day>.json); plus which delivery pools are in auto mode
+    (state/pool_auto.json) as `pool_auto`."""
     today = today or dt.datetime.now(IST).date()
-    morning = {"fields": ["date", "read", "top"], "rows": []}
+    morning = {"fields": MORNING_FIELDS, "rows": []}
     if bucket:
         for back in range(MORNING_DAYS):
             day = (today - dt.timedelta(days=back)).isoformat()
-            doc = load_previous(s3, bucket, f"opening/{day}.json")
-            if doc:
-                top = [{"symbol": r.get("symbol"), "score": r.get("score"), "rvol": r.get("rvol"),
-                        "gap_pct": r.get("gap_pct"), "first10_pct": r.get("first10_pct"),
-                        "preopen_gap": (r.get("preopen") or {}).get("gap_pct"),
-                        "buy_sell": (r.get("preopen") or {}).get("buy_sell")} for r in (doc.get("stocks") or [])[:5]]
-                morning["rows"] = [{"date": day, "read": doc.get("read") or {}, "top": top}]
-                break
+            plan = load_previous(s3, bucket, f"plans/{day}.json")
+            opening = load_previous(s3, bucket, f"opening/{day}.json")
+            if not plan and not opening:
+                continue
+            pre = (load_previous(s3, bucket, f"preopen/{day}.json") or {}).get("stocks") or {}
+            p = (plan or {}).get("plan") or {}
+            top = [{"symbol": r.get("symbol"), "score": r.get("score"), "rvol": r.get("rvol"),
+                    "gap_pct": r.get("gap_pct"), "first10_pct": r.get("first10_pct"), "news": bool(r.get("news")),
+                    "preopen_gap": (r.get("preopen") or {}).get("gap_pct"),
+                    "buy_sell": (r.get("preopen") or {}).get("buy_sell")}
+                   for r in ((opening or {}).get("stocks") or [])[:5]]
+            morning["rows"] = [{
+                "date": day, "read": (opening or {}).get("read") or {}, "top": top,
+                "plan": {"vix": p.get("india_vix", p.get("vix")), "risk_pct": p.get("risk_per_trade_pct"),
+                         "bias": p.get("bias"), "regime": p.get("nifty_regime_words")} if plan else {},
+                "focus": (plan or {}).get("focus") or [],
+                "gaps_up": _gaps(pre, True), "gaps_down": _gaps(pre, False), "preopen_count": len(pre)}]
+            break
     auto = (load_previous(s3, bucket, "state/pool_auto.json") if bucket else {}) or {}
     pools = {"swing": True, "long_term": False, **{k: bool(v) for k, v in auto.items() if k in ("swing", "long_term")}}
     return morning, {"fields": ["pool", "on"], "rows": [{"pool": k, "on": v} for k, v in pools.items()]}
+
+
+def _pct(v):
+    return "" if v is None else f"{v:+.1f}%"
+
+
+def morning_lines(row):
+    """The morning as flat rows (page, section, item, detail) for the dashboard: page 'desk' = the market (India VIX
+    and bias, pre-open gaps, the opening read); page 'intraday' = the trader's plan (risk per trade, focus list,
+    stocks in play)."""
+    if not row:
+        return []
+    out, p, r = [], row.get("plan") or {}, row.get("read") or {}
+
+    def add(page, sec, item, detail=""):
+        out.append({"date": row["date"], "page": page, "section": sec, "item": item, "detail": detail})
+
+    def gap(g):
+        return _pct(g["gap_pct"]) + (f", buy/sell {g['buy_sell']:g}x" if g.get("buy_sell") else "")
+    if p.get("vix") is not None or p.get("bias"):
+        add("desk", "1 Market", f"India VIX {p['vix']:.1f}" if p.get("vix") is not None else "India VIX –",
+            "; ".join(x for x in [f"bias: {p['bias']}" if p.get("bias") else "", p.get("regime") or ""] if x))
+    for g in row.get("gaps_up") or []:
+        add("desk", "2 Pre-open gaps up", g["symbol"], gap(g))
+    for g in row.get("gaps_down") or []:
+        add("desk", "3 Pre-open gaps down", g["symbol"], gap(g))
+    if r.get("nifty_gap_pct") is not None:
+        add("desk", "4 Opening read", f"Nifty opened {_pct(r['nifty_gap_pct'])}, {_pct(r.get('nifty_first10_pct'))} in 10 min ({r.get('nifty_gap')})",
+            "; ".join(x for x in [f"{r['up_from_open']} stocks up from their open" if r.get("up_from_open") else "",
+                                  f"opening range {round(r['median_or_vs_day_range'] * 100)}% of a usual day's"
+                                  if r.get("median_or_vs_day_range") is not None else "",
+                                  f"India VIX {_pct(r.get('india_vix_change_pct'))}" if r.get("india_vix_change_pct") is not None else ""] if x))
+    if p.get("risk_pct") is not None:
+        add("intraday", "1 Plan", f"Risk {p['risk_pct']}% per trade", f"set from India VIX {p['vix']:.1f}" if p.get("vix") is not None else "")
+    if row.get("focus"):
+        add("intraday", "2 Focus", f"{len(row['focus'])} stocks", ", ".join(row["focus"]))
+    for i, t in enumerate(row.get("top") or [], 1):
+        bits = [f"score {t.get('score')}", f"{t.get('rvol')}x usual volume", f"gap {_pct(t.get('gap_pct'))}"]
+        bits += ["news"] if t.get("news") else []
+        bits += [f"pre-open {_pct(t['preopen_gap'])}" + (f", buy/sell {t['buy_sell']:g}x" if t.get("buy_sell") else "")] \
+            if t.get("preopen_gap") is not None else []
+        add("intraday", "3 In play at 09:25", f"{i}. {t.get('symbol')}", " · ".join(bits))
+    return out
+
+
+def push_morning(row):
+    """Copy the morning to the Databricks trader_morning volume (latest.jsonl, overwritten) for the dashboard. Not the
+    landing volume: that one starts a pipeline run on every new file. Never fails the export."""
+    vol = os.environ.get("MORNING_VOLUME_PATH")
+    if not vol or not row:
+        return False
+    try:
+        import databricks_volume
+        body = "\n".join(json.dumps(x) for x in morning_lines(row)).encode()
+        databricks_volume.upload("latest.jsonl", body, volume=vol)
+        return True
+    except Exception as err:  # noqa: BLE001
+        log.error("Morning copy to Databricks failed: %s", err)
+        return False
 
 
 def handler(event, context):
@@ -256,6 +336,7 @@ def handler(event, context):
     datasets["nse_holidays"], datasets["market_status"], hol_failed = market_status(previous)
     failed += ["nse_holidays"] if hol_failed else []
     datasets["morning"], datasets["pool_auto"] = trader_files(s3, os.environ.get("TRADER_BUCKET"))
+    push_morning((datasets["morning"]["rows"] or [None])[0])
     datasets["bullion_in"], bullion_failed = bullion_rates(previous)
     failed += ["bullion_in"] if bullion_failed else []
     datasets["fuel_mumbai"], fuel_failed = fuel_rates(previous)

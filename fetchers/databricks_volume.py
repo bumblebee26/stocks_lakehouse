@@ -39,7 +39,7 @@ def config():
         _config = {
             "host": param(os.environ["DATABRICKS_URL_PARAM"], False).rstrip("/"),
             "token": param(os.environ["DATABRICKS_TOKEN_PARAM"], True),
-            "volume": os.environ["LANDING_VOLUME_PATH"].rstrip("/"),
+            "volume": os.environ.get("LANDING_VOLUME_PATH", "").rstrip("/"),   # app export passes its own
         }
         _config_loaded_at = time.monotonic()
     return _config
