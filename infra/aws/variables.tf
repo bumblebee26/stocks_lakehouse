@@ -84,12 +84,6 @@ variable "news_enabled" {
 }
 
 # ----- Pre-market brief -------------------------------------------------------
-variable "premarket_enabled" {
-  description = "Send the pre-market brief to Telegram at 08:30 IST Mon-Fri. Leave false until a dry run looks right."
-  type        = bool
-  default     = false
-}
-
 variable "us_proxy_symbol" {
   description = "US ticker used as the US market proxy (S&P 500 ETF). Keep in sync with the databricks stack."
   type        = string
