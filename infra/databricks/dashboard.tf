@@ -811,7 +811,7 @@ locals {
   # Every strategy (real pools and shadow pools) in one shape: label, group, start, latest return, NIFTYBEES over the
   # same days (from the pool's first snapshot to its latest), and the difference.
   strategy_label_sql = <<-SQL
-    CASE pool WHEN 'intraday' THEN 'Intraday (real)' WHEN 'swing' THEN 'Swing (real, auto: momentum + news)'
+    CASE pool WHEN 'intraday' THEN 'Intraday (real)' WHEN 'swing' THEN 'Swing (real: momentum + news + your trades)'
               WHEN 'long_term' THEN 'Long-term (real: cash until buying starts)'
               WHEN 'swing_shadow' THEN 'Swing shadow: news breakouts' WHEN 'swing_tech_shadow' THEN 'Swing shadow: technical scanner'
               WHEN 'long_term_shadow' THEN 'Long-term shadow: quality picks'
