@@ -309,6 +309,9 @@ function plChart(rows, o) {
     (by[r[o.line]] = by[r[o.line]] || { kind: o.kindOf(r), points: [] }).points.push([String(r[o.x]).slice(0, 10), num(r[o.y])]);
   });
   Object.values(by).forEach((v) => v.points.sort((a, b) => (a[0] < b[0] ? -1 : 1)));
+  // P&L doesn't change on a day without trades: carry each line flat to the latest date any line has
+  const end = Object.values(by).map((v) => v.points.at(-1)[0]).sort().at(-1);
+  Object.values(by).forEach((v) => { if (v.points.at(-1)[0] < end) v.points.push([end, v.points.at(-1)[1]]); });
   const rg = ranged(o.key + "_pl", Object.keys(by).map((n) => ({ name: n, points: by[n].points })));
   rg.series.forEach((sr) => { by[sr.name].points = sr.points; });
   Object.keys(by).forEach((n) => { if (!by[n].points.length) delete by[n]; });
