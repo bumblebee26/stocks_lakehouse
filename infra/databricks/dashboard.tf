@@ -477,24 +477,13 @@ locals {
            p AS (SELECT e.symbol, (e.close / e.prev_close - 1) * 100 AS chg
                  FROM stocks.silver.nse_eq_daily e JOIN d ON e.trade_date = d.d
                  WHERE e.series = 'EQ' AND e.prev_close > 0),
-           m AS (SELECT DISTINCT symbol, industry FROM stocks.silver.index_members WHERE industry IS NOT NULL)
+           m AS (SELECT DISTINCT symbol, company, industry FROM stocks.silver.index_members WHERE industry IS NOT NULL)
       SELECT 'industry' AS kind,
-             CASE m.industry
-               WHEN 'Information Technology' THEN 'IT'
-               WHEN 'Financial Services' THEN 'Banks & finance'
-               WHEN 'Automobile and Auto Components' THEN 'Auto'
-               WHEN 'Fast Moving Consumer Goods' THEN 'FMCG'
-               WHEN 'Healthcare' THEN 'Pharma & health'
-               WHEN 'Metals & Mining' THEN 'Metals'
-               WHEN 'Oil Gas & Consumable Fuels' THEN 'Oil & gas'
-               WHEN 'Consumer Durables' THEN 'Durables'
-               WHEN 'Construction Materials' THEN 'Cement'
-               WHEN 'Telecommunication' THEN 'Telecom'
-               ELSE m.industry END AS sector,
+             ${local.sector_name_sql} AS sector,
              round(avg(p.chg), 2) AS change_pct, count_if(p.chg > 0) AS up, count_if(p.chg < 0) AS down,
              count(*) AS stocks, (SELECT d FROM d) AS trade_date
       FROM p JOIN m ON m.symbol = p.symbol
-      GROUP BY m.industry
+      GROUP BY 2
       UNION ALL
       SELECT 'index',
              CASE lower(trim(index_name)) WHEN 'nifty bank' THEN 'Nifty Bank' WHEN 'nifty psu bank' THEN 'PSU banks'
@@ -508,17 +497,11 @@ locals {
 
     sector_stocks = <<-SQL
       WITH d AS (SELECT max(trade_date) AS d FROM stocks.silver.nse_eq_daily)
-      SELECT CASE m.industry
-               WHEN 'Information Technology' THEN 'IT' WHEN 'Financial Services' THEN 'Banks & finance'
-               WHEN 'Automobile and Auto Components' THEN 'Auto' WHEN 'Fast Moving Consumer Goods' THEN 'FMCG'
-               WHEN 'Healthcare' THEN 'Pharma & health' WHEN 'Metals & Mining' THEN 'Metals'
-               WHEN 'Oil Gas & Consumable Fuels' THEN 'Oil & gas' WHEN 'Consumer Durables' THEN 'Durables'
-               WHEN 'Construction Materials' THEN 'Cement' WHEN 'Telecommunication' THEN 'Telecom'
-               ELSE m.industry END AS sector,
+      SELECT ${local.sector_name_sql} AS sector,
              e.symbol, round(e.close, 2) AS close, round((e.close / e.prev_close - 1) * 100, 2) AS change_pct
       FROM stocks.silver.nse_eq_daily e
       JOIN d ON e.trade_date = d.d
-      JOIN (SELECT DISTINCT symbol, industry FROM stocks.silver.index_members WHERE industry IS NOT NULL) m
+      JOIN (SELECT DISTINCT symbol, company, industry FROM stocks.silver.index_members WHERE industry IS NOT NULL) m
         ON m.symbol = e.symbol
       WHERE e.series = 'EQ' AND e.prev_close > 0
       ORDER BY sector, change_pct DESC
@@ -796,6 +779,27 @@ locals {
   signed_pct_sql = "CASE WHEN __V__ IS NULL THEN '–' WHEN __V__ > 0 THEN concat('▲ ', format_number(__V__, 1), '%') WHEN __V__ < 0 THEN concat('▼ ', format_number(-(__V__), 1), '%') ELSE '0.0%' END"
   signed_pts_sql = "CASE WHEN __V__ IS NULL THEN '–' WHEN __V__ > 0 THEN concat('▲ ', format_number(__V__, 1), ' pts') WHEN __V__ < 0 THEN concat('▼ ', format_number(-(__V__), 1), ' pts') ELSE 'level' END"
   signed_rs_sql  = "concat(CASE WHEN __V__ < 0 THEN '−₹' ELSE '+₹' END, format_number(abs(__V__), 0))"
+
+  # Short sector names for the app (NSE industry of the Nifty 200 list). Banks and hospitals are split out by
+  # company name. shortcut: NSE's list has no finer industry; name-based, so a bank without "Bank" in its name
+  # would count as Finance. Upgrade with Upstox's or NSE's detailed industry when available.
+  sector_name_sql = <<-SQL
+    CASE
+      WHEN m.industry = 'Financial Services' AND m.company RLIKE '(?i)(^| )bank( |$)' THEN 'Bank'
+      WHEN m.industry = 'Financial Services' THEN 'Finance'
+      WHEN m.industry = 'Healthcare' AND m.company RLIKE '(?i)hospital|health|hrudayalaya|diagnostic' THEN 'Health'
+      WHEN m.industry = 'Healthcare' THEN 'Pharma'
+      WHEN m.industry = 'Information Technology' THEN 'IT'
+      WHEN m.industry = 'Automobile and Auto Components' THEN 'Auto'
+      WHEN m.industry = 'Fast Moving Consumer Goods' THEN 'FMCG'
+      WHEN m.industry = 'Metals & Mining' THEN 'Metal'
+      WHEN m.industry = 'Oil Gas & Consumable Fuels' THEN 'Oil & gas'
+      WHEN m.industry = 'Consumer Durables' THEN 'Durables'
+      WHEN m.industry = 'Construction Materials' THEN 'Cement'
+      WHEN m.industry = 'Telecommunication' THEN 'Telecom'
+      WHEN m.industry = 'Media Entertainment & Publication' THEN 'Media'
+      ELSE m.industry END
+  SQL
 
   # Rated proposals with a known outcome, and whether your call was right.
   rated_sql = <<-SQL
