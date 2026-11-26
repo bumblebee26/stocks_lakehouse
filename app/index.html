@@ -119,6 +119,11 @@ svg.chart.hl polyline.on { opacity: 1; stroke-width: 3.5 }
 .banner h3 { margin-bottom: 4px }
 .banner p { margin: 0; font-size: 13px; color: var(--fg) }
 .tiles.bul .v { font-size: 17px; white-space: nowrap }
+.row.sec .n { display: flex; flex-direction: row; align-items: center; gap: 12px }
+.row.sec .n > span { display: flex; flex-direction: column }
+.row.sec .n b { color: var(--fg); font-size: 15px }
+.sec .r { font-weight: 700 }
+.sic { width: 24px; height: 24px; flex: none; color: var(--muted) }
 .heat { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px }
 .heat button { min-height: 60px; min-width: 0; border: 1px solid transparent; border-radius: 10px; padding: 6px 7px; text-align: left; color: var(--fg); font: 500 11px/1.3 inherit; font-family: inherit; cursor: pointer; white-space: nowrap }
 .heat button span { display: block; font-size: 12px; font-weight: 700 }
@@ -696,13 +701,46 @@ function sectors() {
     return `<button type="button" style="background:${shade(x.change_pct)}" ${isInd ? `data-sector="${esc(x.sector)}" aria-pressed="${OPEN_SECTOR === x.sector}"` : "disabled"}>`
       + `<b>${esc(x.sector)}</b><span>${pct(x.change_pct, true)}</span>${counts}</button>`;
   }).join("");
+  const vsw = viewSwitch("sectors", ["Grid", "List"]);
   const list = OPEN_SECTOR ? rows("sector_stocks").filter((x) => x.sector === OPEN_SECTOR).sort((a, b) => num(b.change_pct) - num(a.change_pct)) : [];
   const detail = OPEN_SECTOR ? `<div class="sub" style="margin-top:10px">${esc(OPEN_SECTOR)}: ${list.length} stocks</div>`
     + list.map((x) => `<div class="row"><div class="n"><b>${esc(x.symbol)}</b><span>₹${esc(x.close)}</span></div><div class="r ${cls(x.change_pct)}">${pct(x.change_pct, true)}</div></div>`).join("") : "";
-  return `<section class="card"><h3>Sectors at the close (${esc(dayMonth(String(r[0].trade_date).slice(0, 10)))})</h3><div class="heat">${tiles}</div>${detail}`
+  const lines = [...r].sort((a, b) => num(b.change_pct) - num(a.change_pct)).map((x) => {
+    const isInd = x.kind === "industry";
+    return `<button type="button" class="row pick sec" ${isInd ? `data-sector="${esc(x.sector)}" aria-expanded="${OPEN_SECTOR === x.sector}"` : "disabled"}>`
+      + `<span class="n">${sectorIcon(x.sector)}<span><b>${esc(x.sector)}</b><span>${isInd ? `${esc(x.up)}↑ ${esc(x.down)}↓` : "index"}</span></span></span>`
+      + `<span class="r ${cls(x.change_pct)}">${pct(x.change_pct, true)}</span></button>` + (OPEN_SECTOR === x.sector ? detail : "");
+  }).join("");
+  return `<section class="card">${cardHead(`Sectors at the close (${esc(dayMonth(String(r[0].trade_date).slice(0, 10)))})`, vsw)}${vsw.i ? lines : `<div class="heat">${tiles}</div>${detail}`}`
     + `<p class="note">Nifty 200 stocks, equal weight.</p></section>`;
 }
 let OPEN_SECTOR = "";
+// Sector icons for the list view (outline, 24x24); anything not listed gets a plain dot
+const SECTOR_PATHS = {
+  Bank: "M3 10h18M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18M12 3 3 8h18z",
+  Finance: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM9 8h6M9 11h6M13 8c1.5 0 2 4-1 4H9.5l4.5 4",
+  "Nifty Bank": "M3 10h18M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18M12 3 3 8h18z",
+  "PSU banks": "M3 10h18M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18M12 3 3 8h18z",
+  IT: "M7 7h10v10H7zM10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4",
+  Pharma: "M10.5 20.5a5 5 0 0 1-7-7l7-7a5 5 0 0 1 7 7zM7 10l7 7",
+  Health: "M12 20s-8-4.5-8-10a4.5 4.5 0 0 1 8-2.8A4.5 4.5 0 0 1 20 10c0 5.5-8 10-8 10zM4 12h4l2-3 3 6 2-3h5",
+  Auto: "M5 16V11l2-5h10l2 5v5M3 16h18M7 16v3M17 16v3M5 11h14M7.5 13.5h.01M16.5 13.5h.01",
+  FMCG: "M4 5h2l2.5 10h9L20 8H7M9.5 19.5h.01M16.5 19.5h.01",
+  Metal: "M4 19h7l-1.5-5h-4zM13 19h7l-1.5-5h-4zM8.5 12h7L14 7h-4z",
+  "Oil & gas": "M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z",
+  Power: "M13 2 4 14h7l-1 8 9-12h-7z",
+  Realty: "M4 21V7l6-3v17M10 9h10v12M4 21h17M7 9v.01M7 13v.01M7 17v.01M14 13h2M14 17h2",
+  Construction: "M4 21V7l6-3v17M10 9h10v12M4 21h17M7 9v.01M7 13v.01M7 17v.01M14 13h2M14 17h2",
+  Cement: "M4 21V7l6-3v17M10 9h10v12M4 21h17M7 9v.01M7 13v.01M7 17v.01M14 13h2M14 17h2",
+  Telecom: "M12 12v9M8 21h8M8.5 8.5a5 5 0 0 1 7 0M5.5 5.5a9 9 0 0 1 13 0M12 12h.01",
+  Media: "M4 5h16v12H4zM10 9l5 2-5 2zM8 21h8",
+  Chemicals: "M9 3h6M10 3v6L4.5 19a1.5 1.5 0 0 0 1.3 2h12.4a1.5 1.5 0 0 0 1.3-2L14 9V3M7 15h10",
+  "Capital Goods": "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2",
+  "Consumer Services": "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0",
+  Durables: "M5 3h14v18H5zM5 9h14M9 6h.01M12 14a2.5 2.5 0 1 0 0 .01",
+  Textiles: "M8 3 4 6l2 4 2-1v12h8V9l2 1 2-4-4-3c-1 2-2.5 3-4 3S9 5 8 3z",
+};
+const sectorIcon = (name) => `<svg class="sic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${SECTOR_PATHS[name] || "M12 11a1 1 0 1 0 0 2 1 1 0 0 0 0-2z"}"/></svg>`;
 
 function markets() {
   const k = one("markets_kpis"), n = indiaNow();
